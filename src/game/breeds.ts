@@ -13,6 +13,9 @@ import type { Breed } from "./types.ts";
  * - 도적: 체력 낮음, 공격·속도 최상. 빨리 붙어 터뜨린다
  * - 궁수: 중간 체력, 안정적인 물리 화력
  * - 마법사: 체력 최하, 사거리 최장, 공격 느림. 스킬로 판을 흔든다
+ *
+ * 측정 후 조정: 평타 기준 전력이 마법사 1 대 도적 4로 벌어져 있었다. 마법사가
+ * 스킬 세 번 쓸 때까지 버티질 못했다. 사거리와 스킬이 강한 건 맞지만 4배는 과했다.
  */
 export const BREEDS: readonly Breed[] = [
   // ── 전사 ─────────────────────────────────────────────
@@ -30,7 +33,7 @@ export const BREEDS: readonly Breed[] = [
   // ── 도적 ─────────────────────────────────────────────
   {
     id: 3, name: "까망이", color: "black", cls: "rogue", kind: "melee",
-    hp: 95, atk: 32, atkInterval: 420, range: 0.8, moveSpeed: 2.4,
+    hp: 95, atk: 29, atkInterval: 430, range: 0.8, moveSpeed: 2.4,
     manaPerAttack: 50, skill: "shadow_strike", cost: 4,
   },
   {
@@ -42,24 +45,24 @@ export const BREEDS: readonly Breed[] = [
   // ── 궁수 ─────────────────────────────────────────────
   {
     id: 8, name: "호랑이", color: "orange", cls: "archer", kind: "ranged",
-    hp: 105, atk: 26, atkInterval: 560, range: 2.8, moveSpeed: 1.2,
+    hp: 112, atk: 27, atkInterval: 540, range: 2.8, moveSpeed: 1.2,
     manaPerAttack: 34, skill: "pierce", cost: 4,
   },
   {
     id: 6, name: "삼색이", color: "calico", cls: "archer", kind: "ranged",
-    hp: 100, atk: 22, atkInterval: 520, range: 2.8, moveSpeed: 1.2,
+    hp: 108, atk: 24, atkInterval: 510, range: 2.8, moveSpeed: 1.2,
     manaPerAttack: 34, skill: "multishot", cost: 4,
   },
 
   // ── 마법사 ───────────────────────────────────────────
   {
     id: 2, name: "꿀밤이", color: "cream", cls: "mage", kind: "ranged",
-    hp: 85, atk: 20, atkInterval: 700, range: 3.0, moveSpeed: 1.0,
+    hp: 98, atk: 24, atkInterval: 660, range: 3.0, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "ember", cost: 4,
   },
   {
     id: 5, name: "하양이", color: "white", cls: "mage", kind: "ranged",
-    hp: 80, atk: 17, atkInterval: 660, range: 2.9, moveSpeed: 1.0,
+    hp: 94, atk: 21, atkInterval: 630, range: 2.9, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "frost_nova", cost: 4,
   },
 ];

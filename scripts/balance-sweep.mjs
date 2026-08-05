@@ -21,7 +21,7 @@ function playOne() {
   for (let guard = 0; guard < MAX_WAVE * 500; guard++) {
     if (s.phase === "gameover") return s.wave;
     if (s.phase === "reward") {
-      const afford = s.offers.filter((o) => o.cost <= s.gold)
+      const afford = s.offers.filter((o) => o && o.cost <= s.gold)
         // 봇은 시너지 적합도를 판단하지 못하므로 교체가 순손실이다. 실제 플레이어는
         // 목표에 맞춰 쓰지만, 여기서는 다른 걸 못 살 때만 집는다.
         .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);
@@ -29,7 +29,7 @@ function playOne() {
         const pick = afford[0];
         const before = s.offers.length;
         if (!buyOffer(s, pick) && s.offers.length === before) {
-          s.offers = s.offers.filter((o) => o !== pick);
+          s.offers = s.offers.map((o) => (o === pick ? null : o));
         }
         continue;
       }
@@ -65,10 +65,10 @@ function measure() {
 }
 
 const grid = [];
-for (const enemyScale of [1.15, 1.18, 1.22, 1.25]) {
-  for (const veterancy of [1.0, 1.08, 1.12, 1.16]) {
-    for (const goldPerWave of [1.5, 2.5]) {
-      grid.push({ enemyScale, veterancy, goldPerWave });
+for (const enemyScale of [1.24, 1.27, 1.3, 1.33]) {
+  for (const veterancy of [1.1, 1.12, 1.14]) {
+    for (const enemyCountDivisor of [1.35, 1.45]) {
+      grid.push({ enemyScale, veterancy, enemyCountDivisor });
     }
   }
 }
@@ -78,19 +78,19 @@ for (const combo of grid) {
   Object.assign(BALANCE, combo);
   const m = measure();
   // 중앙값 12에 가깝고 분포가 넓을수록 좋다.
-  const score = Math.abs(m.med - 12) * 2 - m.spread;
+  const score = Math.abs(m.med - 13) * 2 - m.spread;
   rows.push({ ...combo, ...m, score });
 }
 
 rows.sort((a, b) => a.score - b.score);
-console.log("적배수  베테랑  생선/웨이브 |  p10  중앙  p90  폭   점수");
+console.log("적배수  베테랑  적수제수 |  p10  중앙  p90  폭   점수");
 for (const r of rows.slice(0, 12)) {
   console.log(
-    `${r.enemyScale.toFixed(2)}   ${r.veterancy.toFixed(2)}    ${r.goldPerWave.toFixed(1)}       | ` +
+    `${r.enemyScale.toFixed(2)}   ${r.veterancy.toFixed(2)}    ${r.enemyCountDivisor.toFixed(2)}     | ` +
       `${String(r.p10).padStart(4)} ${String(r.med).padStart(4)} ${String(r.p90).padStart(4)} ` +
       `${String(r.spread).padStart(3)}  ${r.score.toFixed(1)}`,
   );
 }
 const best = rows[0];
-console.log(`\n추천: enemyScale=${best.enemyScale} veterancy=${best.veterancy} goldPerWave=${best.goldPerWave}`);
+console.log(`\n추천: enemyScale=${best.enemyScale} veterancy=${best.veterancy} enemyCountDivisor=${best.enemyCountDivisor}`);
 console.log(`      중앙값 ${best.med}웨이브, 분포 ${best.p10}~${best.p90}`);

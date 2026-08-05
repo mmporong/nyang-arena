@@ -93,7 +93,7 @@ canvas.addEventListener("pointerdown", (e) => {
       rerollOffers(state);
       return;
     }
-    const rects = offerRects(layout, state.offers.length);
+    const rects = offerRects(layout);
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       const offer = state.offers[i];

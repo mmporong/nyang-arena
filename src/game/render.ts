@@ -1,7 +1,7 @@
-import { bursts, BURST_LIFE_MS, damagePops, POP_LIFE_MS, shots, SHOT_LIFE_MS, skillName } from "./battle.ts";
+import { damagePops, fxs, POP_LIFE_MS, shake, shots, SHOT_LIFE_MS, skillName } from "./battle.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
-import { boardUnits, REROLL_COST, waveKind, waveKindInfo, type Offer, type RunState } from "./run.ts";
+import { boardUnits, OFFER_SLOTS, REROLL_COST, waveKind, waveKindInfo, type Offer, type RunState } from "./run.ts";
 import { bevelPanel, pixelText, roundRect, T, uiText } from "./theme.ts";
 import { effectLabel, synergyProgress, triggerLabel } from "../validate/synergy-schema.ts";
 import { BOARD_SIZE, CLASS_LABEL, livingCats, type Cat, type ClassKind, type Side } from "./types.ts";
@@ -290,19 +290,110 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
   }
 }
 
-/** 스킬 발동 파문. 어디서 무엇이 터졌는지 한눈에 보이게 한다. */
-function drawBursts(ctx: CanvasRenderingContext2D, L: Layout): void {
-  for (const b of bursts) {
-    const t = 1 - b.life / BURST_LIFE_MS;
-    const { x, y } = fieldToScreen(L, b.fx, b.fy);
-    const pitch = L.cell + L.gap;
+/**
+ * 스킬 연출. 종류마다 그리는 방식이 다르다 — 무엇이 터졌는지 색과 모양으로 읽힌다.
+ * 판정과 완전히 분리돼 있어서 이 함수를 지워도 전투 결과는 같다.
+ */
+function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
+  const pitch = L.cell + L.gap;
+
+  for (const f of fxs) {
+    const t = 1 - f.life / f.maxLife; // 0 → 1
+    const p = fieldToScreen(L, f.fx, f.fy);
     ctx.save();
-    ctx.globalAlpha = Math.max(0, 0.55 * (1 - t));
-    ctx.strokeStyle = b.ally ? T.gold : T.enemy;
-    ctx.lineWidth = Math.max(2, L.cell * 0.06);
-    ctx.beginPath();
-    ctx.arc(x, y, b.radius * pitch * (0.35 + t * 0.75), 0, Math.PI * 2);
-    ctx.stroke();
+
+    switch (f.kind) {
+      case "ring": {
+        ctx.globalAlpha = Math.max(0, 0.85 * (1 - t) ** 1.4);
+        ctx.strokeStyle = f.color;
+        ctx.lineWidth = Math.max(2, L.cell * 0.09 * (1 - t * 0.6));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, f.radius * pitch * (0.25 + t * 0.85), 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      case "slash": {
+        // 짧은 호가 바깥으로 퍼지며 사라진다
+        ctx.globalAlpha = Math.max(0, 0.95 * (1 - t));
+        ctx.strokeStyle = f.color;
+        ctx.lineCap = "round";
+        ctx.lineWidth = Math.max(2.5, L.cell * 0.075);
+        const rr = f.radius * pitch * (0.35 + t * 0.55);
+        const a0 = f.angle + t * 1.5;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rr, a0, a0 + 0.85);
+        ctx.stroke();
+        break;
+      }
+      case "beam": {
+        const q = fieldToScreen(L, f.tx, f.ty);
+        ctx.globalAlpha = Math.max(0, 0.9 * (1 - t) ** 0.7);
+        ctx.strokeStyle = f.color;
+        ctx.lineCap = "round";
+        ctx.lineWidth = Math.max(2, f.radius * pitch * (1 - t * 0.5));
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(q.x, q.y);
+        ctx.stroke();
+        break;
+      }
+      case "streak": {
+        // 시작점에서 목표까지 순식간에 지나간 자국
+        const q = fieldToScreen(L, f.tx, f.ty);
+        const head = { x: p.x + (q.x - p.x) * Math.min(1, t * 1.8), y: p.y + (q.y - p.y) * Math.min(1, t * 1.8) };
+        ctx.globalAlpha = Math.max(0, 0.9 * (1 - t));
+        ctx.strokeStyle = f.color;
+        ctx.lineCap = "round";
+        ctx.lineWidth = Math.max(3, L.cell * 0.1);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(head.x, head.y);
+        ctx.stroke();
+        break;
+      }
+      case "spark": {
+        // 네 갈래로 튀는 짧은 선
+        ctx.globalAlpha = Math.max(0, 1 - t);
+        ctx.strokeStyle = f.color;
+        ctx.lineCap = "round";
+        ctx.lineWidth = Math.max(1.5, L.cell * 0.045);
+        const len = f.radius * pitch * (0.25 + t * 0.5);
+        for (let i = 0; i < 4; i++) {
+          const a = f.angle + (Math.PI / 2) * i;
+          ctx.beginPath();
+          ctx.moveTo(p.x + Math.cos(a) * len * 0.4, p.y + Math.sin(a) * len * 0.4);
+          ctx.lineTo(p.x + Math.cos(a) * len, p.y + Math.sin(a) * len);
+          ctx.stroke();
+        }
+        break;
+      }
+      case "ember": {
+        // 위로 떠오르며 작아진다
+        ctx.globalAlpha = Math.max(0, 0.9 * (1 - t) ** 1.5);
+        ctx.fillStyle = f.color;
+        const rise = t * pitch * 0.9;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - rise, Math.max(1.5, f.radius * pitch * (1 - t)), 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case "frost": {
+        // 여섯 갈래 결정. 얼어붙은 대상 위에 오래 남는다
+        ctx.globalAlpha = Math.max(0, 0.8 * (1 - t) ** 0.6);
+        ctx.strokeStyle = f.color;
+        ctx.lineCap = "round";
+        ctx.lineWidth = Math.max(1.5, L.cell * 0.04);
+        const rr = f.radius * pitch * (0.6 + t * 0.25);
+        for (let i = 0; i < 6; i++) {
+          const a = f.angle + (Math.PI / 3) * i;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
+          ctx.stroke();
+        }
+        break;
+      }
+    }
     ctx.restore();
   }
 }
@@ -439,7 +530,8 @@ export function rerollRect(L: Layout): Rect {
   };
 }
 
-export function offerRects(L: Layout, count: number): Rect[] {
+/** 슬롯은 늘 세 칸. 하나를 사도 남은 카드가 넓어지지 않는다. */
+export function offerRects(L: Layout, count: number = OFFER_SLOTS): Rect[] {
   const r = L.offers;
   const n = Math.max(1, count);
   const gap = r.w * 0.022;
@@ -485,12 +577,29 @@ function drawTeamStrip(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
 }
 
 function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
-  const rects = offerRects(L, s.offers.length);
+  const rects = offerRects(L);
   const fs = Math.max(11, L.offers.h * 0.19);
 
-  s.offers.forEach((o: Offer, i) => {
+  s.offers.forEach((o: Offer | null, i) => {
     const cr = rects[i];
     if (!cr) return;
+
+    // 산 자리는 비워 둔다. 카드가 사라지면서 남은 것이 넓어지면 손이 헛나간다.
+    if (!o) {
+      roundRect(ctx, cr, cr.h * 0.16);
+      ctx.fillStyle = "rgba(239,224,198,0.02)";
+      ctx.fill();
+      ctx.setLineDash([4, 5]);
+      ctx.strokeStyle = "rgba(239,224,198,0.10)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      uiText(ctx, "샀음", cr.x + cr.w / 2, cr.y + cr.h / 2, fs * 0.85, "rgba(156,139,118,0.55)", {
+        align: "center",
+        weight: 600,
+      });
+      return;
+    }
     const afford = s.gold >= o.cost;
     // 영입·교체는 그 고양이의 직업색으로. 카드만 봐도 무엇이 오는지 알 수 있다.
     const accent = o.kind === "upgrade" ? T.gold : CLASS_COLOR[o.breed.cls];
@@ -549,7 +658,7 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
 }
 
 function drawBottomZone(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
-  const reward = s.phase === "reward" && s.offers.length > 0;
+  const reward = s.phase === "reward";
 
   if (reward && !L.roomy) {
     ctx.fillStyle = "rgba(12,8,6,0.55)";
@@ -780,10 +889,20 @@ export function render(
   drag: DragState,
   hoverCell: number,
 ): void {
+  // 큰 스킬이 터지면 화면이 잠깐 흔들린다. 전장만 흔들고 UI는 고정한다.
+  const shakeT = shake.life > 0 ? shake.life / shake.maxLife : 0;
+  const sx = shakeT > 0 ? (Math.random() - 0.5) * shake.amount * shakeT : 0;
+  const sy = shakeT > 0 ? (Math.random() - 0.5) * shake.amount * shakeT : 0;
+
   drawBackground(ctx, L);
+  ctx.save();
+  ctx.translate(sx, sy);
   drawArena(ctx, L);
+  ctx.restore();
   drawHud(ctx, L, s);
 
+  ctx.save();
+  ctx.translate(sx, sy);
   drawDivider(ctx, L);
   drawSideLabels(ctx, L);
   drawBoard(ctx, L, "ally", T.ally, hoverCell);
@@ -807,7 +926,7 @@ export function render(
   drawList.sort((p, q) => p.y - q.y);
   for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed);
 
-  drawBursts(ctx, L);
+  drawFx(ctx, L);
   drawShots(ctx, L);
 
   // 드래그 중인 고양이는 손가락을 따라다닌다.
@@ -824,6 +943,8 @@ export function render(
   }
 
   drawPops(ctx, L);
+  ctx.restore();
+
   drawBottomZone(ctx, L, s);
   drawSynergies(ctx, L, s);
   drawButton(ctx, L, s);

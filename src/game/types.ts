@@ -127,6 +127,8 @@ export interface Cat {
   dot: { dps: number; remain: number } | null;
   /** 남은 보호막. 피해를 먼저 흡수한다 */
   shield: number;
+  /** 이동 속도 배수. 돌격대 같은 웨이브 성격이 여기를 건드린다. */
+  speedMul: number;
 }
 
 export type Board = (Cat | null)[];

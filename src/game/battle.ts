@@ -1,5 +1,5 @@
 import { fieldDistance, livingCats, MANA_MAX, type Cat } from "./types.ts";
-import { runSkill, SKILLS } from "./skills.ts";
+import { runSkill, SKILLS, type SkillResult } from "./skills.ts";
 import { finishWave, type RunState } from "./run.ts";
 
 /** 고정 시뮬레이션 스텝. */
@@ -63,16 +63,53 @@ export const SHOT_LIFE_MS = 220;
 export const damagePops: DamagePop[] = [];
 export const shots: Shot[] = [];
 
-/** 스킬 발동 순간의 파문. 시전자 위치에 잠깐 원이 퍼진다. */
-export interface Burst {
+/**
+ * 연출 조각. 스킬마다 생김새가 달라야 무엇이 터졌는지 눈으로 구분된다.
+ *
+ * 판정과 완전히 분리돼 있다 — 이 배열이 비어 있어도 전투 결과는 같다.
+ * 그래서 헤드리스 시뮬은 이걸 무시하고 돌 수 있다.
+ */
+export type FxKind =
+  | "ring" // 퍼지는 고리 (회전베기·대지 강타·서리 발톱)
+  | "slash" // 호를 그리는 참격 (연속 찌르기)
+  | "beam" // 직선 광선 (꿰뚫기)
+  | "streak" // 짧은 돌진 자국 (그림자 일격)
+  | "spark" // 튀는 불똥 (타격 지점)
+  | "ember" // 위로 떠오르는 불티 (불씨)
+  | "frost"; // 얼음 결정 (빙결)
+
+export interface Fx {
+  kind: FxKind;
   fx: number;
   fy: number;
+  /** beam·streak·slash가 향하는 곳 */
+  tx: number;
+  ty: number;
   radius: number;
+  angle: number;
   life: number;
-  ally: boolean;
+  maxLife: number;
+  color: string;
 }
+
+export const fxs: Fx[] = [];
+
+function pushFx(f: Omit<Fx, "maxLife"> & { maxLife?: number }): void {
+  if (fxs.length > 90) fxs.shift();
+  fxs.push({ ...f, maxLife: f.maxLife ?? f.life });
+}
+
+/** 화면 흔들림. 큰 스킬이 터졌다는 걸 몸으로 느끼게 한다. */
+export const shake = { amount: 0, life: 0, maxLife: 1 };
+
+export function addShake(amount: number, ms: number): void {
+  if (amount <= shake.amount && shake.life > 0) return;
+  shake.amount = amount;
+  shake.life = ms;
+  shake.maxLife = ms;
+}
+
 export const BURST_LIFE_MS = 320;
-export const bursts: Burst[] = [];
 
 /** 렌더러가 시전 이름표를 그릴 때 쓴다. */
 export function skillName(cat: Cat): string {
@@ -159,30 +196,23 @@ function castSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): void {
   caster.pose = "wink";
   caster.poseTimer = POSE_WINK_MS;
 
-  if (bursts.length > 12) bursts.shift();
-  bursts.push({
-    fx: caster.fx,
-    fy: caster.fy,
-    radius: caster.breed.kind === "melee" ? 1.6 : 0.9,
-    life: BURST_LIFE_MS,
-    ally: caster.side === "ally",
-  });
-
-  for (const s of res.shots) {
-    if (shots.length > 32) shots.shift();
-    shots.push({
-      fromX: caster.fx,
-      fromY: caster.fy,
-      toX: s.fx,
-      toY: s.fy,
-      life: SHOT_LIFE_MS,
-      ally: caster.side === "ally",
-    });
-  }
+  spawnSkillFx(caster, target, res);
 
   for (const h of res.hits) {
     if (!h.target.alive) continue;
     damage(h.target, caster.atk * h.mul, true);
+    // 맞은 자리마다 불똥. 몇 명이 맞았는지 눈으로 세어진다.
+    pushFx({
+      kind: "spark",
+      fx: h.target.fx,
+      fy: h.target.fy,
+      tx: h.target.fx,
+      ty: h.target.fy,
+      radius: 0.5,
+      angle: Math.random() * Math.PI * 2,
+      life: 260,
+      color: CLASS_FX[caster.breed.cls] ?? "#FFFFFF",
+    });
   }
   for (const s of res.stuns) {
     if (!s.target.alive) continue;
@@ -191,6 +221,117 @@ function castSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): void {
   for (const d of res.dots) {
     if (!d.target.alive) continue;
     d.target.dot = { dps: d.dps, remain: d.ms };
+  }
+}
+
+/** 직업별 이펙트 색 */
+const CLASS_FX: Record<string, string> = {
+  warrior: "#FF9E5A",
+  rogue: "#D98BE8",
+  archer: "#FFC46B",
+  mage: "#8FD4FF",
+};
+
+/** 스킬마다 다른 연출을 뿌린다. 무엇이 터졌는지 색과 모양으로 구분되게. */
+function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
+  const color = CLASS_FX[caster.breed.cls] ?? "#FFFFFF";
+  const base = { fx: caster.fx, fy: caster.fy, tx: target.fx, ty: target.fy, angle: 0, color };
+
+  switch (caster.breed.skill) {
+    case "whirlwind": {
+      // 두 겹 고리 + 회전하는 참격 넷
+      pushFx({ ...base, kind: "ring", radius: 1.7, life: 420 });
+      pushFx({ ...base, kind: "ring", radius: 1.2, life: 300 });
+      for (let i = 0; i < 4; i++) {
+        pushFx({ ...base, kind: "slash", radius: 1.5, angle: (Math.PI / 2) * i, life: 340 });
+      }
+      addShake(3, 220);
+      break;
+    }
+    case "shockwave": {
+      // 두껍고 느린 고리. 땅이 갈라지는 느낌
+      pushFx({ ...base, kind: "ring", radius: 2.0, life: 560 });
+      pushFx({ ...base, kind: "ring", radius: 1.1, life: 380 });
+      addShake(6, 340);
+      break;
+    }
+    case "shadow_strike": {
+      const prey = res.hits[0]?.target ?? target;
+      pushFx({ ...base, kind: "streak", tx: prey.fx, ty: prey.fy, radius: 0.5, life: 260 });
+      pushFx({ ...base, kind: "ring", fx: prey.fx, fy: prey.fy, radius: 0.9, life: 320 });
+      addShake(4, 200);
+      break;
+    }
+    case "flurry": {
+      // 네 번 찌르니 참격도 네 개, 조금씩 시간차를 준다
+      for (let i = 0; i < 4; i++) {
+        pushFx({
+          ...base,
+          kind: "slash",
+          fx: target.fx,
+          fy: target.fy,
+          radius: 0.85,
+          angle: (Math.PI / 3) * i + 0.3,
+          life: 240 + i * 40,
+        });
+      }
+      break;
+    }
+    case "pierce": {
+      // 목표 너머까지 뻗는 광선
+      const dx = target.fx - caster.fx;
+      const dy = target.fy - caster.fy;
+      const len = Math.hypot(dx, dy) || 1;
+      pushFx({
+        ...base,
+        kind: "beam",
+        tx: caster.fx + (dx / len) * 9,
+        ty: caster.fy + (dy / len) * 9,
+        radius: 0.34,
+        life: 320,
+      });
+      addShake(2, 160);
+      break;
+    }
+    case "multishot": {
+      for (const s of res.shots) {
+        pushFx({ ...base, kind: "beam", tx: s.fx, ty: s.fy, radius: 0.16, life: 260 });
+      }
+      break;
+    }
+    case "ember": {
+      // 떠오르는 불티 여러 개
+      for (let i = 0; i < 7; i++) {
+        pushFx({
+          ...base,
+          kind: "ember",
+          fx: target.fx + (Math.random() - 0.5) * 0.7,
+          fy: target.fy + (Math.random() - 0.5) * 0.5,
+          radius: 0.12 + Math.random() * 0.1,
+          life: 620 + Math.random() * 320,
+          color: "#FF8A3D",
+        });
+      }
+      break;
+    }
+    case "frost_nova": {
+      pushFx({ ...base, kind: "ring", fx: target.fx, fy: target.fy, radius: 1.5, life: 460, color: "#9BDCFF" });
+      for (const h of res.hits) {
+        pushFx({
+          kind: "frost",
+          fx: h.target.fx,
+          fy: h.target.fy,
+          tx: h.target.fx,
+          ty: h.target.fy,
+          radius: 0.42,
+          angle: Math.random() * Math.PI,
+          life: 900,
+          color: "#BFEBFF",
+        });
+      }
+      addShake(2, 180);
+      break;
+    }
   }
 }
 
@@ -233,7 +374,7 @@ function stepToward(cat: Cat, target: Cat, stepMs: number): void {
   const d = Math.hypot(dx, dy);
   if (d <= 1e-6) return;
 
-  const want = cat.breed.moveSpeed * (stepMs / 1000);
+  const want = cat.breed.moveSpeed * cat.speedMul * (stepMs / 1000);
   // 지나쳐 들어가면 다음 틱에 뒤로 밀렸다 앞으로 갔다 하며 떤다.
   const travel = Math.min(want, Math.max(0, d - cat.breed.range * 0.95));
   if (travel <= 0) return;
@@ -315,12 +456,13 @@ export function stepBattle(state: RunState, dtMs: number): void {
     s.life -= dtMs;
     if (s.life <= 0) shots.splice(i, 1);
   }
-  for (let i = bursts.length - 1; i >= 0; i--) {
-    const b = bursts[i];
-    if (!b) continue;
-    b.life -= dtMs;
-    if (b.life <= 0) bursts.splice(i, 1);
+  for (let i = fxs.length - 1; i >= 0; i--) {
+    const f = fxs[i];
+    if (!f) continue;
+    f.life -= dtMs;
+    if (f.life <= 0) fxs.splice(i, 1);
   }
+  if (shake.life > 0) shake.life = Math.max(0, shake.life - dtMs);
 
   if (state.phase !== "battle") return;
 

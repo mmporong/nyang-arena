@@ -56,7 +56,8 @@ export interface RunState {
   /** 갱신 때 다시 뽑을 후보 전체 */
   synergyPool: SynergyRule[];
   activeSynergyIds: Set<string>;
-  offers: Offer[];
+  /** 항상 길이 3. 산 자리는 null로 비워 둔다 — 남은 카드가 넓어지지 않게. */
+  offers: (Offer | null)[];
   /** 마지막 전투 결과 메시지 */
   notice: string;
   battleElapsed: number;
@@ -247,6 +248,7 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     stun: 0,
     dot: null,
     shield: 0,
+    speedMul: 1,
   };
 }
 
@@ -341,13 +343,17 @@ export function buildEnemyWave(state: RunState): void {
 
   let count = Math.min(unitCap(w), Math.ceil(w / BALANCE.enemyCountDivisor));
   let statBoost = 1;
+  // 돌격대는 전부 근접이라 우리 원거리에게 일방적으로 씹혔다(사망의 1%).
+  // 수나 스탯 대신 발을 빠르게 해서 이름값을 하게 한다 — 뒷줄까지 금방 닿는다.
+  const speedMul = kind === "rush" ? 1.45 : 1;
   // 돌격대는 전부 근접이라는 것만으로 이미 다른 문제다. 수까지 늘리면 과했다.
   // 저격대는 원거리가 일방적으로 때리는 구간이 있어 같은 수라도 체감이 세다.
   if (kind === "snipe") count = Math.max(2, count - 1);
   if (kind === "boss") {
     // 수를 반으로 줄이고 그만큼 한 마리를 크게 만든다. 총 전력은 비슷하되 형태가 다르다.
     count = Math.max(1, Math.ceil(count / 2));
-    statBoost = 1.45;
+    // 1.45에서 낮췄다. 정확히 첫 보스 웨이브에 사망 봉우리가 서면 벽으로 읽힌다.
+    statBoost = 1.35;
   }
 
   state.enemy = emptyBoard();
@@ -364,6 +370,7 @@ export function buildEnemyWave(state: RunState): void {
     cat.maxHp = Math.round(cat.maxHp * scale * statBoost);
     cat.hp = cat.maxHp;
     cat.atk = Math.round(cat.atk * scale * statBoost);
+    cat.speedMul = speedMul;
     state.enemy[cell] = cat;
   }
 }
@@ -428,6 +435,8 @@ export function applySynergies(state: RunState): void {
  * 남고 구성에 대한 선택이 사라진다 — 다 배치하고 나면 할 게 없다는 문제의 원인이다.
  * 자리가 없을 때는 **교체** 카드를 낸다. 무엇을 내보낼지가 새로운 결정이 된다.
  */
+export const OFFER_SLOTS = 3;
+
 export function rollOffers(state: RunState): void {
   const offers: Offer[] = [];
   const owned = state.ally.filter((c): c is Cat => c !== null);
@@ -466,7 +475,7 @@ export function rollOffers(state: RunState): void {
   // 남은 칸을 강화로 채운다. 대상은 중복되지 않게 고른다.
   const shuffled = [...owned].sort(() => Math.random() - 0.5);
   for (const target of shuffled) {
-    if (offers.length >= 3) break;
+    if (offers.length >= OFFER_SLOTS) break;
     offers.push({
       kind: "upgrade",
       cost: upgradeCost(target.level),
@@ -477,7 +486,8 @@ export function rollOffers(state: RunState): void {
     });
   }
 
-  state.offers = offers;
+  // 슬롯은 늘 세 칸. 모자라면 빈 칸으로 채운다.
+  state.offers = Array.from({ length: OFFER_SLOTS }, (_, i) => offers[i] ?? null);
 }
 
 export function buyOffer(state: RunState, offer: Offer): boolean {
@@ -488,7 +498,7 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
     const free = owned < unitCap(state.wave) ? bestFreeCell(state.ally, offer.breed) : -1;
     if (free < 0) {
       // 살 수 없는 카드를 목록에 남겨두면 무한히 재시도된다. 즉시 걷어낸다.
-      state.offers = state.offers.filter((o) => o !== offer);
+      state.offers = state.offers.map((o) => (o === offer ? null : o));
       state.notice = "더 데리고 있을 수 없습니다";
       return false;
     }
@@ -496,7 +506,7 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
   } else if (offer.kind === "replace" && offer.targetUid) {
     const idx = state.ally.findIndex((c) => c?.uid === offer.targetUid);
     if (idx < 0) {
-      state.offers = state.offers.filter((o) => o !== offer);
+      state.offers = state.offers.map((o) => (o === offer ? null : o));
       return false;
     }
     // 자리를 그대로 물려받는다. 배치를 다시 짤 필요가 없어 교체가 부담스럽지 않다.
@@ -510,7 +520,7 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
   }
 
   state.gold -= offer.cost;
-  state.offers = state.offers.filter((o) => o !== offer);
+  state.offers = state.offers.map((o) => (o === offer ? null : o));
   applySynergies(state);
   return true;
 }

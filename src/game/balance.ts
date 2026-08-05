@@ -13,12 +13,15 @@ export const BALANCE = {
 
   /**
    * 적 스탯 배수 = enemyScale^(wave-1).
-   * 웨이브 성격(돌격·저격·보스)이 들어오면서 체감 난이도가 올라, 사이클을 두 바퀴
-   * 이상 보도록 1.25에서 낮췄다.
+   * 스윕으로 잡았다. 같은 중앙값(13)을 내는 조합이 여럿이었는데, 분포 하한이
+   * 높은 쪽을 골랐다 — 하한이 낮으면 짧은 런이 잦아 좌절이 늘어난다.
    */
-  enemyScale: 1.22,
-  /** 적 수 = ceil(wave / enemyCountDivisor), 최대 9 */
-  enemyCountDivisor: 1.4,
+  enemyScale: 1.24,
+  /**
+   * 적 수 = ceil(wave / enemyCountDivisor), 보유 한도가 상한.
+   * 1.4에서 올렸다 — 초반 사망이 19.5%로 너무 높았다.
+   */
+  enemyCountDivisor: 1.45,
 
   /** 개별 고양이 레벨당 배수 */
   levelScale: 1.4,
@@ -36,7 +39,7 @@ export const BALANCE = {
    * 이게 없으면 적은 전체가 복리로 크는데 플레이어는 웨이브당 한 마리만
    * 강화하게 되어(9마리 중 1마리 ×1.4 ≈ 팀 전력 +4%) 구조적으로 따라잡힌다.
    */
-  veterancy: 1.12,
+  veterancy: 1.14,
 
   /** 시작 고양이 수 */
   starterCount: 3,

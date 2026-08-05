@@ -26,7 +26,7 @@ function playOne() {
 
     if (s.phase === "reward") {
       // 살 수 있는 것 중 가장 비싼 것을 산다 (강화 우선이 되는 경향)
-      const affordable = s.offers.filter((o) => o.cost <= s.gold)
+      const affordable = s.offers.filter((o) => o && o.cost <= s.gold)
         // 봇은 시너지 적합도를 판단하지 못하므로 교체가 순손실이다. 실제 플레이어는
         // 목표에 맞춰 쓰지만, 여기서는 다른 걸 못 살 때만 집는다.
         .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);
@@ -35,7 +35,7 @@ function playOne() {
         const before = s.offers.length;
         // 구매 실패한 카드가 목록에 남으면 같은 카드를 무한히 재시도하게 된다.
         if (!buyOffer(s, pick) && s.offers.length === before) {
-          s.offers = s.offers.filter((o) => o !== pick);
+          s.offers = s.offers.map((o) => (o === pick ? null : o));
         }
         continue;
       }
