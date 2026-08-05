@@ -20,6 +20,7 @@ const DT = 100;
 const tried = new Map();
 const lost = new Map();
 const battleMs = [];
+const battleMsByKind = new Map();
 
 /**
  * @param seed 런마다 고정 시드를 준다. 없으면 같은 명령이 매번 다른 수치를 내고,
@@ -78,7 +79,13 @@ function playOne(seed) {
     // 전투가 끝나는 틱에는 battleElapsed가 리셋될 수 있으므로 직전 값을 들고 있는다.
     elapsedBeforeTick = s.battleElapsed;
     stepBattle(s, DT);
-    if (s.phase !== "battle") battleMs.push(elapsedBeforeTick + DT);
+    if (s.phase !== "battle") {
+      const ms = elapsedBeforeTick + DT;
+      battleMs.push(ms);
+      const list = battleMsByKind.get(kindAtStart) ?? [];
+      list.push(ms);
+      battleMsByKind.set(kindAtStart, list);
+    }
   }
   return s.wave;
 }
@@ -112,7 +119,13 @@ for (const kind of ["mixed", "rush", "snipe", "boss"]) {
 
 battleMs.sort((a, b) => a - b);
 const bq = (p) => (battleMs[Math.min(battleMs.length - 1, Math.floor(battleMs.length * p))] ?? 0) / 1000;
-console.log(`\n전투 길이  p50 ${bq(0.5).toFixed(1)}초  p90 ${bq(0.9).toFixed(1)}초  최대 ${(battleMs[battleMs.length - 1] / 1000).toFixed(1)}초`);
+console.log("\n전투 길이 (초)");
+for (const kind of ["mixed", "rush", "snipe", "boss"]) {
+  const list = (battleMsByKind.get(kind) ?? []).slice().sort((a, b) => a - b);
+  if (list.length === 0) continue;
+  const k = (p) => (list[Math.min(list.length - 1, Math.floor(list.length * p))] / 1000).toFixed(1);
+  console.log(`  ${kind.padEnd(6)} p50 ${String(k(0.5)).padStart(5)}  p90 ${String(k(0.9)).padStart(5)}  최대 ${(list[list.length - 1] / 1000).toFixed(1)}`);
+}
 console.log(`60웨이브 상한 도달: ${results.filter((r) => r > MAX_WAVE).length}건`);
 
 // 목표: 중앙값 8~15웨이브. 너무 짧으면 좌절, 너무 길면 한 판이 지루하다.

@@ -1,4 +1,11 @@
-import { damagePops, fxs, POP_LIFE_MS, shots, SHOT_LIFE_MS, skillName } from "./battle.ts";
+import {
+  damagePops,
+  fxs,
+  POP_LIFE_MS,
+  shots,
+  SHOT_LIFE_MS,
+  skillName,
+} from "./battle.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -11,8 +18,19 @@ import {
   type Offer,
   type RunState,
 } from "./run.ts";
-import { bevelPanel, pixelText, roundRect, T, uiText, wrapLines } from "./theme.ts";
-import { effectLabel, synergyProgress, triggerLabel } from "../validate/synergy-schema.ts";
+import {
+  bevelPanel,
+  pixelText,
+  roundRect,
+  T,
+  uiText,
+  wrapLines,
+} from "./theme.ts";
+import {
+  effectLabel,
+  synergyProgress,
+  triggerLabel,
+} from "../validate/synergy-schema.ts";
 import { PASSIVES, SKILLS } from "./skills.ts";
 import {
   BOARD_SIZE,
@@ -93,8 +111,12 @@ function arenaBox(L: Layout): Rect {
     Math.min(L.allyBoard.y, L.enemyBoard.y) - pad * 0.5 - L.labelH,
     L.notice.y + L.notice.h,
   );
-  const right = Math.max(L.allyBoard.x + L.allyBoard.w, L.enemyBoard.x + L.enemyBoard.w) + pad;
-  const bottom = Math.max(L.allyBoard.y + L.allyBoard.h, L.enemyBoard.y + L.enemyBoard.h) + pad;
+  const right =
+    Math.max(L.allyBoard.x + L.allyBoard.w, L.enemyBoard.x + L.enemyBoard.w) +
+    pad;
+  const bottom =
+    Math.max(L.allyBoard.y + L.allyBoard.h, L.enemyBoard.y + L.enemyBoard.h) +
+    pad;
   return { x, y, w: right - x, h: bottom - y };
 }
 
@@ -123,7 +145,12 @@ function hudChip(
 ): void {
   const cap = Math.max(9, box.h * 0.24);
   const px = Math.max(2, Math.round(box.h * 0.055));
-  const x = align === "left" ? box.x : align === "right" ? box.x + box.w : box.x + box.w / 2;
+  const x =
+    align === "left"
+      ? box.x
+      : align === "right"
+        ? box.x + box.w
+        : box.x + box.w / 2;
 
   uiText(ctx, caption, x, box.y + box.h * 0.26, cap, T.muted, {
     align,
@@ -136,8 +163,22 @@ function hudChip(
 function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const r = L.hud;
   const third = r.w / 3;
-  hudChip(ctx, { x: r.x, y: r.y, w: third, h: r.h }, "웨이브", String(s.wave), T.text, "left");
-  hudChip(ctx, { x: r.x + third, y: r.y, w: third, h: r.h }, "생선", String(s.gold), T.fish, "center");
+  hudChip(
+    ctx,
+    { x: r.x, y: r.y, w: third, h: r.h },
+    "웨이브",
+    String(s.wave),
+    T.text,
+    "left",
+  );
+  hudChip(
+    ctx,
+    { x: r.x + third, y: r.y, w: third, h: r.h },
+    "생선",
+    String(s.gold),
+    T.fish,
+    "center",
+  );
   hudChip(
     ctx,
     { x: r.x + third * 2, y: r.y, w: third, h: r.h },
@@ -162,7 +203,10 @@ function drawBoard(
   for (let i = 0; i < BOARD_SIZE; i++) {
     const cr = cellRect(L, side, i);
     roundRect(ctx, cr, L.cell * 0.16);
-    ctx.fillStyle = i === highlightCell ? "rgba(244,227,193,0.13)" : "rgba(239,224,198,0.045)";
+    ctx.fillStyle =
+      i === highlightCell
+        ? "rgba(244,227,193,0.13)"
+        : "rgba(239,224,198,0.045)";
     ctx.fill();
     ctx.strokeStyle = i === highlightCell ? accent : "rgba(239,224,198,0.10)";
     ctx.lineWidth = i === highlightCell ? 2.5 : 1;
@@ -176,11 +220,21 @@ function drawBoard(
  * 돌진 연출은 화면 좌표가 아니라 전장 좌표에서 fx를 살짝 밀어 계산한다.
  * 그래야 가로/세로 어느 방향이든 "적 쪽으로 들이받는" 방향이 저절로 맞는다.
  */
-function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boolean): void {
+function drawCat(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  cat: Cat,
+  dimmed: boolean,
+): void {
   const dir = cat.side === "ally" ? 1 : -1;
-  const { x: cx, y: cy } = fieldToScreen(L, cat.fx + dir * 0.22 * cat.lunge, cat.fy);
+  const { x: cx, y: cy } = fieldToScreen(
+    L,
+    cat.fx + dir * 0.22 * cat.lunge,
+    cat.fy,
+  );
 
-  const size = L.cell * CAT_SCALE;
+  // 보스는 반경만큼 크게 그린다. 셀 격자에 얽매이지 않고 3x3을 덮는다.
+  const size = cat.radius > 0 ? L.cell * cat.radius * 2.1 : L.cell * CAT_SCALE;
   const x = cx - size / 2;
   const y = cy - size / 2 - L.cell * 0.03;
 
@@ -189,7 +243,15 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
     ctx.save();
     ctx.globalAlpha = dimmed ? 0.12 : 0.3;
     ctx.beginPath();
-    ctx.ellipse(cx, cy + size * 0.44, size * 0.3, size * 0.1, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      cx,
+      cy + size * 0.44,
+      size * 0.3,
+      size * 0.1,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fillStyle = "#000";
     ctx.fill();
     ctx.restore();
@@ -228,23 +290,38 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
   ctx.fill();
 
   // 마나 바. 체력 바 바로 아래에 얇게. 가득 차면 스킬이 나간다.
+  // 스킬이 없는 고양이(패시브·보스)는 마나가 의미 없으므로 아예 그리지 않는다.
   const my = by + bh + 1.5;
   const mh = Math.max(2, bh * 0.62);
-  const mfrac = Math.max(0, Math.min(1, cat.mana / cat.manaMax));
-  roundRect(ctx, { x: bx - 1, y: my - 1, w: bw + 2, h: mh + 2 }, (mh + 2) / 2);
-  ctx.fillStyle = "rgba(12,8,6,0.8)";
-  ctx.fill();
-  if (mfrac > 0) {
-    roundRect(ctx, { x: bx, y: my, w: Math.max(mh, bw * mfrac), h: mh }, mh / 2);
-    ctx.fillStyle = mfrac >= 1 ? T.gold : T.fish;
+  const mfrac = cat.breed.skill
+    ? Math.max(0, Math.min(1, cat.mana / cat.manaMax))
+    : -1;
+  if (mfrac >= 0) {
+    roundRect(
+      ctx,
+      { x: bx - 1, y: my - 1, w: bw + 2, h: mh + 2 },
+      (mh + 2) / 2,
+    );
+    ctx.fillStyle = "rgba(12,8,6,0.8)";
     ctx.fill();
+    if (mfrac > 0) {
+      roundRect(
+        ctx,
+        { x: bx, y: my, w: Math.max(mh, bw * mfrac), h: mh },
+        mh / 2,
+      );
+      ctx.fillStyle = mfrac >= 1 ? T.gold : T.fish;
+      ctx.fill();
+    }
   }
 
   // 직업 뱃지
   if (size >= 26) {
     const cls = cat.breed.cls;
     const hue = CLASS_COLOR[cls];
-    const rad = size * 0.2;
+    // 뱃지는 몸이 커져도 같이 커지면 안 된다. 보스에서 지름 3배가 되어 화면을 먹었다.
+    // 자리는 몸을 따라가되(size) 크기는 일반 고양이 기준(cell)으로 고정한다.
+    const rad = Math.min(size, L.cell * CAT_SCALE) * 0.2;
     const bxc = cx + size * 0.44;
     const byc = cy - size * 0.44;
     ctx.beginPath();
@@ -275,7 +352,13 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
     ctx.save();
     ctx.fillStyle = T.melee;
     ctx.beginPath();
-    ctx.arc(cx - bw / 2 - size * 0.09, by + bh / 2, Math.max(2, size * 0.055), 0, Math.PI * 2);
+    ctx.arc(
+      cx - bw / 2 - size * 0.09,
+      by + bh / 2,
+      Math.max(2, size * 0.055),
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
     ctx.restore();
   }
@@ -284,11 +367,19 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
   if (cat.castFlash > 0) {
     ctx.save();
     ctx.globalAlpha = Math.min(1, cat.castFlash / 400);
-    uiText(ctx, skillName(cat), cx, cy - size * 0.78, Math.max(10, size * 0.2), CLASS_COLOR[cat.breed.cls], {
-      align: "center",
-      weight: 800,
-      outline: true,
-    });
+    uiText(
+      ctx,
+      skillName(cat),
+      cx,
+      cy - size * 0.78,
+      Math.max(10, size * 0.2),
+      CLASS_COLOR[cat.breed.cls],
+      {
+        align: "center",
+        weight: 800,
+        outline: true,
+      },
+    );
     ctx.restore();
   }
 
@@ -304,7 +395,16 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
     ctx.strokeStyle = T.gold;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    pixelText(ctx, String(cat.level), lx, ly, Math.max(1, rad * 0.24), T.gold, "center", false);
+    pixelText(
+      ctx,
+      String(cat.level),
+      lx,
+      ly,
+      Math.max(1, rad * 0.24),
+      T.gold,
+      "center",
+      false,
+    );
   }
 }
 
@@ -358,7 +458,10 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
       case "streak": {
         // 시작점에서 목표까지 순식간에 지나간 자국
         const q = fieldToScreen(L, f.tx, f.ty);
-        const head = { x: p.x + (q.x - p.x) * Math.min(1, t * 1.8), y: p.y + (q.y - p.y) * Math.min(1, t * 1.8) };
+        const head = {
+          x: p.x + (q.x - p.x) * Math.min(1, t * 1.8),
+          y: p.y + (q.y - p.y) * Math.min(1, t * 1.8),
+        };
         ctx.globalAlpha = Math.max(0, 0.9 * (1 - t));
         ctx.strokeStyle = f.color;
         ctx.lineCap = "round";
@@ -379,7 +482,10 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
         for (let i = 0; i < 4; i++) {
           const a = f.angle + (Math.PI / 2) * i;
           ctx.beginPath();
-          ctx.moveTo(p.x + Math.cos(a) * len * 0.4, p.y + Math.sin(a) * len * 0.4);
+          ctx.moveTo(
+            p.x + Math.cos(a) * len * 0.4,
+            p.y + Math.sin(a) * len * 0.4,
+          );
           ctx.lineTo(p.x + Math.cos(a) * len, p.y + Math.sin(a) * len);
           ctx.stroke();
         }
@@ -391,7 +497,13 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
         ctx.fillStyle = f.color;
         const rise = t * pitch * 0.9;
         ctx.beginPath();
-        ctx.arc(p.x, p.y - rise, Math.max(1.5, f.radius * pitch * (1 - t)), 0, Math.PI * 2);
+        ctx.arc(
+          p.x,
+          p.y - rise,
+          Math.max(1.5, f.radius * pitch * (1 - t)),
+          0,
+          Math.PI * 2,
+        );
         ctx.fill();
         break;
       }
@@ -426,7 +538,11 @@ function drawShots(ctx: CanvasRenderingContext2D, L: Layout): void {
     const rad = Math.max(2.5, L.cell * 0.05);
     const color = s.ally ? T.gold : T.enemy;
 
-    const back = fieldToScreen(L, fx - (s.toX - s.fromX) * 0.14, fy - (s.toY - s.fromY) * 0.14);
+    const back = fieldToScreen(
+      L,
+      fx - (s.toX - s.fromX) * 0.14,
+      fy - (s.toY - s.fromY) * 0.14,
+    );
     ctx.save();
     ctx.globalAlpha = 0.4;
     ctx.strokeStyle = color;
@@ -460,7 +576,15 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
         outline: true,
       });
     } else {
-      pixelText(ctx, p.text, ox, oy, Math.max(1, L.cell * (p.crit ? 0.036 : 0.028)), p.crit ? T.gold : "#FFFFFF", "center");
+      pixelText(
+        ctx,
+        p.text,
+        ox,
+        oy,
+        Math.max(1, L.cell * (p.crit ? 0.036 : 0.028)),
+        p.crit ? T.gold : "#FFFFFF",
+        "center",
+      );
     }
     ctx.restore();
   }
@@ -481,7 +605,13 @@ function drawSideLabels(ctx: CanvasRenderingContext2D, L: Layout): void {
   const a = arenaBox(L);
   const fs = Math.min(Math.max(9, L.cell * 0.16), L.labelH * 0.8);
   const inset = L.cell * 0.22;
-  const put = (x: number, y: number, text: string, color: string, align: CanvasTextAlign) => {
+  const put = (
+    x: number,
+    y: number,
+    text: string,
+    color: string,
+    align: CanvasTextAlign,
+  ) => {
     uiText(ctx, text, x, y, fs, color, {
       align,
       weight: 800,
@@ -506,18 +636,22 @@ function drawDivider(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.setLineDash([3, 7]);
   ctx.beginPath();
   if (L.portrait) {
-    const y = Math.round((L.enemyBoard.y + L.enemyBoard.h + L.allyBoard.y) / 2) + 0.5;
+    const y =
+      Math.round((L.enemyBoard.y + L.enemyBoard.h + L.allyBoard.y) / 2) + 0.5;
     ctx.moveTo(L.allyBoard.x, y);
     ctx.lineTo(L.allyBoard.x + L.allyBoard.w, y);
   } else {
-    const x = Math.round((L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2) + 0.5;
+    const x =
+      Math.round((L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2) + 0.5;
     ctx.moveTo(x, L.allyBoard.y - L.labelH);
     ctx.lineTo(x, L.allyBoard.y + L.allyBoard.h);
   }
   ctx.stroke();
   ctx.restore();
 
-  const cx = L.portrait ? L.w / 2 : (L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2;
+  const cx = L.portrait
+    ? L.w / 2
+    : (L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2;
   const cy = L.portrait
     ? (L.enemyBoard.y + L.enemyBoard.h + L.allyBoard.y) / 2
     : L.allyBoard.y + L.allyBoard.h / 2;
@@ -529,7 +663,16 @@ function drawDivider(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.strokeStyle = "rgba(239,224,198,0.16)";
   ctx.lineWidth = 1;
   ctx.stroke();
-  pixelText(ctx, "VS", cx, cy, Math.max(1, rad * 0.2), T.muted, "center", false);
+  pixelText(
+    ctx,
+    "VS",
+    cx,
+    cy,
+    Math.max(1, rad * 0.2),
+    T.muted,
+    "center",
+    false,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -550,17 +693,31 @@ export function offerRects(L: Layout, count: number = OFFER_SLOTS): Rect[] {
   const n = Math.max(1, count);
   const gap = L.offerGap;
   const cw = (r.w - gap * (n - 1)) / n;
-  return Array.from({ length: count }, (_, i) => ({ x: r.x + i * (cw + gap), y: r.y, w: cw, h: r.h }));
+  return Array.from({ length: count }, (_, i) => ({
+    x: r.x + i * (cw + gap),
+    y: r.y,
+    w: cw,
+    h: r.h,
+  }));
 }
 
 /**
  * 보상 단계가 아닐 때 카드 자리를 비워 두면 화면 아래가 휑하다.
  * 대신 팀 구성을 보여준다 — 근접/원거리 균형은 배치를 정할 때 실제로 필요한 정보다.
  */
-function drawTeamStrip(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawTeamStrip(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+): void {
   const r = L.offers;
   const cats = livingCats(s.ally);
-  const counts: Record<ClassKind, number> = { warrior: 0, rogue: 0, archer: 0, mage: 0 };
+  const counts: Record<ClassKind, number> = {
+    warrior: 0,
+    rogue: 0,
+    archer: 0,
+    mage: 0,
+  };
   for (const c of cats) counts[c.breed.cls] += 1;
 
   const cap = Math.max(9, r.h * 0.17);
@@ -571,13 +728,37 @@ function drawTeamStrip(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
 
   order.forEach((cls, i) => {
     const cx = r.x + cw * i + cw / 2;
-    uiText(ctx, CLASS_LABEL[cls], cx, r.y + r.h * 0.3, cap, T.muted, { align: "center", weight: 700 });
-    pixelText(ctx, String(counts[cls]), cx, r.y + r.h * 0.66, px, CLASS_COLOR[cls], "center", false);
+    uiText(ctx, CLASS_LABEL[cls], cx, r.y + r.h * 0.3, cap, T.muted, {
+      align: "center",
+      weight: 700,
+    });
+    pixelText(
+      ctx,
+      String(counts[cls]),
+      cx,
+      r.y + r.h * 0.66,
+      px,
+      CLASS_COLOR[cls],
+      "center",
+      false,
+    );
   });
 
   const cx = r.x + cw * order.length + cw / 2;
-  uiText(ctx, "상대", cx, r.y + r.h * 0.3, cap, T.muted, { align: "center", weight: 700 });
-  pixelText(ctx, String(livingCats(s.enemy).length), cx, r.y + r.h * 0.66, px, T.enemy, "center", false);
+  uiText(ctx, "상대", cx, r.y + r.h * 0.3, cap, T.muted, {
+    align: "center",
+    weight: 700,
+  });
+  pixelText(
+    ctx,
+    String(livingCats(s.enemy).length),
+    cx,
+    r.y + r.h * 0.66,
+    px,
+    T.enemy,
+    "center",
+    false,
+  );
 
   ctx.strokeStyle = "rgba(239,224,198,0.08)";
   ctx.lineWidth = 1;
@@ -603,7 +784,10 @@ function hexA(hex: string, a: number): string {
 function cardIdle(seed: number, t: number): { pose: Pose; bob: number } {
   const cycle = 2600 + (seed % 5) * 260;
   const p = (t + seed * 430) % cycle;
-  return { pose: p < 170 ? "wink" : "idle", bob: Math.sin((t + seed * 700) / 540) };
+  return {
+    pose: p < 170 ? "wink" : "idle",
+    bob: Math.sin((t + seed * 700) / 540),
+  };
 }
 
 /** 초상 자리. 직업색으로 은은하게 물들이고 그 안에 고양이를 세운다. */
@@ -668,10 +852,23 @@ function drawCostBadge(
   ctx.strokeStyle = afford ? T.fish : "rgba(239,224,198,0.16)";
   ctx.lineWidth = 2;
   ctx.stroke();
-  pixelText(ctx, String(cost), cx, cy, Math.max(1, r * 0.26), afford ? T.fish : T.muted, "center", false);
+  pixelText(
+    ctx,
+    String(cost),
+    cx,
+    cy,
+    Math.max(1, r * 0.26),
+    afford ? T.fish : T.muted,
+    "center",
+    false,
+  );
 }
 
-function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawOffers(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+): void {
   const rects = offerRects(L);
   const t = performance.now();
 
@@ -690,10 +887,18 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.setLineDash([]);
-      uiText(ctx, "샀음", cr.x + cr.w / 2, cr.y + cr.h / 2, Math.max(11, cr.w * 0.1), "rgba(156,139,118,0.55)", {
-        align: "center",
-        weight: 600,
-      });
+      uiText(
+        ctx,
+        "샀음",
+        cr.x + cr.w / 2,
+        cr.y + cr.h / 2,
+        Math.max(11, cr.w * 0.1),
+        "rgba(156,139,118,0.55)",
+        {
+          align: "center",
+          weight: 600,
+        },
+      );
       return;
     }
 
@@ -726,10 +931,30 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
 
     // 세로 카드가 기본. 초상이 위, 글이 아래.
     if (cr.h >= cr.w * 0.9) {
-      const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: cr.w - pad * 2, h: cr.h * 0.42 };
-      drawPortraitWell(ctx, well, o.breed.id, o.breed.id * 7 + i, accent, afford, t);
+      const well: Rect = {
+        x: cr.x + pad,
+        y: cr.y + pad,
+        w: cr.w - pad * 2,
+        h: cr.h * 0.42,
+      };
+      drawPortraitWell(
+        ctx,
+        well,
+        o.breed.id,
+        o.breed.id * 7 + i,
+        accent,
+        afford,
+        t,
+      );
       const br = Math.max(12, cr.w * 0.105);
-      drawCostBadge(ctx, cr.x + cr.w - pad - br * 0.9, cr.y + pad + br * 0.9, br, o.cost, afford);
+      drawCostBadge(
+        ctx,
+        cr.x + cr.w - pad - br * 0.9,
+        cr.y + pad + br * 0.9,
+        br,
+        o.cost,
+        afford,
+      );
 
       const fsName = Math.max(12, Math.min(22, cr.w * 0.115));
       const fsAbil = fsName * 0.78;
@@ -754,9 +979,22 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
       // 설명은 남은 자리만큼만. 카드 밖으로 새면 옆 카드와 겹쳐 읽힌다.
       const room = cr.y + cr.h - pad - ty;
       const lineH = fsDesc * 1.3;
-      const maxLines = Math.max(1, Math.min(3, Math.floor((room + fsDesc * 0.65) / lineH)));
-      for (const line of wrapLines(ctx, abilityDesc, fsDesc, 500, tw, maxLines)) {
-        uiText(ctx, line, cx, ty, fsDesc, afford ? T.paperDim : T.muted, { align: "center", weight: 500 });
+      const maxLines = Math.max(
+        1,
+        Math.min(3, Math.floor((room + fsDesc * 0.65) / lineH)),
+      );
+      for (const line of wrapLines(
+        ctx,
+        abilityDesc,
+        fsDesc,
+        500,
+        tw,
+        maxLines,
+      )) {
+        uiText(ctx, line, cx, ty, fsDesc, afford ? T.paperDim : T.muted, {
+          align: "center",
+          weight: 500,
+        });
         ty += lineH;
       }
       return;
@@ -765,7 +1003,15 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
     // 카드를 세울 높이가 안 나오는 화면에서는 눕힌다. 초상 왼쪽, 글 오른쪽.
     const side = cr.h - pad * 2;
     const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: side, h: side };
-    drawPortraitWell(ctx, well, o.breed.id, o.breed.id * 7 + i, accent, afford, t);
+    drawPortraitWell(
+      ctx,
+      well,
+      o.breed.id,
+      o.breed.id * 7 + i,
+      accent,
+      afford,
+      t,
+    );
 
     const br = Math.max(11, cr.h * 0.17);
     const fs = Math.max(11, cr.h * 0.19);
@@ -773,24 +1019,55 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
     const textW = cr.x + cr.w - pad - br * 2.1 - textX;
     const roomy = cr.h >= 84;
 
-    uiText(ctx, o.label, textX, cr.y + cr.h * (roomy ? 0.26 : 0.34), fs, afford ? T.text : T.muted, {
-      align: "left",
-      weight: 800,
-      maxWidth: textW,
-    });
-    uiText(ctx, abilityLine, textX, cr.y + cr.h * (roomy ? 0.48 : 0.58), fs * 0.74, afford ? accent : T.muted, {
-      align: "left",
-      weight: 700,
-      maxWidth: textW,
-    });
-    if (roomy) {
-      uiText(ctx, abilityDesc, textX, cr.y + cr.h * 0.68, fs * 0.68, afford ? T.paperDim : T.muted, {
+    uiText(
+      ctx,
+      o.label,
+      textX,
+      cr.y + cr.h * (roomy ? 0.26 : 0.34),
+      fs,
+      afford ? T.text : T.muted,
+      {
         align: "left",
-        weight: 500,
+        weight: 800,
         maxWidth: textW,
-      });
+      },
+    );
+    uiText(
+      ctx,
+      abilityLine,
+      textX,
+      cr.y + cr.h * (roomy ? 0.48 : 0.58),
+      fs * 0.74,
+      afford ? accent : T.muted,
+      {
+        align: "left",
+        weight: 700,
+        maxWidth: textW,
+      },
+    );
+    if (roomy) {
+      uiText(
+        ctx,
+        abilityDesc,
+        textX,
+        cr.y + cr.h * 0.68,
+        fs * 0.68,
+        afford ? T.paperDim : T.muted,
+        {
+          align: "left",
+          weight: 500,
+          maxWidth: textW,
+        },
+      );
     }
-    drawCostBadge(ctx, cr.x + cr.w - pad - br, cr.y + cr.h / 2, br, o.cost, afford);
+    drawCostBadge(
+      ctx,
+      cr.x + cr.w - pad - br,
+      cr.y + cr.h / 2,
+      br,
+      o.cost,
+      afford,
+    );
   });
 }
 
@@ -813,14 +1090,23 @@ function offerHeadline(s: RunState): string {
   return `${team} · 생선을 쓰거나, 그냥 다음 웨이브로`;
 }
 
-function drawBottomZone(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawBottomZone(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+): void {
   const reward = s.phase === "reward";
   const rr = rerollRect(L);
 
   // 보상 단계에는 카드가 보드 위로 자란다. 그동안 보드는 어차피 만질 수 없으므로
   // (main.ts canRearrange) 덮어도 되지만, 덮는다는 걸 눈에 보이게 해야 한다.
   const panel: Rect = reward
-    ? { x: 0, y: rr.y - rr.h * 0.7, w: L.w, h: L.offersPanel.y + L.offersPanel.h - (rr.y - rr.h * 0.7) }
+    ? {
+        x: 0,
+        y: rr.y - rr.h * 0.7,
+        w: L.w,
+        h: L.offersPanel.y + L.offersPanel.h - (rr.y - rr.h * 0.7),
+      }
     : L.offersPanel;
 
   if (reward) {
@@ -861,16 +1147,26 @@ function drawBottomZone(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
 
     const canRoll = s.gold >= REROLL_COST;
     roundRect(ctx, rr, rr.h * 0.5);
-    ctx.fillStyle = canRoll ? "rgba(111,182,220,0.14)" : "rgba(239,224,198,0.04)";
+    ctx.fillStyle = canRoll
+      ? "rgba(111,182,220,0.14)"
+      : "rgba(239,224,198,0.04)";
     ctx.fill();
     ctx.strokeStyle = canRoll ? T.fish : "rgba(239,224,198,0.12)";
     ctx.lineWidth = 1.5;
     ctx.stroke();
     const rfs = Math.max(10, rr.h * 0.46);
-    uiText(ctx, "다시 뽑기", rr.x + rr.w * 0.42, rr.y + rr.h / 2, rfs, canRoll ? T.text : T.muted, {
-      align: "right",
-      weight: 700,
-    });
+    uiText(
+      ctx,
+      "다시 뽑기",
+      rr.x + rr.w * 0.42,
+      rr.y + rr.h / 2,
+      rfs,
+      canRoll ? T.text : T.muted,
+      {
+        align: "right",
+        weight: 700,
+      },
+    );
     pixelText(
       ctx,
       String(REROLL_COST),
@@ -899,7 +1195,11 @@ function drawBottomZone(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
  * 화면 아래 목표 세 줄이 무슨 뜻인지 알 수 없었다.
  * 네 조건은 전부 동시에 만족할 수 있으므로 셋 다 켜는 것이 실제 목표가 된다.
  */
-function drawSynergies(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawSynergies(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+): void {
   const r = L.synergyBar;
   const n = Math.max(1, s.synergies.length);
   const gap = r.w * 0.016;
@@ -929,33 +1229,89 @@ function drawSynergies(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
     const wide = cr.w > r.h * 6;
 
     if (wide) {
-      uiText(ctx, triggerLabel(syn.trigger), cr.x + padX, cr.y + r.h * 0.34, fs * 0.86, on ? hue : T.muted, {
-        align: "left",
-        weight: 700,
-        maxWidth: inner * 0.52,
-      });
-      pixelText(ctx, prog, cr.x + padX, cr.y + r.h * 0.72, px, on ? hue : T.muted, "left", false);
-      uiText(ctx, syn.name, cr.x + cr.w - padX, cr.y + r.h * 0.34, fs * 0.86, on ? T.text : T.muted, {
-        align: "right",
-        weight: 800,
-        maxWidth: inner * 0.45,
-      });
-      uiText(ctx, effectLabel(syn.effect), cr.x + cr.w - padX, cr.y + r.h * 0.72, fs * 0.8,
-        on ? T.gold : "rgba(156,139,118,0.6)", { align: "right", weight: 600, maxWidth: inner * 0.55 });
+      uiText(
+        ctx,
+        triggerLabel(syn.trigger),
+        cr.x + padX,
+        cr.y + r.h * 0.34,
+        fs * 0.86,
+        on ? hue : T.muted,
+        {
+          align: "left",
+          weight: 700,
+          maxWidth: inner * 0.52,
+        },
+      );
+      pixelText(
+        ctx,
+        prog,
+        cr.x + padX,
+        cr.y + r.h * 0.72,
+        px,
+        on ? hue : T.muted,
+        "left",
+        false,
+      );
+      uiText(
+        ctx,
+        syn.name,
+        cr.x + cr.w - padX,
+        cr.y + r.h * 0.34,
+        fs * 0.86,
+        on ? T.text : T.muted,
+        {
+          align: "right",
+          weight: 800,
+          maxWidth: inner * 0.45,
+        },
+      );
+      uiText(
+        ctx,
+        effectLabel(syn.effect),
+        cr.x + cr.w - padX,
+        cr.y + r.h * 0.72,
+        fs * 0.8,
+        on ? T.gold : "rgba(156,139,118,0.6)",
+        { align: "right", weight: 600, maxWidth: inner * 0.55 },
+      );
       return;
     }
 
     // 좁은 칩: 두 줄로 확실히 나눈다. 이름(장식)은 뺀다 — 플레이어에게 필요한 건
     // 무엇을 해야 하는가지 시너지의 이름이 아니다.
     // 윗줄: 조건과 진행도. 아랫줄: 얻는 효과.
-    uiText(ctx, triggerLabel(syn.trigger), cr.x + padX, cr.y + r.h * 0.32, fs * 0.86, on ? hue : T.muted, {
-      align: "left",
-      weight: 800,
-      maxWidth: inner * 0.68,
-    });
-    pixelText(ctx, prog, cr.x + cr.w - padX, cr.y + r.h * 0.32, px, on ? hue : T.muted, "right", false);
-    uiText(ctx, effectLabel(syn.effect), cr.x + cr.w / 2, cr.y + r.h * 0.72, fs * 0.76,
-      on ? T.gold : "rgba(156,139,118,0.6)", { align: "center", weight: 600, maxWidth: inner });
+    uiText(
+      ctx,
+      triggerLabel(syn.trigger),
+      cr.x + padX,
+      cr.y + r.h * 0.32,
+      fs * 0.86,
+      on ? hue : T.muted,
+      {
+        align: "left",
+        weight: 800,
+        maxWidth: inner * 0.68,
+      },
+    );
+    pixelText(
+      ctx,
+      prog,
+      cr.x + cr.w - padX,
+      cr.y + r.h * 0.32,
+      px,
+      on ? hue : T.muted,
+      "right",
+      false,
+    );
+    uiText(
+      ctx,
+      effectLabel(syn.effect),
+      cr.x + cr.w / 2,
+      cr.y + r.h * 0.72,
+      fs * 0.76,
+      on ? T.gold : "rgba(156,139,118,0.6)",
+      { align: "center", weight: 600, maxWidth: inner },
+    );
   });
 }
 
@@ -973,33 +1329,65 @@ export function buttonText(s: RunState): string {
   }
 }
 
-function drawButton(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawButton(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+): void {
   const r = L.button;
   const idle = s.phase === "battle";
   const face = idle ? "rgba(239,224,198,0.07)" : T.action;
   const edge = idle ? "rgba(0,0,0,0.3)" : "#A85E1E";
 
-  bevelPanel(ctx, r, r.h * 0.26, face, edge, idle ? 2 : Math.max(3, r.h * 0.08));
+  bevelPanel(
+    ctx,
+    r,
+    r.h * 0.26,
+    face,
+    edge,
+    idle ? 2 : Math.max(3, r.h * 0.08),
+  );
 
   if (!idle) {
     // 위쪽 하이라이트. 눌리는 물건처럼 보이게 하는 최소한의 장치.
-    roundRect(ctx, { x: r.x + r.w * 0.06, y: r.y + r.h * 0.13, w: r.w * 0.88, h: r.h * 0.22 }, r.h * 0.11);
+    roundRect(
+      ctx,
+      {
+        x: r.x + r.w * 0.06,
+        y: r.y + r.h * 0.13,
+        w: r.w * 0.88,
+        h: r.h * 0.22,
+      },
+      r.h * 0.11,
+    );
     ctx.fillStyle = "rgba(255,255,255,0.16)";
     ctx.fill();
   }
 
-  uiText(ctx, buttonText(s), r.x + r.w / 2, r.y + r.h / 2, Math.max(15, r.h * 0.36), idle ? T.muted : T.actionInk, {
-    align: "center",
-    weight: 800,
-    tracking: r.h * 0.02,
-  });
+  uiText(
+    ctx,
+    buttonText(s),
+    r.x + r.w / 2,
+    r.y + r.h / 2,
+    Math.max(15, r.h * 0.36),
+    idle ? T.muted : T.actionInk,
+    {
+      align: "center",
+      weight: 800,
+      tracking: r.h * 0.02,
+    },
+  );
 }
 
 /**
  * 안내 띠. 준비 단계에서는 이번 상대의 성격을 알려준다.
  * 무엇이 오는지 모르면 배치를 바꿀 이유가 없다.
  */
-function drawNotice(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawNotice(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+): void {
   if (s.phase === "gameover") return;
   const r = L.notice;
   const size = Math.max(11, r.h * 0.56);
@@ -1008,10 +1396,18 @@ function drawNotice(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
   if (s.phase === "prepare") {
     const info = waveKindInfo(waveKind(s.wave));
     const nameW = ctx.measureText(info.name).width;
-    uiText(ctx, info.name, L.w / 2 - nameW * 0.5 - r.h * 0.2, cy, size, T.action, {
-      align: "right",
-      weight: 800,
-    });
+    uiText(
+      ctx,
+      info.name,
+      L.w / 2 - nameW * 0.5 - r.h * 0.2,
+      cy,
+      size,
+      T.action,
+      {
+        align: "right",
+        weight: 800,
+      },
+    );
     uiText(ctx, info.hint, L.w / 2 - nameW * 0.5, cy, size * 0.94, T.paperDim, {
       align: "left",
       weight: 600,
@@ -1020,10 +1416,17 @@ function drawNotice(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
   }
 
   if (!s.notice) return;
-  uiText(ctx, s.notice, L.w / 2, cy, size, T.paperDim, { align: "center", weight: 600 });
+  uiText(ctx, s.notice, L.w / 2, cy, size, T.paperDim, {
+    align: "center",
+    weight: 600,
+  });
 }
 
-function drawGameOver(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawGameOver(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+): void {
   if (s.phase !== "gameover") return;
   ctx.fillStyle = "rgba(14,10,8,0.84)";
   ctx.fillRect(0, 0, L.w, L.h);
@@ -1038,13 +1441,24 @@ function drawGameOver(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): vo
     tracking: L.scale * 3,
   });
   pixelText(ctx, num, L.w / 2, cy - L.scale * 22, px, T.paper, "center", false);
-  uiText(ctx, "웨이브", L.w / 2, cy + L.scale * 16, L.scale * 16, T.muted, { align: "center", weight: 700 });
+  uiText(ctx, "웨이브", L.w / 2, cy + L.scale * 16, L.scale * 16, T.muted, {
+    align: "center",
+    weight: 700,
+  });
 
   if (s.lossReason === "timeout") {
-    uiText(ctx, "시간 안에 정리하지 못했습니다", L.w / 2, cy + L.scale * 42, L.scale * 13, T.enemy, {
-      align: "center",
-      weight: 600,
-    });
+    uiText(
+      ctx,
+      "시간 안에 정리하지 못했습니다",
+      L.w / 2,
+      cy + L.scale * 42,
+      L.scale * 13,
+      T.enemy,
+      {
+        align: "center",
+        weight: 600,
+      },
+    );
   }
   uiText(
     ctx,
@@ -1080,7 +1494,12 @@ export function render(
   const drawList: { cat: Cat; y: number; dimmed: boolean }[] = [];
   for (let i = 0; i < BOARD_SIZE; i++) {
     const e = s.enemy[i];
-    if (e) drawList.push({ cat: e, y: fieldToScreen(L, e.fx, e.fy).y, dimmed: false });
+    if (e)
+      drawList.push({
+        cat: e,
+        y: fieldToScreen(L, e.fx, e.fy).y,
+        dimmed: false,
+      });
     const a = s.ally[i];
     if (a) {
       drawList.push({
@@ -1104,7 +1523,8 @@ export function render(
       const img = spriteFor(cat.breed.id, "move");
       ctx.save();
       ctx.globalAlpha = 0.95;
-      if (img) ctx.drawImage(img, drag.x - size / 2, drag.y - size / 2, size, size);
+      if (img)
+        ctx.drawImage(img, drag.x - size / 2, drag.y - size / 2, size, size);
       ctx.restore();
     }
   }

@@ -108,6 +108,8 @@ export interface Cat {
   evade: number;
   /** 다음 공격까지 남은 ms */
   cooldown: number;
+  /** 몸 크기(칸). 보스만 0보다 크다. 사거리·겹침 계산이 이걸 뺀다. */
+  radius: number;
   side: Side;
   /** 보드 셀 인덱스 0..8, 보드 밖(벤치)이면 -1 */
   cell: number;
@@ -156,4 +158,15 @@ export function livingCats(board: Board): Cat[] {
 
 export function fieldDistance(a: Cat, b: Cat): number {
   return Math.hypot(a.fx - b.fx, a.fy - b.fy);
+}
+
+/**
+ * 두 유닛의 **표면** 사이 거리.
+ *
+ * 보스처럼 큰 개체는 중심까지 갈 필요 없이 몸에 닿으면 때릴 수 있어야 한다.
+ * 일반 고양이는 반경이 0이라 `fieldDistance`와 같은 값이 나온다 — 즉 기존
+ * 유닛의 거동은 한 톨도 바뀌지 않는다.
+ */
+export function surfaceDistance(a: Cat, b: Cat): number {
+  return Math.max(0, fieldDistance(a, b) - a.radius - b.radius);
 }

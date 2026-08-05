@@ -1,6 +1,7 @@
 import { BALANCE } from "./balance.ts";
 import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
+import { BOSS_RADIUS, bossForWave } from "./bosses.ts";
 import {
   BOARD_COLS,
   BOARD_ROWS,
@@ -247,6 +248,7 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     atkInterval: breed.atkInterval,
     evade: 0,
     cooldown: breed.atkInterval,
+    radius: 0,
     side,
     cell,
     fx,
@@ -403,10 +405,51 @@ function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
 }
 
 /** 웨이브가 오를수록 적이 많아지고 스탯이 커진다. 성격에 따라 수와 배치가 달라진다. */
+/**
+ * 보스 웨이브: 3x3을 차지하는 한 마리 + 앞줄 호위.
+ *
+ * 호위를 붙이는 이유는 보스만 있으면 우리 원거리가 사거리 밖에서 할 일이 없기
+ * 때문이다. 앞줄에 세워 근접이 먼저 부딪히게 한다.
+ */
+function buildBossWave(state: RunState, wave: number, scale: number): void {
+  state.enemy = emptyBoard();
+
+  const breed = bossForWave(wave);
+  // 보드 한가운데(행 2, 열 2). 반경 1.5라 행 1~3 × 열 1~3을 덮는다.
+  const bossCell = 2 * BOARD_COLS + 2;
+  const boss = makeCat(breed, "enemy", bossCell);
+  boss.radius = BOSS_RADIUS;
+  // 첫 보스는 얇게, 후반으로 갈수록 두껍게. 고정 배수는 5웨이브를 벽으로 만든다.
+  const ramp = Math.min(1, Math.max(0, (wave - 5) / BALANCE.bossHpRampWaves));
+  const hpMul = BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp;
+  boss.maxHp = Math.round(boss.maxHp * scale * hpMul);
+  boss.hp = boss.maxHp;
+  boss.atk = Math.round(boss.atk * scale * BALANCE.bossAtkMul);
+  state.enemy[bossCell] = boss;
+
+  const escortCells = ROW_ORDER.map((r) => r * BOARD_COLS + 0);
+  const ids = enemyBreedIds("mixed", BALANCE.bossEscortCount, wave);
+  for (let i = 0; i < BALANCE.bossEscortCount; i++) {
+    const cell = escortCells[i];
+    const id = ids[i];
+    if (cell === undefined || id === undefined) break;
+    const cat = makeCat(breedById(id), "enemy", cell);
+    cat.maxHp = Math.round(cat.maxHp * scale);
+    cat.hp = cat.maxHp;
+    cat.atk = Math.round(cat.atk * scale);
+    state.enemy[cell] = cat;
+  }
+}
+
 export function buildEnemyWave(state: RunState): void {
   const w = state.wave;
   const kind = waveKind(w);
   const scale = Math.pow(BALANCE.enemyScale, w - 1);
+
+  if (kind === "boss") {
+    buildBossWave(state, w, scale);
+    return;
+  }
 
   let count = Math.min(unitCap(w), Math.ceil(w / BALANCE.enemyCountDivisor));
   let statBoost = 1;
@@ -416,13 +459,6 @@ export function buildEnemyWave(state: RunState): void {
   // 돌격대는 전부 근접이라는 것만으로 이미 다른 문제다. 수까지 늘리면 과했다.
   // 저격대는 원거리가 일방적으로 때리는 구간이 있어 같은 수라도 체감이 세다.
   if (kind === "snipe") count = Math.max(2, count - 1);
-  if (kind === "boss") {
-    // 수를 반으로 줄이고 그만큼 한 마리를 크게 만든다. 총 전력은 비슷하되 형태가 다르다.
-    count = Math.max(1, Math.ceil(count / 2));
-    // 1.45에서 낮췄다. 정확히 첫 보스 웨이브에 사망 봉우리가 서면 벽으로 읽힌다.
-    statBoost = 1.35;
-  }
-
   state.enemy = emptyBoard();
   const order = enemyOrder(kind);
   const ids = enemyBreedIds(kind, count, w);

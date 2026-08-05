@@ -1,4 +1,5 @@
 import { BREEDS } from "./breeds.ts";
+import { BOSS_BREEDS } from "./bosses.ts";
 import type { Pose } from "./types.ts";
 
 const POSES: Pose[] = ["idle", "sleep", "wink", "move", "back", "run"];
@@ -19,11 +20,11 @@ export function spriteFor(breedId: number, pose: Pose): HTMLImageElement | null 
   return img && img.complete && img.naturalWidth > 0 ? img : null;
 }
 
-/** T1은 #01~#08만 쓴다. 전부 로드될 때까지 기다렸다가 게임을 시작한다. */
+/** 고양이 8종 + 보스. 전부 로드될 때까지 기다렸다가 게임을 시작한다. */
 export async function loadSprites(): Promise<void> {
   const jobs: Promise<void>[] = [];
 
-  for (const breed of BREEDS) {
+  for (const breed of [...BREEDS, ...BOSS_BREEDS]) {
     for (const pose of POSES) {
       const k = key(breed.id, pose);
       const img = new Image();

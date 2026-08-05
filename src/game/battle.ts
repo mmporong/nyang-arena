@@ -6,6 +6,7 @@ import {
   cellToField,
   fieldDistance,
   livingCats,
+  surfaceDistance,
   MANA_MAX,
   type Cat,
   type Side,
@@ -20,7 +21,7 @@ import {
   SKILLS,
   type SkillResult,
 } from "./skills.ts";
-import { finishWave, type RunState } from "./run.ts";
+import { finishWave, waveKind, type RunState } from "./run.ts";
 
 /** 고정 시뮬레이션 스텝. */
 export const SIM_STEP_MS = 100;
@@ -33,6 +34,18 @@ export const SIM_STEP_MS = 100;
  * 도달). 이동이 들어가면서 전투가 1~2초 길어졌으므로 상한도 함께 올렸다.
  */
 const BATTLE_TIMEOUT_MS = 16_000;
+/**
+ * 보스는 오래 싸운다. 예고→회피 사이클이 여러 번 돌아야 레이드가 되기 때문이다.
+ *
+ * 늘려도 예전의 "탱키 조합이 매 웨이브 타임아웃 승리로 런이 안 끝남" 회귀는
+ * 되살아나지 않는다. 그 버그는 타임아웃을 **체력 비율로 판정**했기 때문이었고,
+ * 지금은 타임아웃이 곧 패배다. 시간을 끌어 봐야 지는 것은 같다.
+ */
+const BOSS_TIMEOUT_MS = 150_000;
+
+function battleTimeout(wave: number): number {
+  return waveKind(wave) === "boss" ? BOSS_TIMEOUT_MS : BATTLE_TIMEOUT_MS;
+}
 
 const POSE_WINK_MS = 500;
 const POSE_MOVE_MS = 260;
@@ -201,7 +214,9 @@ function damage(target: Cat, amount: number, crit: boolean): void {
   // 측정해 보니 전사 스킬이 원거리의 3~6분의 1밖에 안 나갔다. 4번 때려야 하는데
   // 걸어가는 시간까지 있어서다. TFT도 탱커에게 피격 마나를 주는데, 앞에서
   // 두들겨 맞는 역할이 곧 마나 엔진이 되므로 정체성과도 맞는다.
-  if (target.breed.cls === "warrior") {
+  // 쓸 스킬이 없으면 채워 봐야 쓸 데가 없다. 보스는 전사이면서 스킬이 없어서
+  // 마나바가 가득 찬 채로 영원히 떠 있었다.
+  if (target.breed.cls === "warrior" && target.breed.skill) {
     target.mana = Math.min(MANA_MAX, target.mana + MANA_ON_HIT_WARRIOR);
   }
   pop(target, String(left), crit);
@@ -415,7 +430,9 @@ function stepToward(cat: Cat, target: Cat, stepMs: number): void {
 
   const want = cat.breed.moveSpeed * cat.speedMul * (stepMs / 1000);
   // 지나쳐 들어가면 다음 틱에 뒤로 밀렸다 앞으로 갔다 하며 떤다.
-  const travel = Math.min(want, Math.max(0, d - cat.breed.range * 0.95));
+  // 반경을 빼야 보스 몸통 앞에서 멈춘다. 일반 고양이는 반경 0이라 그대로다.
+  const stopAt = cat.breed.range * 0.95 + cat.radius + target.radius;
+  const travel = Math.min(want, Math.max(0, d - stopAt));
   if (travel <= 0) return;
 
   cat.fx += (dx / d) * travel;
@@ -434,15 +451,23 @@ function separate(cats: Cat[]): void {
       const dx = b.fx - a.fx;
       const dy = b.fy - a.fy;
       const d = Math.hypot(dx, dy);
-      if (d >= SEPARATION) continue;
+      const minD = SEPARATION + a.radius + b.radius;
+      if (d >= minD) continue;
       // 정확히 겹쳤으면 uid 순서로 축을 갈라 결정적으로 만든다.
       const nx = d > 1e-6 ? dx / d : a.uid < b.uid ? 1 : -1;
       const ny = d > 1e-6 ? dy / d : 0;
-      const push = (SEPARATION - d) * 0.5;
-      a.fx -= nx * push;
-      a.fy -= ny * push;
-      b.fx += nx * push;
-      b.fy += ny * push;
+      const overlap = minD - d;
+      // 보스는 밀리지 않는다. 큰 개체가 잡몹에게 떠밀리면 진형이 흐트러지고,
+      // 예고 광역의 기준점이 매 틱 흔들려 회피를 조준할 수 없게 된다.
+      const aFixed = a.radius > 0;
+      const bFixed = b.radius > 0;
+      if (aFixed && bFixed) continue;
+      const aShare = aFixed ? 0 : bFixed ? 1 : 0.5;
+      const bShare = 1 - aShare;
+      a.fx -= nx * overlap * aShare;
+      a.fy -= ny * overlap * aShare;
+      b.fx += nx * overlap * bShare;
+      b.fy += ny * overlap * bShare;
     }
   }
 }
@@ -615,7 +640,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
 
       cat.cooldown -= step;
 
-      if (fieldDistance(cat, target) <= cat.breed.range) {
+      if (surfaceDistance(cat, target) <= cat.breed.range) {
         if (cat.cooldown <= 0) {
           // 마나가 가득 찼으면 평타 대신 스킬이 나간다.
           if (cat.breed.skill && cat.mana >= MANA_MAX) {
@@ -639,7 +664,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
     separate(allies);
     separate(foes);
 
-    if (state.battleElapsed >= BATTLE_TIMEOUT_MS) {
+    if (state.battleElapsed >= battleTimeout(state.wave)) {
       finishWave(state, false, "timeout");
       return;
     }
