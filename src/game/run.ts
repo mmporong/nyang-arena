@@ -1,8 +1,10 @@
 import { BALANCE } from "./balance.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import {
-  BOARD_SIZE,
+  BOARD_ROWS,
   cellCol,
+  cellRow,
+  MANA_MAX,
   cellToField,
   emptyBoard,
   livingCats,
@@ -69,10 +71,13 @@ const SYNERGIES_PER_RUN = 3;
 /**
  * 목표를 다시 뽑는 주기(웨이브).
  *
+ * 5로 둔 이유: 웨이브 성격 주기도 5(마지막이 대장묘)라, 보스를 넘긴 직후에
+ * 새 목표가 걸리는 리듬이 된다.
+ *
  * 목표가 런 내내 고정이면, 한 번 달성한 뒤로는 배치를 다시 볼 이유가 없다.
  * 주기적으로 갈아주면 그때마다 구성과 배치를 다시 짜게 된다.
  */
-const SYNERGY_REFRESH_EVERY = 4;
+const SYNERGY_REFRESH_EVERY = 5;
 
 /**
  * 카드 다시 뽑기 비용.
@@ -100,6 +105,37 @@ export function goldForWave(wave: number): number {
   const base = BALANCE.goldBase + wave * BALANCE.goldPerWave;
   // 보스는 벽이 아니라 사건이어야 한다. 넘으면 그만한 보상이 있어야 다음 판을 계속한다.
   return Math.round(waveKind(wave) === "boss" ? base * 1.5 : base);
+}
+
+/**
+ * 새로 온 고양이를 놓을 자리.
+ *
+ * 예전에는 빈 칸 중 가장 앞 인덱스에 놓았는데, 5x5에서 그건 뒷줄부터 채운다는
+ * 뜻이라 근접이 여섯 칸을 걸어가는 일이 생겼다. 직업에 맞는 열을 먼저 고르고
+ * 같은 열이면 가운데 행부터 채운다. 물론 플레이어가 다시 옮길 수 있다.
+ */
+export function bestFreeCell(board: Board, breed: Breed): number {
+  const free: number[] = [];
+  board.forEach((c, i) => {
+    if (c === null) free.push(i);
+  });
+  if (free.length === 0) return -1;
+
+  const mid = (BOARD_ROWS - 1) / 2;
+  const wantsFront = breed.kind === "melee";
+  free.sort((a, b) => {
+    const ca = cellCol(a);
+    const cb = cellCol(b);
+    const colScore = wantsFront ? cb - ca : ca - cb;
+    if (colScore !== 0) return colScore;
+    return Math.abs(cellRow(a) - mid) - Math.abs(cellRow(b) - mid);
+  });
+  return free[0] ?? -1;
+}
+
+/** 이 웨이브에 데리고 있을 수 있는 고양이 수. 보드 칸이 아니라 이것이 진짜 제한이다. */
+export function unitCap(wave: number): number {
+  return Math.min(BALANCE.unitCapMax, BALANCE.unitCapBase + Math.floor(wave / BALANCE.unitCapEvery));
 }
 
 /** 웨이브를 넘길수록 살아남은 전원이 강해진다. 적의 전체 복리 성장에 대응하는 축. */
@@ -204,6 +240,12 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     poseTimer: 0,
     lunge: 0,
     flash: 0,
+    mana: 0,
+    manaMax: MANA_MAX,
+    castFlash: 0,
+    stun: 0,
+    dot: null,
+    shield: 0,
   };
 }
 
@@ -249,8 +291,10 @@ export function newRun(): RunState {
   // 가운데 줄에 앞·중간·뒤로 하나씩 세운다. 근접이 앞, 원거리가 뒤라는 형태를
   // 보여주되 배치 목표는 한 칸씩 모자라게 둔다(앞줄 근접 1/2, 뒷줄 원거리 1/2).
   // 목표가 처음부터 달성돼 있으면 플레이어가 할 일이 없다.
-  const starters = [BREEDS[0], BREEDS[3], BREEDS[1]].slice(0, BALANCE.starterCount);
-  const startCells = [5, 4, 3];
+  // 5x5 가운데 행(row 2)에 뒤·중간·앞으로 하나씩. 근접이 앞, 원거리가 뒤라는
+  // 형태를 보여주되 배치 목표는 한 칸씩 모자라게 둔다.
+  const starters = [BREEDS[0], BREEDS[3], BREEDS[6]].slice(0, BALANCE.starterCount);
+  const startCells = [14, 12, 10];
   starters.forEach((b, i) => {
     if (!b) return;
     const cell = startCells[i] ?? 3 + i;
@@ -294,7 +338,7 @@ export function buildEnemyWave(state: RunState): void {
   const kind = waveKind(w);
   const scale = Math.pow(BALANCE.enemyScale, w - 1);
 
-  let count = Math.min(BOARD_SIZE, Math.ceil(w / BALANCE.enemyCountDivisor));
+  let count = Math.min(unitCap(w), Math.ceil(w / BALANCE.enemyCountDivisor));
   let statBoost = 1;
   // 돌격대는 전부 근접이라는 것만으로 이미 다른 문제다. 수까지 늘리면 과했다.
   // 저격대는 원거리가 일방적으로 때리는 구간이 있어 같은 수라도 체감이 세다.
@@ -386,7 +430,8 @@ export function applySynergies(state: RunState): void {
 export function rollOffers(state: RunState): void {
   const offers: Offer[] = [];
   const owned = state.ally.filter((c): c is Cat => c !== null);
-  const hasFreeSlot = state.ally.some((c) => c === null);
+  // 빈 칸이 아니라 보유 한도로 판단한다. 5x5에는 칸이 늘 남아 있다.
+  const hasFreeSlot = owned.length < unitCap(state.wave);
   const pool = [...BREEDS].sort(() => Math.random() - 0.5);
 
   if (hasFreeSlot) {
@@ -438,11 +483,12 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
   if (state.gold < offer.cost) return false;
 
   if (offer.kind === "recruit") {
-    const free = state.ally.findIndex((c) => c === null);
+    const owned = state.ally.filter((c) => c !== null).length;
+    const free = owned < unitCap(state.wave) ? bestFreeCell(state.ally, offer.breed) : -1;
     if (free < 0) {
       // 살 수 없는 카드를 목록에 남겨두면 무한히 재시도된다. 즉시 걷어낸다.
       state.offers = state.offers.filter((o) => o !== offer);
-      state.notice = "보드가 꽉 찼습니다";
+      state.notice = "더 데리고 있을 수 없습니다";
       return false;
     }
     state.ally[free] = makeCat(offer.breed, "ally", free);
@@ -501,8 +547,18 @@ export function startBattle(state: RunState): void {
   // 지난 전투에서 걸어나간 위치를 배치한 셀로 되돌린다. 이걸 빼먹으면
   // 다음 웨이브가 적진 한복판에서 시작한다.
   resetPositions(state);
-  for (const c of state.ally) if (c) c.cooldown = c.atkInterval;
-  for (const c of state.enemy) if (c) c.cooldown = c.atkInterval;
+  for (const board of [state.ally, state.enemy]) {
+    for (const c of board) {
+      if (!c) continue;
+      c.cooldown = c.atkInterval;
+      // 마나와 상태이상은 전투마다 초기화한다. 지난 판의 도트가 남으면 안 된다.
+      c.mana = 0;
+      c.stun = 0;
+      c.dot = null;
+      c.shield = 0;
+      c.castFlash = 0;
+    }
+  }
   state.battleElapsed = 0;
   state.phase = "battle";
   state.notice = "";
@@ -535,6 +591,11 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
     c.poseTimer = 0;
     c.lunge = 0;
     c.flash = 0;
+    c.mana = 0;
+    c.stun = 0;
+    c.dot = null;
+    c.shield = 0;
+    c.castFlash = 0;
     const home = cellToField(c.side, c.cell);
     c.fx = home.fx;
     c.fy = home.fy;

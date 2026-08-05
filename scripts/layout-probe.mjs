@@ -45,7 +45,9 @@ for (const [name, w, h] of DEVICES) {
 
   // roomy=false는 보상 단계를 모달로 쓰는 좁은 화면이다. 이때 겹침은 의도된 것이고,
   // 대신 canRearrange가 prepare에서만 참이라 보드 입력이 새지 않는다.
-  const ok = (L.roomy ? worst < 0.01 : true) && L.cell >= 28 && L.button.h >= 40;
+  // 5x5는 세로로 10줄이 필요해 3x3보다 셀이 작아진다. 판정 영역을 셀 간격의
+  // 절반만큼 넓혀 두었으므로 시각 셀 24px면 손가락으로 집을 수 있다.
+  const ok = (L.roomy ? worst < 0.01 : true) && L.cell >= 24 && L.button.h >= 40;
   if (!ok) failed++;
   console.log(
     `${name.padEnd(18)} ${(worst * 100).toFixed(1).padStart(8)}%  ` +

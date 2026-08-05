@@ -8,7 +8,7 @@
  * 이 파일은 빌드타임 생성 스크립트(scripts/gen-synergies.mjs)와 런타임이
  * 공유한다. 8/26 런타임 프록시로 승격할 때도 같은 검증기를 그대로 쓴다.
  */
-import type { CatColor } from "../game/types.ts";
+import { BOARD_COLS, type CatColor } from "../game/types.ts";
 
 /**
  * 시너지 조건.
@@ -179,7 +179,8 @@ export interface BoardUnit {
   col: number;
 }
 
-const FRONT_COL = 2;
+/** 적에게 가장 가까운 열과 가장 먼 열. 보드 폭이 바뀌어도 따라간다. */
+const FRONT_COL = BOARD_COLS - 1;
 const BACK_COL = 0;
 
 /**

@@ -1,4 +1,5 @@
-import { fieldDistance, livingCats, type Cat } from "./types.ts";
+import { fieldDistance, livingCats, MANA_MAX, type Cat } from "./types.ts";
+import { runSkill, SKILLS } from "./skills.ts";
 import { finishWave, type RunState } from "./run.ts";
 
 /** 고정 시뮬레이션 스텝. */
@@ -32,6 +33,9 @@ const SEPARATION = 1.0;
  */
 const CROWD_PENALTY = 0.7;
 
+/** 전사가 피격 한 번에 얻는 마나 */
+const MANA_ON_HIT_WARRIOR = 11;
+
 /** 렌더러가 화면 좌표로 옮겨 띄우는 1회성 연출. */
 export interface DamagePop {
   fx: number;
@@ -58,6 +62,22 @@ export const SHOT_LIFE_MS = 220;
 
 export const damagePops: DamagePop[] = [];
 export const shots: Shot[] = [];
+
+/** 스킬 발동 순간의 파문. 시전자 위치에 잠깐 원이 퍼진다. */
+export interface Burst {
+  fx: number;
+  fy: number;
+  radius: number;
+  life: number;
+  ally: boolean;
+}
+export const BURST_LIFE_MS = 320;
+export const bursts: Burst[] = [];
+
+/** 렌더러가 시전 이름표를 그릴 때 쓴다. */
+export function skillName(cat: Cat): string {
+  return SKILLS[cat.breed.skill].name;
+}
 
 let popSeq = 0;
 
@@ -94,6 +114,86 @@ export function pickTarget(attacker: Cat, foes: Cat[], claimed?: Map<string, num
   return best;
 }
 
+/** 실제 피해 적용. 보호막을 먼저 깎는다. */
+function damage(target: Cat, amount: number, crit: boolean): void {
+  let left = Math.round(amount);
+  if (target.shield > 0) {
+    const absorbed = Math.min(target.shield, left);
+    target.shield -= absorbed;
+    left -= absorbed;
+  }
+  if (left <= 0) {
+    pop(target, "막힘", false);
+    return;
+  }
+  target.hp -= left;
+  target.flash = FLASH_MS;
+
+  // 전사는 맞을 때도 마나가 찬다.
+  // 측정해 보니 전사 스킬이 원거리의 3~6분의 1밖에 안 나갔다. 4번 때려야 하는데
+  // 걸어가는 시간까지 있어서다. TFT도 탱커에게 피격 마나를 주는데, 앞에서
+  // 두들겨 맞는 역할이 곧 마나 엔진이 되므로 정체성과도 맞는다.
+  if (target.breed.cls === "warrior") {
+    target.mana = Math.min(MANA_MAX, target.mana + MANA_ON_HIT_WARRIOR);
+  }
+  pop(target, String(left), crit);
+  if (target.hp <= 0) {
+    target.hp = 0;
+    target.alive = false;
+    target.pose = "sleep";
+    target.poseTimer = 0;
+  }
+}
+
+/**
+ * 스킬 발동. 마나가 가득 찬 순간 평타 대신 이것이 나간다.
+ *
+ * 결과 계산은 skills.ts가 하고 여기서는 적용과 연출만 한다. 그래야 브라우저와
+ * 헤드리스 시뮬이 같은 판정을 쓴다.
+ */
+function castSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): void {
+  const res = runSkill(caster, target, foes, allies);
+
+  caster.mana = res.manaRefund;
+  caster.castFlash = 700;
+  caster.pose = "wink";
+  caster.poseTimer = POSE_WINK_MS;
+
+  if (bursts.length > 12) bursts.shift();
+  bursts.push({
+    fx: caster.fx,
+    fy: caster.fy,
+    radius: caster.breed.kind === "melee" ? 1.6 : 0.9,
+    life: BURST_LIFE_MS,
+    ally: caster.side === "ally",
+  });
+
+  for (const s of res.shots) {
+    if (shots.length > 32) shots.shift();
+    shots.push({
+      fromX: caster.fx,
+      fromY: caster.fy,
+      toX: s.fx,
+      toY: s.fy,
+      life: SHOT_LIFE_MS,
+      ally: caster.side === "ally",
+    });
+  }
+
+  for (const h of res.hits) {
+    if (!h.target.alive) continue;
+    damage(h.target, caster.atk * h.mul, true);
+  }
+  for (const s of res.stuns) {
+    if (!s.target.alive) continue;
+    s.target.stun = Math.max(s.target.stun, s.ms);
+  }
+  for (const d of res.dots) {
+    if (!d.target.alive) continue;
+    d.target.dot = { dps: d.dps, remain: d.ms };
+  }
+}
+
 function attack(attacker: Cat, target: Cat): void {
   attacker.pose = "move";
   attacker.poseTimer = POSE_MOVE_MS;
@@ -111,21 +211,16 @@ function attack(attacker: Cat, target: Cat): void {
     });
   }
 
+  // 마나는 빗나가도 찬다. TFT도 on-attack 기준이다.
+  attacker.mana = Math.min(MANA_MAX, attacker.mana + attacker.breed.manaPerAttack);
+
   if (Math.random() < target.evade) {
-    pop(target, "회피", false);
+    pop(target, "빗나감", false);
     return;
   }
 
-  target.hp -= attacker.atk;
-  target.flash = FLASH_MS;
-  // 절대값으로 잡으면 웨이브 7쯤부터 모든 타격이 crit이 되어 강조가 무의미해진다.
-  pop(target, String(attacker.atk), attacker.atk >= target.maxHp * 0.35);
-
-  if (target.hp <= 0) {
-    target.hp = 0;
-    target.alive = false;
-    target.pose = "sleep";
-    target.poseTimer = 0;
+  damage(target, attacker.atk, attacker.atk >= target.maxHp * 0.35);
+  if (!target.alive) {
     attacker.pose = "wink";
     attacker.poseTimer = POSE_WINK_MS;
   }
@@ -177,9 +272,21 @@ function tickEffects(cats: (Cat | null)[], dt: number): void {
     if (!c) continue;
     if (c.flash > 0) c.flash = Math.max(0, c.flash - dt);
     if (c.lunge > 0) c.lunge = Math.max(0, c.lunge - dt / POSE_MOVE_MS);
+    if (c.castFlash > 0) c.castFlash = Math.max(0, c.castFlash - dt);
     if (!c.alive) {
       c.pose = "sleep";
+      c.dot = null;
+      c.stun = 0;
       continue;
+    }
+
+    if (c.stun > 0) c.stun = Math.max(0, c.stun - dt);
+    if (c.dot) {
+      // 지속 피해는 보호막을 무시하지 않는다. 평타와 같은 경로로 들어간다.
+      const slice = (c.dot.dps * Math.min(dt, c.dot.remain)) / 1000;
+      c.dot.remain -= dt;
+      if (slice > 0.5) damage(c, slice, false);
+      if (c.dot.remain <= 0) c.dot = null;
     }
     if (c.poseTimer > 0) {
       c.poseTimer -= dt;
@@ -208,6 +315,12 @@ export function stepBattle(state: RunState, dtMs: number): void {
     s.life -= dtMs;
     if (s.life <= 0) shots.splice(i, 1);
   }
+  for (let i = bursts.length - 1; i >= 0; i--) {
+    const b = bursts[i];
+    if (!b) continue;
+    b.life -= dtMs;
+    if (b.life <= 0) bursts.splice(i, 1);
+  }
 
   if (state.phase !== "battle") return;
 
@@ -235,6 +348,9 @@ export function stepBattle(state: RunState, dtMs: number): void {
 
     for (const cat of actors) {
       if (!cat.alive) continue;
+      // 기절·빙결 중에는 이동도 공격도 못 한다. 쿨다운도 멈춘다.
+      if (cat.stun > 0) continue;
+
       const enemies = cat.side === "ally" ? livingCats(state.enemy) : livingCats(state.ally);
       const target = pickTarget(cat, enemies, claimed);
       if (!target) break;
@@ -244,7 +360,13 @@ export function stepBattle(state: RunState, dtMs: number): void {
 
       if (fieldDistance(cat, target) <= cat.breed.range) {
         if (cat.cooldown <= 0) {
-          attack(cat, target);
+          // 마나가 가득 찼으면 평타 대신 스킬이 나간다.
+          if (cat.mana >= MANA_MAX) {
+            const own = cat.side === "ally" ? livingCats(state.ally) : livingCats(state.enemy);
+            castSkill(cat, target, enemies, own);
+          } else {
+            attack(cat, target);
+          }
           cat.cooldown += cat.atkInterval;
         }
       } else {

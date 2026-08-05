@@ -40,6 +40,17 @@ export const BALANCE = {
 
   /** 시작 고양이 수 */
   starterCount: 3,
+
+  /**
+   * 보유 한도 = min(unitCapMax, unitCapBase + floor(wave / unitCapEvery)).
+   *
+   * 보드가 5x5(25칸)가 되면서 칸 수로는 아무것도 제한되지 않는다. TFT가 레벨로
+   * 배치 수를 묶는 것과 같은 이유로 한도를 따로 둔다. 5x5는 칸이 늘어난 게
+   * 아니라 **배치 자유도**다.
+   */
+  unitCapBase: 3,
+  unitCapEvery: 2,
+  unitCapMax: 10,
 };
 
 export type Balance = typeof BALANCE;

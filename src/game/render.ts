@@ -1,10 +1,10 @@
-import { damagePops, POP_LIFE_MS, shots, SHOT_LIFE_MS } from "./battle.ts";
+import { bursts, BURST_LIFE_MS, damagePops, POP_LIFE_MS, shots, SHOT_LIFE_MS, skillName } from "./battle.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import { boardUnits, REROLL_COST, waveKind, waveKindInfo, type Offer, type RunState } from "./run.ts";
 import { bevelPanel, pixelText, roundRect, T, uiText } from "./theme.ts";
 import { effectLabel, synergyProgress, triggerLabel } from "../validate/synergy-schema.ts";
-import { BOARD_SIZE, livingCats, type Cat, type Side } from "./types.ts";
+import { BOARD_SIZE, CLASS_LABEL, livingCats, type Cat, type ClassKind, type Side } from "./types.ts";
 
 /**
  * 셀 대비 고양이 그리기 크기.
@@ -14,6 +14,22 @@ import { BOARD_SIZE, livingCats, type Cat, type Side } from "./types.ts";
 const CAT_SCALE = 0.66;
 
 /** 시너지 트리거마다 고유색. TFT가 특성별로 색을 나누는 것과 같은 이유 — 한눈에 구분되게. */
+/** 직업 색. 뱃지와 카드에서 같은 색을 쓴다. */
+const CLASS_COLOR: Record<ClassKind, string> = {
+  warrior: "#E8654A",
+  rogue: "#C97BD4",
+  archer: "#E8913C",
+  mage: "#6FB6DC",
+};
+
+/** 뱃지에 넣을 한 글자. 5x5에서는 셀이 작아 한 글자가 한계다. */
+const CLASS_CHAR: Record<ClassKind, string> = {
+  warrior: "전",
+  rogue: "도",
+  archer: "궁",
+  mage: "법",
+};
+
 const TRIGGER_COLOR: Record<string, string> = {
   same_color_3: "#E8913C",
   same_breed_2: "#C97BD4",
@@ -193,9 +209,23 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
   ctx.fillStyle = cat.side === "ally" ? T.ally : T.enemy;
   ctx.fill();
 
-  // 근접/원거리 뱃지. 작은 화면에서는 글자가 뭉개지므로 생략한다.
-  if (size >= 34) {
-    const ranged = cat.breed.kind === "ranged";
+  // 마나 바. 체력 바 바로 아래에 얇게. 가득 차면 스킬이 나간다.
+  const my = by + bh + 1.5;
+  const mh = Math.max(2, bh * 0.62);
+  const mfrac = Math.max(0, Math.min(1, cat.mana / cat.manaMax));
+  roundRect(ctx, { x: bx - 1, y: my - 1, w: bw + 2, h: mh + 2 }, (mh + 2) / 2);
+  ctx.fillStyle = "rgba(12,8,6,0.8)";
+  ctx.fill();
+  if (mfrac > 0) {
+    roundRect(ctx, { x: bx, y: my, w: Math.max(mh, bw * mfrac), h: mh }, mh / 2);
+    ctx.fillStyle = mfrac >= 1 ? T.gold : T.fish;
+    ctx.fill();
+  }
+
+  // 직업 뱃지
+  if (size >= 26) {
+    const cls = cat.breed.cls;
+    const hue = CLASS_COLOR[cls];
     const rad = size * 0.2;
     const bxc = cx + size * 0.44;
     const byc = cy - size * 0.44;
@@ -203,13 +233,45 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
     ctx.arc(bxc, byc, rad, 0, Math.PI * 2);
     ctx.fillStyle = T.inkDeep;
     ctx.fill();
-    ctx.strokeStyle = ranged ? T.ranged : T.melee;
+    ctx.strokeStyle = hue;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    uiText(ctx, ranged ? "원" : "근", bxc, byc + rad * 0.06, rad * 1.25, ranged ? T.ranged : T.melee, {
+    uiText(ctx, CLASS_CHAR[cls], bxc, byc + rad * 0.06, rad * 1.25, hue, {
       align: "center",
       weight: 800,
     });
+  }
+
+  // 상태이상 — 기절·빙결은 위에 고리, 지속 피해는 아래에 점
+  if (cat.stun > 0) {
+    ctx.save();
+    ctx.strokeStyle = T.ranged;
+    ctx.lineWidth = Math.max(1.5, size * 0.05);
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(cx, cy - size * 0.56, size * 0.16, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+  if (cat.dot) {
+    ctx.save();
+    ctx.fillStyle = T.melee;
+    ctx.beginPath();
+    ctx.arc(cx - bw / 2 - size * 0.09, by + bh / 2, Math.max(2, size * 0.055), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 스킬 시전 이름표
+  if (cat.castFlash > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, cat.castFlash / 400);
+    uiText(ctx, skillName(cat), cx, cy - size * 0.78, Math.max(10, size * 0.2), CLASS_COLOR[cat.breed.cls], {
+      align: "center",
+      weight: 800,
+      outline: true,
+    });
+    ctx.restore();
   }
 
   // 레벨은 픽셀 숫자로. 스프라이트 무늬에 묻히지 않게 뱃지 위에 얹는다.
@@ -225,6 +287,23 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
     ctx.lineWidth = 1.5;
     ctx.stroke();
     pixelText(ctx, String(cat.level), lx, ly, Math.max(1, rad * 0.24), T.gold, "center", false);
+  }
+}
+
+/** 스킬 발동 파문. 어디서 무엇이 터졌는지 한눈에 보이게 한다. */
+function drawBursts(ctx: CanvasRenderingContext2D, L: Layout): void {
+  for (const b of bursts) {
+    const t = 1 - b.life / BURST_LIFE_MS;
+    const { x, y } = fieldToScreen(L, b.fx, b.fy);
+    const pitch = L.cell + L.gap;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, 0.55 * (1 - t));
+    ctx.strokeStyle = b.ally ? T.gold : T.enemy;
+    ctx.lineWidth = Math.max(2, L.cell * 0.06);
+    ctx.beginPath();
+    ctx.arc(x, y, b.radius * pitch * (0.35 + t * 0.75), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -375,26 +454,25 @@ export function offerRects(L: Layout, count: number): Rect[] {
 function drawTeamStrip(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const r = L.offers;
   const cats = livingCats(s.ally);
-  const melee = cats.filter((c) => c.breed.kind === "melee").length;
-  const ranged = cats.length - melee;
-  const foes = livingCats(s.enemy).length;
+  const counts: Record<ClassKind, number> = { warrior: 0, rogue: 0, archer: 0, mage: 0 };
+  for (const c of cats) counts[c.breed.cls] += 1;
 
   const cap = Math.max(9, r.h * 0.17);
   const px = Math.max(2, Math.round(r.h * 0.048));
-  const cols = 3;
+  const order: ClassKind[] = ["warrior", "rogue", "archer", "mage"];
+  const cols = order.length + 1;
   const cw = r.w / cols;
 
-  const stat = (i: number, caption: string, value: string, color: string) => {
+  order.forEach((cls, i) => {
     const cx = r.x + cw * i + cw / 2;
-    uiText(ctx, caption, cx, r.y + r.h * 0.3, cap, T.muted, { align: "center", weight: 700 });
-    pixelText(ctx, value, cx, r.y + r.h * 0.66, px, color, "center", false);
-  };
+    uiText(ctx, CLASS_LABEL[cls], cx, r.y + r.h * 0.3, cap, T.muted, { align: "center", weight: 700 });
+    pixelText(ctx, String(counts[cls]), cx, r.y + r.h * 0.66, px, CLASS_COLOR[cls], "center", false);
+  });
 
-  stat(0, "근접", String(melee), T.melee);
-  stat(1, "원거리", String(ranged), T.ranged);
-  stat(2, "상대", String(foes), T.enemy);
+  const cx = r.x + cw * order.length + cw / 2;
+  uiText(ctx, "상대", cx, r.y + r.h * 0.3, cap, T.muted, { align: "center", weight: 700 });
+  pixelText(ctx, String(livingCats(s.enemy).length), cx, r.y + r.h * 0.66, px, T.enemy, "center", false);
 
-  // 칸 사이 얇은 구분선
   ctx.strokeStyle = "rgba(239,224,198,0.08)";
   ctx.lineWidth = 1;
   for (let i = 1; i < cols; i++) {
@@ -556,34 +634,42 @@ function drawSynergies(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
     ctx.lineWidth = on ? 2 : 1;
     ctx.stroke();
 
-    const padX = r.h * 0.26;
+    const padX = r.h * 0.22;
     const inner = cr.w - padX * 2;
-
-    // 왼쪽: 조건과 진행도. 오른쪽: 얻는 효과.
-    uiText(ctx, triggerLabel(syn.trigger), cr.x + padX, cr.y + r.h * 0.34, fs * 0.86, on ? hue : T.muted, {
-      align: "left",
-      weight: 700,
-      maxWidth: inner * 0.55,
-    });
-
-    const px = Math.max(1, r.h * 0.032);
+    const px = Math.max(1, r.h * 0.03);
     const prog = `${Math.min(have, need)}/${need}`;
-    pixelText(ctx, prog, cr.x + padX, cr.y + r.h * 0.72, px, on ? hue : T.muted, "left", false);
 
-    uiText(ctx, syn.name, cr.x + cr.w - padX, cr.y + r.h * 0.34, fs * 0.86, on ? T.text : T.muted, {
-      align: "right",
+    // 칩이 좁으면 좌우로 나눌 수 없다. 세로 화면에서 글자가 겹치던 문제.
+    const wide = cr.w > r.h * 6;
+
+    if (wide) {
+      uiText(ctx, triggerLabel(syn.trigger), cr.x + padX, cr.y + r.h * 0.34, fs * 0.86, on ? hue : T.muted, {
+        align: "left",
+        weight: 700,
+        maxWidth: inner * 0.52,
+      });
+      pixelText(ctx, prog, cr.x + padX, cr.y + r.h * 0.72, px, on ? hue : T.muted, "left", false);
+      uiText(ctx, syn.name, cr.x + cr.w - padX, cr.y + r.h * 0.34, fs * 0.86, on ? T.text : T.muted, {
+        align: "right",
+        weight: 800,
+        maxWidth: inner * 0.45,
+      });
+      uiText(ctx, effectLabel(syn.effect), cr.x + cr.w - padX, cr.y + r.h * 0.72, fs * 0.8,
+        on ? T.gold : "rgba(156,139,118,0.6)", { align: "right", weight: 600, maxWidth: inner * 0.55 });
+      return;
+    }
+
+    // 좁은 칩: 두 줄로 확실히 나눈다. 이름(장식)은 뺀다 — 플레이어에게 필요한 건
+    // 무엇을 해야 하는가지 시너지의 이름이 아니다.
+    // 윗줄: 조건과 진행도. 아랫줄: 얻는 효과.
+    uiText(ctx, triggerLabel(syn.trigger), cr.x + padX, cr.y + r.h * 0.32, fs * 0.86, on ? hue : T.muted, {
+      align: "left",
       weight: 800,
-      maxWidth: inner * 0.5,
+      maxWidth: inner * 0.68,
     });
-    uiText(
-      ctx,
-      effectLabel(syn.effect),
-      cr.x + cr.w - padX,
-      cr.y + r.h * 0.72,
-      fs * 0.8,
-      on ? T.gold : "rgba(156,139,118,0.6)",
-      { align: "right", weight: 600, maxWidth: inner * 0.6 },
-    );
+    pixelText(ctx, prog, cr.x + cr.w - padX, cr.y + r.h * 0.32, px, on ? hue : T.muted, "right", false);
+    uiText(ctx, effectLabel(syn.effect), cr.x + cr.w / 2, cr.y + r.h * 0.72, fs * 0.76,
+      on ? T.gold : "rgba(156,139,118,0.6)", { align: "center", weight: 600, maxWidth: inner });
   });
 }
 
@@ -720,6 +806,7 @@ export function render(
   drawList.sort((p, q) => p.y - q.y);
   for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed);
 
+  drawBursts(ctx, L);
   drawShots(ctx, L);
 
   // 드래그 중인 고양이는 손가락을 따라다닌다.

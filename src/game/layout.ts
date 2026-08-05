@@ -48,11 +48,17 @@ export function rectHas(r: Rect, x: number, y: number): boolean {
 export function computeLayout(w: number, h: number): Layout {
   const portrait = h > w * 1.05;
   const scale = Math.min(w / 900, h / 600);
-  const pad = Math.round(Math.min(w, h) * 0.03);
+  const pad = Math.round(Math.min(w, h) * (Math.min(w, h) < 420 ? 0.022 : 0.03));
 
-  const hudH = Math.round(Math.max(44, Math.min(w, h) * 0.09));
-  const barH = Math.round(Math.max(34, Math.min(w, h) * 0.07));
-  const btnH = Math.round(Math.max(46, Math.min(w, h) * 0.09));
+  // 보드가 5x5가 되면서 세로로 10줄이 필요하다. 작은 화면에서는 크롬 최소 높이를
+  // 낮춰 보드에 자리를 넘긴다. 버튼만은 손가락 크기 아래로 내리지 않는다.
+  const tight = Math.min(w, h) < 420;
+  const hudH = Math.round(Math.max(tight ? 34 : 44, Math.min(w, h) * 0.09));
+  // 시너지 칩은 폭이 좁으면 두 줄이 되므로 세로 화면에서만 바를 키운다.
+  // 가로에서는 칩이 넓어 한 줄로 들어가고, 짧은 가로 화면은 그 1px이 아쉽다.
+  const barFloor = portrait ? 34 : tight ? 26 : 34;
+  const barH = Math.round(Math.max(barFloor, Math.min(w, h) * 0.07));
+  const btnH = Math.round(Math.max(tight ? 42 : 46, Math.min(w, h) * 0.09));
 
   const hud: Rect = { x: pad, y: pad, w: w - pad * 2, h: hudH };
   const bottomY = h - pad - btnH;
@@ -69,11 +75,11 @@ export function computeLayout(w: number, h: number): Layout {
     h: barH,
   };
 
-  const noticeH = Math.round(Math.max(20, Math.min(w, h) * 0.045));
+  const noticeH = Math.round(Math.max(tight ? 13 : 20, Math.min(w, h) * 0.045));
   const notice: Rect = { x: pad, y: hud.y + hud.h, w: w - pad * 2, h: noticeH };
 
   // 보드 위 진영 라벨("우리 편"/"상대")이 안내 문구와 겹치지 않도록 자리를 뗀다.
-  const labelH = Math.round(Math.max(14, Math.min(w, h) * 0.032));
+  const labelH = Math.round(Math.max(tight ? 9 : 14, Math.min(w, h) * 0.032));
 
   /**
    * 보상 카드 영역.
@@ -81,7 +87,7 @@ export function computeLayout(w: number, h: number): Layout {
    * 높이를 cell이 아니라 min(w,h)에서 뽑는 이유: cell 계산이 이 값에 의존하므로
    * cell 기반으로 잡으면 순환이 생긴다. 아래 roomy 판정이 이 높이를 쓴다.
    */
-  const offersH = Math.round(Math.max(64, Math.min(w, h) * 0.135));
+  const offersH = Math.round(Math.max(tight ? 52 : 64, Math.min(w, h) * 0.135));
   const offers: Rect = {
     x: pad,
     y: synergyBar.y - pad * 0.6 - offersH,
@@ -114,7 +120,7 @@ export function computeLayout(w: number, h: number): Layout {
   const fieldH = Math.max(80, fieldBottom - fieldTop);
   const fieldW = w - pad * 2;
   /** 두 보드 사이 간격. 셀 사이 간격보다 훨씬 커야 진영이 구분된다. */
-  const midGap = Math.round(Math.min(w, h) * 0.09);
+  const midGap = Math.round(Math.min(w, h) * (Math.min(w, h) < 420 ? 0.05 : 0.09));
 
   let cell: number;
   let allyBoard: Rect;
@@ -215,10 +221,17 @@ export function cellRect(L: Layout, side: Side, index: number): Rect {
   return { x: x - L.cell / 2, y: y - L.cell / 2, w: L.cell, h: L.cell };
 }
 
-/** 좌표가 어느 셀 위인지. 보드 밖이면 -1. */
+/**
+ * 좌표가 어느 셀 위인지. 보드 밖이면 -1.
+ *
+ * 판정 영역을 셀 간격의 절반만큼 넓힌다. 5x5에서는 셀이 작아지는데, 눈에 보이는
+ * 사각형만 받으면 손가락으로 집기 어렵다. 칸끼리 맞닿게 만들어 빈틈을 없앤다.
+ */
 export function hitCell(L: Layout, side: Side, x: number, y: number): number {
+  const pad = L.gap / 2;
   for (let i = 0; i < BOARD_COLS * BOARD_ROWS; i++) {
-    if (rectHas(cellRect(L, side, i), x, y)) return i;
+    const r = cellRect(L, side, i);
+    if (rectHas({ x: r.x - pad, y: r.y - pad, w: r.w + pad * 2, h: r.h + pad * 2 }, x, y)) return i;
   }
   return -1;
 }

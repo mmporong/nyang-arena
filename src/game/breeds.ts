@@ -1,26 +1,67 @@
 import type { Breed } from "./types.ts";
 
 /**
- * 8/10 T1 빌드는 시트 #01~#08만 사용한다.
- * 색(color)은 시너지 트리거의 판정 기준이므로 스프라이트 외형과 반드시 일치해야 한다.
+ * 고양이 8마리 = 직업 4종 × 2마리. **같은 직업이라도 스킬은 서로 다르다.**
  *
- * 근접/원거리 설계:
- * - 아군 앞줄과 적 앞줄 사이는 2.5칸이다(types.ts의 FIELD_GAP).
- * - 원거리는 사거리 2.8~3.0이라 **제자리에서 바로 쏜다**. 대신 체력이 낮다.
- * - 근접은 사거리 0.8~0.9라 걸어가서 붙어야 한다. 이동 시간만큼 손해를 보는
- *   대신 체력이 높다. 그래서 근접을 앞줄에, 원거리를 뒷줄에 두는 배치가 생긴다.
+ * 마나: 공격할 때마다 manaPerAttack만큼 차고, 100이 되면 스킬을 쓰고 0으로 돌아간다.
+ * TFT가 역할마다 마나 획득량을 다르게 두는 것과 같은 이유로 직업별로 갈랐다 —
+ * 전사는 4번(25), 궁수·마법사는 3번(34), 도적은 2번(50)에 터진다.
+ * 도적이 자주 터지는 대신 한 방이 약하고, 전사는 드물게 터지는 대신 판을 뒤집는다.
  *
- * 스탯은 한 전투가 4~7초에 끝나도록 잡았다.
+ * 스탯 설계
+ * - 전사: 체력 최상, 공격 낮음. 앞에서 버틴다
+ * - 도적: 체력 낮음, 공격·속도 최상. 빨리 붙어 터뜨린다
+ * - 궁수: 중간 체력, 안정적인 물리 화력
+ * - 마법사: 체력 최하, 사거리 최장, 공격 느림. 스킬로 판을 흔든다
  */
 export const BREEDS: readonly Breed[] = [
-  { id: 1, name: "턱시도", color: "black", kind: "melee", hp: 120, atk: 22, atkInterval: 500, range: 0.8, moveSpeed: 1.7, cost: 3 },
-  { id: 2, name: "꿀밤이", color: "cream", kind: "ranged", hp: 85, atk: 20, atkInterval: 620, range: 2.8, moveSpeed: 1.0, cost: 3 },
-  { id: 3, name: "까망이", color: "black", kind: "melee", hp: 95, atk: 30, atkInterval: 460, range: 0.8, moveSpeed: 2.2, cost: 4 },
-  { id: 4, name: "줄줄이", color: "gray", kind: "melee", hp: 130, atk: 20, atkInterval: 520, range: 0.8, moveSpeed: 1.5, cost: 3 },
-  { id: 5, name: "하양이", color: "white", kind: "ranged", hp: 75, atk: 16, atkInterval: 420, range: 2.8, moveSpeed: 1.1, cost: 3 },
-  { id: 6, name: "삼색이", color: "calico", kind: "ranged", hp: 80, atk: 28, atkInterval: 700, range: 3.0, moveSpeed: 0.9, cost: 4 },
-  { id: 7, name: "몽실이", color: "gray", kind: "melee", hp: 170, atk: 15, atkInterval: 640, range: 0.9, moveSpeed: 1.2, cost: 4 },
-  { id: 8, name: "호랑이", color: "orange", kind: "melee", hp: 125, atk: 27, atkInterval: 540, range: 0.8, moveSpeed: 1.8, cost: 4 },
+  // ── 전사 ─────────────────────────────────────────────
+  {
+    id: 1, name: "턱시도", color: "black", cls: "warrior", kind: "melee",
+    hp: 150, atk: 20, atkInterval: 560, range: 0.8, moveSpeed: 1.7,
+    manaPerAttack: 28, skill: "whirlwind", cost: 3,
+  },
+  {
+    id: 7, name: "몽실이", color: "gray", cls: "warrior", kind: "melee",
+    hp: 190, atk: 16, atkInterval: 640, range: 0.9, moveSpeed: 1.4,
+    manaPerAttack: 28, skill: "shockwave", cost: 4,
+  },
+
+  // ── 도적 ─────────────────────────────────────────────
+  {
+    id: 3, name: "까망이", color: "black", cls: "rogue", kind: "melee",
+    hp: 95, atk: 32, atkInterval: 420, range: 0.8, moveSpeed: 2.4,
+    manaPerAttack: 50, skill: "shadow_strike", cost: 4,
+  },
+  {
+    id: 4, name: "줄줄이", color: "gray", cls: "rogue", kind: "melee",
+    hp: 110, atk: 22, atkInterval: 440, range: 0.8, moveSpeed: 2.1,
+    manaPerAttack: 50, skill: "flurry", cost: 3,
+  },
+
+  // ── 궁수 ─────────────────────────────────────────────
+  {
+    id: 8, name: "호랑이", color: "orange", cls: "archer", kind: "ranged",
+    hp: 105, atk: 26, atkInterval: 560, range: 2.8, moveSpeed: 1.2,
+    manaPerAttack: 34, skill: "pierce", cost: 4,
+  },
+  {
+    id: 6, name: "삼색이", color: "calico", cls: "archer", kind: "ranged",
+    hp: 100, atk: 22, atkInterval: 520, range: 2.8, moveSpeed: 1.2,
+    manaPerAttack: 34, skill: "multishot", cost: 4,
+  },
+
+  // ── 마법사 ───────────────────────────────────────────
+  {
+    id: 2, name: "꿀밤이", color: "cream", cls: "mage", kind: "ranged",
+    hp: 85, atk: 20, atkInterval: 700, range: 3.0, moveSpeed: 1.0,
+    manaPerAttack: 34, skill: "ember", cost: 4,
+  },
+  {
+    id: 5, name: "하양이", color: "white", cls: "mage", kind: "ranged",
+    hp: 80, atk: 17, atkInterval: 660, range: 2.9, moveSpeed: 1.0,
+    manaPerAttack: 34, skill: "frost_nova", cost: 4,
+  },
 ];
 
 export function breedById(id: number): Breed {
