@@ -428,8 +428,63 @@ function ricochet(attacker: Cat, target: Cat, foes: Cat[]): void {
   }
 }
 
+/**
+ * 회피 직후 이동 금지 시간.
+ *
+ * 이게 없으면 빼낸 고양이가 다음 틱부터 목표를 향해 걸어 돌아간다. 도적은
+ * 0.6초면 위험 구간에 다시 들어가므로, 회피가 회피가 아니게 된다.
+ */
+const DODGE_LOCK_MS = 1400;
+
+/** 한 스텝에 소비하는 의도 수와 큐 상한. 브라우저와 봇을 같은 규칙에 묶는다. */
+const PENDING_CAP = 4;
+
+/**
+ * 위험 구간 밖의 가장 가까운 자리를 찾는다.
+ *
+ * 각도와 거리를 고정 격자로 훑는다 — 난수를 쓰면 같은 시드에서도 회피 결과가
+ * 갈려 개입의 값을 잴 수 없다.
+ */
+function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | null {
+  const risky = (fx: number, fy: number) => zones.some((z) => inTelegraph(z, fx, fy));
+  if (!risky(cat.fx, cat.fy)) return null; // 안전하면 움직이지 않는다
+
+  for (let ring = 1; ring <= 7; ring++) {
+    const r = ring * 0.55;
+    for (let a = 0; a < 12; a++) {
+      const ang = (a / 12) * Math.PI * 2;
+      const fx = cat.fx + Math.cos(ang) * r;
+      const fy = cat.fy + Math.sin(ang) * r;
+      // 보드 밖으로 도망가지는 못한다. 피할 자리가 없으면 맞는 게 맞다.
+      if (fy < -0.3 || fy > BOARD_ROWS - 1 + 0.3 || fx < -0.3) continue;
+      if (!risky(fx, fy)) return { fx, fy };
+    }
+  }
+  return null;
+}
+
+/** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
+function doDodge(state: RunState): boolean {
+  const zones: Telegraph[] = [];
+  for (const e of state.enemy) if (e?.telegraph) zones.push(e.telegraph);
+  if (zones.length === 0) return false;
+
+  let moved = false;
+  for (const c of livingCats(state.ally)) {
+    const spot = safeSpot(c, zones);
+    if (!spot) continue;
+    c.fx = spot.fx;
+    c.fy = spot.fy;
+    c.moveLock = DODGE_LOCK_MS;
+    moved = true;
+    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color: "#F3E8D6" });
+  }
+  return moved;
+}
+
 /** 목표 쪽으로 이동. 사거리 바로 안쪽까지만 간다. */
 function stepToward(cat: Cat, target: Cat, stepMs: number): void {
+  if (cat.moveLock > 0) return; // 회피 직후에는 제자리를 지킨다
   const dx = target.fx - cat.fx;
   const dy = target.fy - cat.fy;
   const d = Math.hypot(dx, dy);
@@ -482,6 +537,7 @@ function separate(cats: Cat[]): void {
 function tickEffects(cats: (Cat | null)[], dt: number): void {
   for (const c of cats) {
     if (!c) continue;
+    if (c.moveLock > 0) c.moveLock = Math.max(0, c.moveLock - dt);
     if (c.flash > 0) c.flash = Math.max(0, c.flash - dt);
     if (c.lunge > 0) c.lunge = Math.max(0, c.lunge - dt / POSE_MOVE_MS);
     if (c.castFlash > 0) c.castFlash = Math.max(0, c.castFlash - dt);
@@ -730,6 +786,14 @@ export function stepBattle(state: RunState, dtMs: number): void {
     const step = Math.min(SIM_STEP_MS, remaining);
     remaining -= step;
     state.battleElapsed += step;
+
+    // 의도는 스텝당 하나만 소비한다. 브라우저(~17ms)와 시뮬(100ms)의 입력
+    // 해상도가 달라도 같은 규칙에 묶이도록.
+    if (state.pending.length > PENDING_CAP) state.pending.length = PENDING_CAP;
+    const intent = state.pending.shift();
+    if (intent?.kind === "dodge" && state.dodgeCharges > 0 && doDodge(state)) {
+      state.dodgeCharges -= 1;
+    }
 
     const allies = livingCats(state.ally);
     for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state.wave);

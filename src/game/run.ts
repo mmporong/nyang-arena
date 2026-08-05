@@ -3,6 +3,7 @@ import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import { BOSS_RADIUS, bossForWave } from "./bosses.ts";
 import {
+  type Intervention,
   BOARD_COLS,
   BOARD_ROWS,
   cellCol,
@@ -70,6 +71,16 @@ export interface RunState {
   lossReason: "wipe" | "timeout" | null;
   /** 이 런의 난수 시드. 재현이 필요할 때 이 값만 있으면 된다. */
   seed: number;
+  /**
+   * 아직 처리되지 않은 플레이어 개입. stepBattle이 스텝당 하나씩 소비한다.
+   *
+   * 스텝당 하나로 제한하는 이유: 브라우저는 프레임당(~17ms) 들어오고 시뮬은
+   * 100ms마다 돌므로, 제한이 없으면 봇이 한 틱에 무한히 밀어 넣어 사람과
+   * 전혀 다른 것을 재게 된다.
+   */
+  pending: Intervention[];
+  /** 남은 회피 횟수. 전투마다 초기화된다. */
+  dodgeCharges: number;
 }
 
 const BEST_KEY = "nyang-arena.best";
@@ -251,6 +262,7 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     radius: 0,
     telegraph: null,
     thresholdIdx: 0,
+    moveLock: 0,
     side,
     cell,
     fx,
@@ -316,6 +328,8 @@ export function newRun(seed?: number): RunState {
     recordBroken: false,
     lossReason: null,
     seed: runSeed,
+    pending: [],
+    dodgeCharges: 0,
   };
 
   // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
@@ -684,8 +698,12 @@ export function startBattle(state: RunState): void {
       c.castFlash = 0;
       c.comboTarget = null;
       c.combo = 0;
+      c.moveLock = 0;
     }
   }
+  // 개입 상태는 전투마다 초기화한다. 남아 있으면 다음 전투 첫 틱에 한꺼번에 터진다.
+  state.pending.length = 0;
+  state.dodgeCharges = waveKind(state.wave) === "boss" ? BALANCE.dodgeCharges : 0;
   state.battleElapsed = 0;
   state.phase = "battle";
   state.notice = "";

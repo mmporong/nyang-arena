@@ -94,8 +94,16 @@ export const BALANCE = {
    * 자리조차 없는데, 후반과 같은 비율을 맞으면 p25가 5로 무너진다.
    * 첫 보스는 기믹을 **가르치는** 자리이지 죽이는 자리가 아니다.
    */
-  telegraphDmgFirst: 0.10,
-  telegraphDmg: 0.34,
+  /**
+ * 보스전 한 판에 쓸 수 있는 회피 횟수.
+ *
+ * 체력 문턱 수(6)와 같게 뒀다. 완벽하게 하면 전부 피할 수 있고, 놓친 만큼
+ * 정확히 벌받는다 — 실력이 결과에 그대로 반영되는 형태다. 3회였을 때는
+ * 절반이 어차피 맞아서 개입 격차가 +8.7%p에 머물렀다.
+ */
+  dodgeCharges: 6,
+  telegraphDmgFirst: 0.135,
+  telegraphDmg: 0.45,
 };
 
 export type Balance = typeof BALANCE;

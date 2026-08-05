@@ -18,6 +18,21 @@ let state: RunState = newRun();
 const drag: DragState = { active: false, fromCell: -1, x: 0, y: 0, pointerId: -1 };
 let hoverCell = -1;
 
+/**
+ * 페이즈가 바뀐 시각. 전환 직후 짧게 입력을 잠근다.
+ *
+ * 전멸이나 보스 처치는 stepBattle 루프 **안에서** 일어나므로, 회피를 연타하던
+ * 손가락의 다음 탭이 이미 gameover가 된 화면에 도착한다. 그러면 그 탭이
+ * newRun()을 불러 도달 웨이브 화면을 보기도 전에 런이 사라지고, 보스 처치
+ * 직후라면 1.5배 보상 상점을 통째로 건너뛴다.
+ *
+ * 히트테스트를 페이즈로 분기해도 못 막는다 — 탭이 도착한 시점에는 이미
+ * 페이즈가 바뀌어 있다. 시간으로 막아야 한다.
+ */
+let phaseChangedAt = 0;
+let lastPhase: RunState["phase"] = state.phase;
+const PHASE_LOCK_MS = 350;
+
 function cancelDrag(): void {
   drag.active = false;
   drag.fromCell = -1;
@@ -83,7 +98,15 @@ canvas.addEventListener("pointerdown", (e) => {
   }
   const { x, y } = pointerPos(e);
 
+  // 페이즈가 막 바뀌었으면 이 탭은 이전 화면을 향한 것이다. 버린다.
+  if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
+
   if (rectHas(layout.button, x, y)) {
+    // 보스전 중에는 기본 버튼 자리가 회피 버튼이다.
+    if (state.phase === "battle") {
+      if (state.dodgeCharges > 0) state.pending.push({ kind: "dodge" });
+      return;
+    }
     onPrimaryAction();
     return;
   }
@@ -150,6 +173,10 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 let last = 0;
 function frame(now: number): void {
+  if (state.phase !== lastPhase) {
+    lastPhase = state.phase;
+    phaseChangedAt = now;
+  }
   const dt = last === 0 ? 16 : Math.min(100, now - last);
   last = now;
   stepBattle(state, dt);

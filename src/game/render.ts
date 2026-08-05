@@ -1394,7 +1394,9 @@ export function buttonText(s: RunState): string {
     case "prepare":
       return "전투 시작";
     case "battle":
-      return "전투 중";
+      // 보스전에는 이 자리가 회피 버튼이다. 전투 중 죽어 있던 공간을 재사용하므로
+      // 세로 레이아웃 예산이 늘지 않는다.
+      return s.dodgeCharges > 0 ? `회피  ${s.dodgeCharges}` : "전투 중";
     case "reward":
       // 1웨이브 상점은 전투 뒤가 아니라 전투 앞이다. "다음 웨이브"라고 하면 거짓말이 된다.
       return s.wave === 1 ? "배치하러 가기" : "다음 웨이브";
@@ -1409,7 +1411,8 @@ function drawButton(
   s: RunState,
 ): void {
   const r = L.button;
-  const idle = s.phase === "battle";
+  // 회피가 남아 있으면 누를 수 있는 버튼이므로 죽은 색으로 그리지 않는다.
+  const idle = s.phase === "battle" && s.dodgeCharges <= 0;
   const face = idle ? "rgba(239,224,198,0.07)" : T.action;
   const edge = idle ? "rgba(0,0,0,0.3)" : "#A85E1E";
 

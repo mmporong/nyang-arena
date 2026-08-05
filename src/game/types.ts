@@ -4,6 +4,15 @@ export type CatColor = "black" | "cream" | "gray" | "white" | "calico" | "orange
 
 export type Side = "ally" | "enemy";
 
+/**
+ * 플레이어가 전투 중에 넣는 의도.
+ *
+ * 버튼이 상태를 직접 만지지 않고 큐에 넣기만 하는 이유: 브라우저와 헤드리스
+ * 시뮬이 **같은 함수**를 통과해야 개입의 값을 잴 수 있다. 판정은 전부
+ * stepBattle 안에서 일어난다.
+ */
+export type Intervention = { kind: "dodge" };
+
 /** 보스 광역기의 예고 모양. 터지기 전에 화면에 그려진다. */
 export type TelegraphShape = "circle" | "line" | "cone";
 
@@ -135,6 +144,13 @@ export interface Cat {
   telegraph: Telegraph | null;
   /** 다음에 발동할 체력 문턱의 인덱스. 보스만 쓴다. */
   thresholdIdx: number;
+  /**
+   * 남은 이동 금지 시간(ms).
+   *
+   * 회피로 빼낸 고양이가 다음 틱에 곧바로 목표를 향해 걸어 돌아가면 회피가
+   * 무의미해진다. 도적은 0.6초면 위험 구간에 다시 들어간다.
+   */
+  moveLock: number;
   side: Side;
   /** 보드 셀 인덱스 0..8, 보드 밖(벤치)이면 -1 */
   cell: number;
