@@ -18,7 +18,8 @@
     "decisions": "node --experimental-strip-types scripts/decision-space.mjs",
     "placement": "node --experimental-strip-types scripts/placement-space.mjs",
     "intervention": "node --experimental-strip-types scripts/intervention-space.mjs",
-    "dodge:test": "node --experimental-strip-types scripts/dodge-test.mjs"
+    "dodge:test": "node --experimental-strip-types scripts/dodge-test.mjs",
+    "trace": "node --experimental-strip-types scripts/run-trace.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",
