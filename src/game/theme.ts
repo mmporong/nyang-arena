@@ -165,6 +165,59 @@ export function uiText(
   if (tracking !== undefined) ctx.letterSpacing = "0px";
 }
 
+/**
+ * 정해진 폭에 맞춰 줄을 나눈다. 카드 설명처럼 길이를 미리 알 수 없는 글에 쓴다.
+ *
+ * 한국어는 어절 단위로 끊는다. 한 어절이 통째로 넘치거나 줄 수가 모자라면
+ * 말줄임으로 끝낸다 — 잘린 글이 잘린 줄 모르게 두는 것보다 낫다.
+ */
+export function wrapLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  size: number,
+  weight: number,
+  maxWidth: number,
+  maxLines: number,
+): string[] {
+  ctx.font = `${weight} ${Math.round(size)}px ${STACK}`;
+  const fits = (s: string) => ctx.measureText(s).width <= maxWidth;
+
+  /** 폭을 넘는 줄을 말줄임으로 줄인다. 마지막 줄만이 아니라 어느 줄이든 넘칠 수 있다. */
+  const clip = (s: string) => {
+    if (fits(s)) return s;
+    let out = s;
+    while (out.length > 1 && !fits(`${out}…`)) out = out.slice(0, -1);
+    return `${out}…`;
+  };
+
+  const lines: string[] = [];
+  let cur = "";
+  let dropped = false;
+
+  for (const word of text.split(" ").filter(Boolean)) {
+    const next = cur ? `${cur} ${word}` : word;
+    if (!cur || fits(next)) {
+      cur = next;
+      continue;
+    }
+    if (lines.length + 1 >= maxLines) {
+      dropped = true;
+      break;
+    }
+    lines.push(clip(cur));
+    cur = word;
+  }
+  if (cur) lines.push(cur);
+
+  const last = lines.length - 1;
+  if (last >= 0 && (dropped || !fits(lines[last]!))) {
+    let s = lines[last]!;
+    while (s.length > 1 && !fits(`${s}…`)) s = s.slice(0, -1);
+    lines[last] = `${s}…`;
+  }
+  return lines;
+}
+
 /* ------------------------------------------------------------------ */
 /* 도형                                                                 */
 /* ------------------------------------------------------------------ */

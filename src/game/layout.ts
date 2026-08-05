@@ -7,6 +7,12 @@ import {
   type Side,
 } from "./types.ts";
 
+/** 카드 폭 상한과 세로 비율. 넓은 화면에서 카드가 현수막처럼 늘어나는 걸 막는다. */
+const CARD_MAX_W = 192;
+const CARD_ASPECT = 1.28;
+/** 슬롯은 늘 세 칸. run.ts의 OFFER_SLOTS와 같은 값이어야 한다(레이아웃→런 의존을 안 만들려고 여기 둔다). */
+const OFFER_SLOTS = 3;
+
 export interface Rect {
   x: number;
   y: number;
@@ -31,6 +37,9 @@ export interface Layout {
   synergyBar: Rect;
   button: Rect;
   offers: Rect;
+  /** 보상 단계의 카드 영역. offers 위로 자라며 보드를 덮는다. */
+  offerCards: Rect;
+  offerGap: number;
   /** 카드 뒤 패널. 카드보다 위아래로 더 뻗는다. */
   offersPanel: Rect;
   /** 보드가 카드 패널 위로 올라가 항상 보이는지. false면 보상 단계가 모달이다. */
@@ -103,6 +112,42 @@ export function computeLayout(w: number, h: number): Layout {
     h: offersH + offersPadding * 2.6,
   };
 
+  /**
+   * 실제 카드가 그려지는 자리.
+   *
+   * offers는 준비 단계의 팀 요약 띠이자 카드의 아래쪽 기준선이고, offerCards는
+   * 보상 단계에서만 쓰는 카드 영역이다. 카드가 카드로 보이려면 폭을 제한하고
+   * 세로로 세워야 하는데, 그 높이를 보드 예산에 넣으면 보드가 절반이 된다.
+   * 그래서 위로만 자라게 하고 보상 단계에는 보드를 덮는다 — 그동안 보드는
+   * 어차피 만질 수 없다(main.ts canRearrange는 prepare 단계에서만 참).
+   */
+  const cardGap = Math.max(6, Math.round(Math.min(w, h) * 0.016));
+  const cardW = Math.min(CARD_MAX_W, (offers.w - cardGap * (OFFER_SLOTS - 1)) / OFFER_SLOTS);
+  const offersBottom = offers.y + offers.h;
+  /**
+   * 위로 쓸 수 있는 높이. 안내 문구 아래까지만 쓰고, 그중 HEAD_BAND는 카드 머리줄
+   * (안내 한 줄 + 다시 뽑기 버튼) 몫으로 뗀다. 이걸 빼먹으면 좁은 화면에서
+   * 다시 뽑기 버튼이 안내 문구 위로 올라타 글자가 겹친다.
+   */
+  const HEAD_BAND = 46;
+  const ceilH = offersBottom - (notice.y + notice.h) - HEAD_BAND;
+
+  let offerCards: Rect;
+  if (ceilH >= cardW * 0.9) {
+    // 카드를 세울 수 있다. 폭을 제한하고 가운데로 모은다.
+    const cardH = Math.min(cardW * CARD_ASPECT, ceilH);
+    const rowW = cardW * OFFER_SLOTS + cardGap * (OFFER_SLOTS - 1);
+    offerCards = {
+      x: Math.round(w / 2 - rowW / 2),
+      y: Math.round(offersBottom - cardH),
+      w: Math.round(rowW),
+      h: Math.round(cardH),
+    };
+  } else {
+    // 세울 높이가 없으면 눕힌다. 이때는 폭을 다 써야 이름·능력·설명이 들어간다.
+    offerCards = { ...offers };
+  }
+
   const fieldTop = notice.y + notice.h + labelH;
 
   /**
@@ -165,6 +210,8 @@ export function computeLayout(w: number, h: number): Layout {
     synergyBar,
     button,
     offers,
+    offerCards,
+    offerGap: cardGap,
     offersPanel,
     roomy,
   };

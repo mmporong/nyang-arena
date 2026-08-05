@@ -1,10 +1,28 @@
-import { damagePops, fxs, POP_LIFE_MS, shake, shots, SHOT_LIFE_MS, skillName } from "./battle.ts";
+import { damagePops, fxs, POP_LIFE_MS, shots, SHOT_LIFE_MS, skillName } from "./battle.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
-import { boardUnits, OFFER_SLOTS, REROLL_COST, waveKind, waveKindInfo, type Offer, type RunState } from "./run.ts";
-import { bevelPanel, pixelText, roundRect, T, uiText } from "./theme.ts";
+import {
+  boardUnits,
+  OFFER_SLOTS,
+  REROLL_COST,
+  unitCap,
+  waveKind,
+  waveKindInfo,
+  type Offer,
+  type RunState,
+} from "./run.ts";
+import { bevelPanel, pixelText, roundRect, T, uiText, wrapLines } from "./theme.ts";
 import { effectLabel, synergyProgress, triggerLabel } from "../validate/synergy-schema.ts";
-import { BOARD_SIZE, CLASS_LABEL, livingCats, type Cat, type ClassKind, type Side } from "./types.ts";
+import { PASSIVES, SKILLS } from "./skills.ts";
+import {
+  BOARD_SIZE,
+  CLASS_LABEL,
+  livingCats,
+  type Cat,
+  type ClassKind,
+  type Pose,
+  type Side,
+} from "./types.ts";
 
 /**
  * 셀 대비 고양이 그리기 크기.
@@ -518,23 +536,19 @@ function drawDivider(ctx: CanvasRenderingContext2D, L: Layout): void {
 /* 하단: 팀 상태 / 보상 카드                                            */
 /* ------------------------------------------------------------------ */
 
-/** 다시 뽑기 버튼. 카드 패널 머리줄 오른쪽 끝에 둔다. */
+/** 다시 뽑기 버튼. 카드 머리줄 오른쪽 끝에 둔다. */
 export function rerollRect(L: Layout): Rect {
-  const h = Math.max(22, L.offers.h * 0.26);
-  const w = Math.max(84, L.offers.w * 0.19);
-  return {
-    x: L.offers.x + L.offers.w - w,
-    y: L.offers.y - h - L.offers.h * 0.08,
-    w,
-    h,
-  };
+  const r = L.offerCards;
+  const h = Math.max(24, Math.min(34, r.h * 0.13));
+  const w = Math.max(88, r.w * 0.28);
+  return { x: r.x + r.w - w, y: r.y - h - h * 0.34, w, h };
 }
 
 /** 슬롯은 늘 세 칸. 하나를 사도 남은 카드가 넓어지지 않는다. */
 export function offerRects(L: Layout, count: number = OFFER_SLOTS): Rect[] {
-  const r = L.offers;
+  const r = L.offerCards;
   const n = Math.max(1, count);
-  const gap = r.w * 0.022;
+  const gap = L.offerGap;
   const cw = (r.w - gap * (n - 1)) / n;
   return Array.from({ length: count }, (_, i) => ({ x: r.x + i * (cw + gap), y: r.y, w: cw, h: r.h }));
 }
@@ -576,17 +590,99 @@ function drawTeamStrip(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
   }
 }
 
+/** #RRGGBB → rgba(). 팔레트가 hex라 투명도를 얹으려면 한 번 풀어야 한다. */
+function hexA(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+/**
+ * 카드 위 고양이는 살아 있어야 한다 — 위아래로 조금 흔들리고 가끔 눈을 깜빡인다.
+ * 위상을 품종마다 어긋나게 준다. 셋이 동시에 깜빡이면 살아 있는 게 아니라 기계로 보인다.
+ */
+function cardIdle(seed: number, t: number): { pose: Pose; bob: number } {
+  const cycle = 2600 + (seed % 5) * 260;
+  const p = (t + seed * 430) % cycle;
+  return { pose: p < 170 ? "wink" : "idle", bob: Math.sin((t + seed * 700) / 540) };
+}
+
+/** 초상 자리. 직업색으로 은은하게 물들이고 그 안에 고양이를 세운다. */
+function drawPortraitWell(
+  ctx: CanvasRenderingContext2D,
+  well: Rect,
+  breedId: number,
+  seed: number,
+  accent: string,
+  afford: boolean,
+  t: number,
+): void {
+  // 크기가 0 이하로 들어오면 createRadialGradient가 던지고, 그 예외가 rAF 루프를
+  // 끊어 화면이 영구히 굳는다. 안 그리는 편이 낫다.
+  if (well.w <= 0 || well.h <= 0) return;
+
+  const rad = Math.min(well.w, well.h) * 0.16;
+  roundRect(ctx, well, rad);
+  ctx.fillStyle = "rgba(12,8,6,0.5)";
+  ctx.fill();
+
+  ctx.save();
+  roundRect(ctx, well, rad);
+  ctx.clip();
+  const cx = well.x + well.w / 2;
+  const cy = well.y + well.h * 0.5;
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, well.w * 0.62);
+  glow.addColorStop(0, hexA(accent, afford ? 0.3 : 0.1));
+  glow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(well.x, well.y, well.w, well.h);
+
+  const { pose, bob } = cardIdle(seed, t);
+  const img = spriteFor(breedId, pose);
+  // 0.86인 이유: 흔들림 폭(±sz*0.05)까지 우물 안에 들어와야 발이 잘리지 않는다.
+  const sz = Math.min(well.w, well.h) * 0.86;
+  if (img) {
+    ctx.globalAlpha = afford ? 1 : 0.45;
+    ctx.drawImage(img, cx - sz / 2, cy - sz / 2 + bob * sz * 0.05, sz, sz);
+  }
+  ctx.restore();
+
+  roundRect(ctx, well, rad);
+  ctx.strokeStyle = afford ? hexA(accent, 0.42) : "rgba(239,224,198,0.10)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+/** 값은 카드 모서리의 동그란 뱃지로. 어느 카드가 얼마인지 훑어보기 좋다. */
+function drawCostBadge(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  cost: number,
+  afford: boolean,
+): void {
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(18,12,10,0.94)";
+  ctx.fill();
+  ctx.strokeStyle = afford ? T.fish : "rgba(239,224,198,0.16)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  pixelText(ctx, String(cost), cx, cy, Math.max(1, r * 0.26), afford ? T.fish : T.muted, "center", false);
+}
+
 function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const rects = offerRects(L);
-  const fs = Math.max(11, L.offers.h * 0.19);
+  const t = performance.now();
 
   s.offers.forEach((o: Offer | null, i) => {
     const cr = rects[i];
     if (!cr) return;
+    const rad = Math.min(cr.w, cr.h) * 0.13;
 
     // 산 자리는 비워 둔다. 카드가 사라지면서 남은 것이 넓어지면 손이 헛나간다.
     if (!o) {
-      roundRect(ctx, cr, cr.h * 0.16);
+      roundRect(ctx, cr, rad);
       ctx.fillStyle = "rgba(239,224,198,0.02)";
       ctx.fill();
       ctx.setLineDash([4, 5]);
@@ -594,12 +690,13 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.setLineDash([]);
-      uiText(ctx, "샀음", cr.x + cr.w / 2, cr.y + cr.h / 2, fs * 0.85, "rgba(156,139,118,0.55)", {
+      uiText(ctx, "샀음", cr.x + cr.w / 2, cr.y + cr.h / 2, Math.max(11, cr.w * 0.1), "rgba(156,139,118,0.55)", {
         align: "center",
         weight: 600,
       });
       return;
     }
+
     const afford = s.gold >= o.cost;
     // 영입·교체는 그 고양이의 직업색으로. 카드만 봐도 무엇이 오는지 알 수 있다.
     const accent = o.kind === "upgrade" ? T.gold : CLASS_COLOR[o.breed.cls];
@@ -607,82 +704,161 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
     bevelPanel(
       ctx,
       cr,
-      cr.h * 0.16,
+      rad,
       afford ? "rgba(239,224,198,0.10)" : "rgba(239,224,198,0.035)",
       afford ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.25)",
       3,
     );
-    roundRect(ctx, cr, cr.h * 0.16);
+    roundRect(ctx, cr, rad);
     ctx.strokeStyle = afford ? accent : "rgba(239,224,198,0.12)";
     ctx.lineWidth = afford ? 2 : 1;
     ctx.stroke();
 
-    // 강화 카드도 대상 고양이를 그린다. 예전에는 breed가 없어서 보드가 꽉 차는
-    // 순간부터 카드에서 고양이가 통째로 사라졌다.
-    const sz = cr.h * 0.44;
-    const img = spriteFor(o.breed.id, o.kind === "upgrade" ? "wink" : "idle");
-    const left = cr.x + cr.w * 0.06;
-    if (img) {
-      ctx.save();
-      if (!afford) ctx.globalAlpha = 0.45;
-      ctx.drawImage(img, left, cr.y + cr.h / 2 - sz / 2, sz, sz);
-      ctx.restore();
+    // 무엇을 하는 고양이인지 사기 전에 보여준다.
+    const skill = o.breed.skill ? SKILLS[o.breed.skill] : null;
+    const passive = o.breed.passive ? PASSIVES[o.breed.passive] : null;
+    const abilityName = skill?.name ?? passive?.name ?? "";
+    const abilityDesc = skill?.desc ?? passive?.desc ?? "";
+    const abilityLine = `${o.sublabel} · ${skill ? "" : "패시브 "}${abilityName}`;
+    // 짧은 변에서 뽑는다. 폭에서만 뽑으면 넓고 낮은 카드에서 여백이 높이를
+    // 잡아먹어 우물 크기가 음수가 되고, 그래디언트가 던져 rAF 루프가 죽는다.
+    const pad = Math.max(5, Math.min(cr.w, cr.h) * 0.07);
+
+    // 세로 카드가 기본. 초상이 위, 글이 아래.
+    if (cr.h >= cr.w * 0.9) {
+      const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: cr.w - pad * 2, h: cr.h * 0.42 };
+      drawPortraitWell(ctx, well, o.breed.id, o.breed.id * 7 + i, accent, afford, t);
+      const br = Math.max(12, cr.w * 0.105);
+      drawCostBadge(ctx, cr.x + cr.w - pad - br * 0.9, cr.y + pad + br * 0.9, br, o.cost, afford);
+
+      const fsName = Math.max(12, Math.min(22, cr.w * 0.115));
+      const fsAbil = fsName * 0.78;
+      const fsDesc = Math.max(10, fsName * 0.66);
+      const cx = cr.x + cr.w / 2;
+      const tw = cr.w - pad * 2;
+
+      let ty = well.y + well.h + Math.max(9, cr.h * 0.05) + fsName * 0.5;
+      uiText(ctx, o.label, cx, ty, fsName, afford ? T.text : T.muted, {
+        align: "center",
+        weight: 800,
+        maxWidth: tw,
+      });
+      ty += fsName * 0.52 + fsAbil * 0.72;
+      uiText(ctx, abilityLine, cx, ty, fsAbil, afford ? accent : T.muted, {
+        align: "center",
+        weight: 700,
+        maxWidth: tw,
+      });
+      ty += fsAbil * 0.6 + fsDesc * 0.9;
+
+      // 설명은 남은 자리만큼만. 카드 밖으로 새면 옆 카드와 겹쳐 읽힌다.
+      const room = cr.y + cr.h - pad - ty;
+      const lineH = fsDesc * 1.3;
+      const maxLines = Math.max(1, Math.min(3, Math.floor((room + fsDesc * 0.65) / lineH)));
+      for (const line of wrapLines(ctx, abilityDesc, fsDesc, 500, tw, maxLines)) {
+        uiText(ctx, line, cx, ty, fsDesc, afford ? T.paperDim : T.muted, { align: "center", weight: 500 });
+        ty += lineH;
+      }
+      return;
     }
 
-    const textX = left + sz + cr.w * 0.05;
-    const textW = cr.x + cr.w - cr.w * 0.06 - textX;
+    // 카드를 세울 높이가 안 나오는 화면에서는 눕힌다. 초상 왼쪽, 글 오른쪽.
+    const side = cr.h - pad * 2;
+    const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: side, h: side };
+    drawPortraitWell(ctx, well, o.breed.id, o.breed.id * 7 + i, accent, afford, t);
 
-    uiText(ctx, o.label, textX, cr.y + cr.h * 0.34, fs, afford ? T.text : T.muted, {
+    const br = Math.max(11, cr.h * 0.17);
+    const fs = Math.max(11, cr.h * 0.19);
+    const textX = well.x + well.w + pad;
+    const textW = cr.x + cr.w - pad - br * 2.1 - textX;
+    const roomy = cr.h >= 84;
+
+    uiText(ctx, o.label, textX, cr.y + cr.h * (roomy ? 0.26 : 0.34), fs, afford ? T.text : T.muted, {
       align: "left",
       weight: 800,
       maxWidth: textW,
     });
-    uiText(ctx, o.sublabel, textX, cr.y + cr.h * 0.58, fs * 0.76, afford ? accent : T.muted, {
+    uiText(ctx, abilityLine, textX, cr.y + cr.h * (roomy ? 0.48 : 0.58), fs * 0.74, afford ? accent : T.muted, {
       align: "left",
-      weight: 600,
+      weight: 700,
       maxWidth: textW,
     });
-
-    const px = Math.max(1, cr.h * 0.03);
-    pixelText(
-      ctx,
-      String(o.cost),
-      cr.x + cr.w - cr.w * 0.06,
-      cr.y + cr.h * 0.8,
-      px,
-      afford ? T.fish : T.muted,
-      "right",
-      false,
-    );
+    if (roomy) {
+      uiText(ctx, abilityDesc, textX, cr.y + cr.h * 0.68, fs * 0.68, afford ? T.paperDim : T.muted, {
+        align: "left",
+        weight: 500,
+        maxWidth: textW,
+      });
+    }
+    drawCostBadge(ctx, cr.x + cr.w - pad - br, cr.y + cr.h / 2, br, o.cost, afford);
   });
+}
+
+/**
+ * 카드 머리줄 문구.
+ *
+ * 보유/한도를 먼저 보여주는 이유: 만석이면 영입 카드가 아예 안 나오는데, 그 이유가
+ * 화면 어디에도 없으면 "왜 새 고양이가 안 뜨지"로 읽힌다.
+ */
+function offerHeadline(s: RunState): string {
+  const owned = livingCats(s.ally).length;
+  const cap = unitCap(s.wave);
+  const team = `우리 편 ${owned}/${cap}`;
+
+  if (s.offers.every((o) => o === null)) {
+    return `${team} · 다 샀다 — 배치를 다듬고 ${s.wave === 1 ? "시작하자" : "다음 웨이브로"}`;
+  }
+  if (owned >= cap) return `${team} · 자리가 없다. 강화하거나 바꿔 넣자`;
+  if (s.wave === 1) return `${team} · 쓰고 시작해도, 그냥 시작해도 된다`;
+  return `${team} · 생선을 쓰거나, 그냥 다음 웨이브로`;
 }
 
 function drawBottomZone(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const reward = s.phase === "reward";
+  const rr = rerollRect(L);
 
-  if (reward && !L.roomy) {
-    ctx.fillStyle = "rgba(12,8,6,0.55)";
+  // 보상 단계에는 카드가 보드 위로 자란다. 그동안 보드는 어차피 만질 수 없으므로
+  // (main.ts canRearrange) 덮어도 되지만, 덮는다는 걸 눈에 보이게 해야 한다.
+  const panel: Rect = reward
+    ? { x: 0, y: rr.y - rr.h * 0.7, w: L.w, h: L.offersPanel.y + L.offersPanel.h - (rr.y - rr.h * 0.7) }
+    : L.offersPanel;
+
+  if (reward) {
+    ctx.fillStyle = "rgba(12,8,6,0.62)";
     ctx.fillRect(0, 0, L.w, L.h);
   }
 
-  const panel = L.offersPanel;
   ctx.fillStyle = reward ? "rgba(20,14,11,0.96)" : "rgba(20,14,11,0.55)";
   ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
-  ctx.strokeStyle = "rgba(239,224,198,0.09)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, panel.y + 0.5);
-  ctx.lineTo(L.w, panel.y + 0.5);
-  ctx.stroke();
 
   if (reward) {
-    const headY = panel.y + (L.offers.y - panel.y) * 0.5;
-    uiText(ctx, "생선을 쓰거나, 그냥 다음 웨이브로", L.offers.x, headY, Math.max(10, L.offers.h * 0.16), T.muted, {
-      align: "left",
-      weight: 600,
-    });
+    // 보드 한가운데를 직선으로 자르면 고양이가 반토막 나 보인다. 위로 흘려 보낸다.
+    const fade = Math.min(64, panel.h * 0.24);
+    const g = ctx.createLinearGradient(0, panel.y - fade, 0, panel.y);
+    g.addColorStop(0, "rgba(20,14,11,0)");
+    g.addColorStop(1, "rgba(20,14,11,0.96)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, panel.y - fade, L.w, fade);
+  } else {
+    ctx.strokeStyle = "rgba(239,224,198,0.09)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, panel.y + 0.5);
+    ctx.lineTo(L.w, panel.y + 0.5);
+    ctx.stroke();
+  }
 
-    const rr = rerollRect(L);
+  if (reward) {
+    uiText(
+      ctx,
+      offerHeadline(s),
+      L.offerCards.x,
+      rr.y + rr.h / 2,
+      Math.max(10, Math.min(15, rr.h * 0.46)),
+      T.muted,
+      { align: "left", weight: 600 },
+    );
+
     const canRoll = s.gold >= REROLL_COST;
     roundRect(ctx, rr, rr.h * 0.5);
     ctx.fillStyle = canRoll ? "rgba(111,182,220,0.14)" : "rgba(239,224,198,0.04)";
@@ -790,7 +966,8 @@ export function buttonText(s: RunState): string {
     case "battle":
       return "전투 중";
     case "reward":
-      return "다음 웨이브";
+      // 1웨이브 상점은 전투 뒤가 아니라 전투 앞이다. "다음 웨이브"라고 하면 거짓말이 된다.
+      return s.wave === 1 ? "배치하러 가기" : "다음 웨이브";
     case "gameover":
       return "다시 도전";
   }
@@ -889,20 +1066,10 @@ export function render(
   drag: DragState,
   hoverCell: number,
 ): void {
-  // 큰 스킬이 터지면 화면이 잠깐 흔들린다. 전장만 흔들고 UI는 고정한다.
-  const shakeT = shake.life > 0 ? shake.life / shake.maxLife : 0;
-  const sx = shakeT > 0 ? (Math.random() - 0.5) * shake.amount * shakeT : 0;
-  const sy = shakeT > 0 ? (Math.random() - 0.5) * shake.amount * shakeT : 0;
-
   drawBackground(ctx, L);
-  ctx.save();
-  ctx.translate(sx, sy);
   drawArena(ctx, L);
-  ctx.restore();
   drawHud(ctx, L, s);
 
-  ctx.save();
-  ctx.translate(sx, sy);
   drawDivider(ctx, L);
   drawSideLabels(ctx, L);
   drawBoard(ctx, L, "ally", T.ally, hoverCell);
@@ -943,8 +1110,6 @@ export function render(
   }
 
   drawPops(ctx, L);
-  ctx.restore();
-
   drawBottomZone(ctx, L, s);
   drawSynergies(ctx, L, s);
   drawButton(ctx, L, s);
