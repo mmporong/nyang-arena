@@ -38,7 +38,7 @@
     "id": "stringy",
     "name": "문자열 수치",
     "desc": "value가 숫자가 아님",
-    "trigger": "all_different_5",
+    "trigger": "back_ranged_2",
     "effect": { "key": "atk_mul", "value": "아주 높음" }
   },
   {

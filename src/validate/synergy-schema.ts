@@ -10,7 +10,18 @@
  */
 import type { CatColor } from "../game/types.ts";
 
-export const TRIGGERS = ["same_color_3", "same_breed_2", "all_different_5"] as const;
+/**
+ * 시너지 조건.
+ *
+ * 넷 다 **동시에 성립할 수 있어야 한다.** 예전에는 all_different_5(전부 다른 색 5)가
+ * 있었는데, 색이 전부 달라야 하므로 same_color_3·same_breed_2와 수학적으로 배타였다.
+ * 그런데 UI는 셋을 나란히 놓아 다 모으라는 것처럼 보여줬다. 게다가 그 조건이 켜진
+ * 상태에서 중복 색을 영입하면 팀 전력이 영구히 깎이는 함정이기도 했다.
+ *
+ * front/back 조건은 배치를 요구한다. 구성(무엇을 사는가)과 배치(어디에 놓는가)가
+ * 따로 놀지 않게 하려는 것이다.
+ */
+export const TRIGGERS = ["same_color_3", "same_breed_2", "front_melee_2", "back_ranged_2"] as const;
 export type Trigger = (typeof TRIGGERS)[number];
 
 export const EFFECT_KEYS = ["atk_mul", "hp_mul", "evade_add", "atkspd_mul"] as const;
@@ -144,28 +155,86 @@ export const PRESET_SYNERGIES: readonly SynergyRule[] = [
     effect: { key: "hp_mul", value: 1.3 },
   },
   {
-    id: "motley_crew",
-    name: "잡색 부대",
-    desc: "전부 다른 색 5마리가 어수선하게 흩어진다",
-    trigger: "all_different_5",
-    effect: { key: "evade_add", value: 0.18 },
+    id: "vanguard",
+    name: "선봉",
+    desc: "앞줄에 선 근접들이 발을 굳게 딛는다",
+    trigger: "front_melee_2",
+    effect: { key: "hp_mul", value: 1.25 },
+  },
+  {
+    id: "covering_fire",
+    name: "엄호 사격",
+    desc: "뒤에 선 원거리가 침착하게 조준한다",
+    trigger: "back_ranged_2",
+    effect: { key: "atk_mul", value: 1.3 },
   },
 ];
 
-/** 활성 시너지 판정: 아군 보드 구성이 트리거 조건을 만족하는지. */
-export function isTriggered(trigger: Trigger, colors: CatColor[], breedIds: number[]): boolean {
+/** 판정에 필요한 아군 한 마리의 정보. Cat 전체를 끌어오지 않으려고 최소 형태만 받는다. */
+export interface BoardUnit {
+  color: CatColor;
+  breedId: number;
+  kind: "melee" | "ranged";
+  /** 열 인덱스. 0이 뒷줄, 2가 앞줄(적에게 가까운 쪽) */
+  col: number;
+}
+
+const FRONT_COL = 2;
+const BACK_COL = 0;
+
+/**
+ * 조건 달성도. "몇 개 중 몇 개"를 그대로 화면에 띄우기 위해 불리언이 아니라 수치를 낸다.
+ * 조건만 보여주고 진행도를 감추면 플레이어가 무엇을 더 해야 하는지 알 수 없다.
+ */
+export function synergyProgress(trigger: Trigger, units: BoardUnit[]): { have: number; need: number } {
   switch (trigger) {
     case "same_color_3": {
-      const count = new Map<string, number>();
-      for (const c of colors) count.set(c, (count.get(c) ?? 0) + 1);
-      return [...count.values()].some((n) => n >= 3);
+      const m = new Map<string, number>();
+      for (const u of units) m.set(u.color, (m.get(u.color) ?? 0) + 1);
+      return { have: Math.max(0, ...m.values()), need: 3 };
     }
     case "same_breed_2": {
-      const count = new Map<number, number>();
-      for (const b of breedIds) count.set(b, (count.get(b) ?? 0) + 1);
-      return [...count.values()].some((n) => n >= 2);
+      const m = new Map<number, number>();
+      for (const u of units) m.set(u.breedId, (m.get(u.breedId) ?? 0) + 1);
+      return { have: Math.max(0, ...m.values()), need: 2 };
     }
-    case "all_different_5":
-      return colors.length >= 5 && new Set(colors).size === colors.length;
+    case "front_melee_2":
+      return { have: units.filter((u) => u.col === FRONT_COL && u.kind === "melee").length, need: 2 };
+    case "back_ranged_2":
+      return { have: units.filter((u) => u.col === BACK_COL && u.kind === "ranged").length, need: 2 };
+  }
+}
+
+export function isTriggered(trigger: Trigger, units: BoardUnit[]): boolean {
+  const { have, need } = synergyProgress(trigger, units);
+  return have >= need;
+}
+
+/** 화면에 띄울 조건 문구. */
+export function triggerLabel(trigger: Trigger): string {
+  switch (trigger) {
+    case "same_color_3":
+      return "같은 색";
+    case "same_breed_2":
+      return "같은 품종";
+    case "front_melee_2":
+      return "앞줄 근접";
+    case "back_ranged_2":
+      return "뒷줄 원거리";
+  }
+}
+
+/** 효과를 사람 말로. 무엇을 얻는지 안 보여주면 목표를 쫓을 이유가 없다. */
+export function effectLabel(effect: SynergyRule["effect"]): string {
+  const pct = Math.round((effect.value - 1) * 100);
+  switch (effect.key) {
+    case "atk_mul":
+      return `공격력 +${pct}%`;
+    case "hp_mul":
+      return `체력 +${pct}%`;
+    case "atkspd_mul":
+      return `공격 속도 +${pct}%`;
+    case "evade_add":
+      return `회피 +${Math.round(effect.value * 100)}%`;
   }
 }

@@ -1,8 +1,9 @@
 import { damagePops, POP_LIFE_MS, shots, SHOT_LIFE_MS } from "./battle.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
-import type { Offer, RunState } from "./run.ts";
+import { boardUnits, type Offer, type RunState } from "./run.ts";
 import { bevelPanel, pixelText, pixelTextWidth, roundRect, T, uiText } from "./theme.ts";
+import { effectLabel, synergyProgress, triggerLabel } from "../validate/synergy-schema.ts";
 import { BOARD_SIZE, livingCats, type Cat, type Side } from "./types.ts";
 
 /**
@@ -16,7 +17,8 @@ const CAT_SCALE = 0.66;
 const TRIGGER_COLOR: Record<string, string> = {
   same_color_3: "#E8913C",
   same_breed_2: "#C97BD4",
-  all_different_5: "#6FB6DC",
+  front_melee_2: "#E8654A",
+  back_ranged_2: "#6FB6DC",
 };
 
 export interface DragState {
@@ -489,56 +491,62 @@ function drawBottomZone(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
 /* 시너지 · 버튼 · 안내                                                  */
 /* ------------------------------------------------------------------ */
 
-function triggerText(t: string): string {
-  switch (t) {
-    case "same_color_3":
-      return "같은 색 3";
-    case "same_breed_2":
-      return "같은 품종 2";
-    case "all_different_5":
-      return "전부 다른 색 5";
-    default:
-      return t;
-  }
-}
-
+/**
+ * 시너지 칩 — 조건, 진행도, 효과를 한 칩에 다 보여준다.
+ *
+ * 예전에는 조건만 띄웠다. 무엇을 얻는지도, 얼마나 왔는지도 안 보여주니
+ * 화면 아래 목표 세 줄이 무슨 뜻인지 알 수 없었다.
+ * 네 조건은 전부 동시에 만족할 수 있으므로 셋 다 켜는 것이 실제 목표가 된다.
+ */
 function drawSynergies(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const r = L.synergyBar;
   const n = Math.max(1, s.synergies.length);
   const gap = r.w * 0.016;
   const cw = (r.w - gap * (n - 1)) / n;
-  const fs = Math.max(10, r.h * 0.29);
+  const units = boardUnits(s);
+  const fs = Math.max(10, r.h * 0.27);
 
   s.synergies.forEach((syn, i) => {
     const on = s.activeSynergyIds.has(syn.id);
     const hue = TRIGGER_COLOR[syn.trigger] ?? T.gold;
+    const { have, need } = synergyProgress(syn.trigger, units);
     const cr: Rect = { x: r.x + i * (cw + gap), y: r.y, w: cw, h: r.h };
 
-    roundRect(ctx, cr, r.h * 0.24);
-    ctx.fillStyle = on ? "rgba(240,186,74,0.14)" : "rgba(239,224,198,0.035)";
+    roundRect(ctx, cr, r.h * 0.22);
+    ctx.fillStyle = on ? "rgba(240,186,74,0.13)" : "rgba(239,224,198,0.035)";
     ctx.fill();
     ctx.strokeStyle = on ? hue : "rgba(239,224,198,0.10)";
     ctx.lineWidth = on ? 2 : 1;
     ctx.stroke();
 
-    // 켜진 시너지는 왼쪽에 색 막대를 세워 목록에서 즉시 튀게 한다.
-    if (on) {
-      roundRect(ctx, { x: cr.x + r.h * 0.16, y: cr.y + r.h * 0.24, w: 3, h: r.h * 0.52 }, 2);
-      ctx.fillStyle = hue;
-      ctx.fill();
-    }
+    const padX = r.h * 0.26;
+    const inner = cr.w - padX * 2;
 
-    const inner = cr.w * 0.86;
-    uiText(ctx, syn.name, cr.x + cr.w / 2, cr.y + r.h * 0.35, fs, on ? T.text : T.muted, {
-      align: "center",
+    // 왼쪽: 조건과 진행도. 오른쪽: 얻는 효과.
+    uiText(ctx, triggerLabel(syn.trigger), cr.x + padX, cr.y + r.h * 0.34, fs * 0.86, on ? hue : T.muted, {
+      align: "left",
+      weight: 700,
+      maxWidth: inner * 0.55,
+    });
+
+    const px = Math.max(1, r.h * 0.032);
+    const prog = `${Math.min(have, need)}/${need}`;
+    pixelText(ctx, prog, cr.x + padX, cr.y + r.h * 0.72, px, on ? hue : T.muted, "left", false);
+
+    uiText(ctx, syn.name, cr.x + cr.w - padX, cr.y + r.h * 0.34, fs * 0.86, on ? T.text : T.muted, {
+      align: "right",
       weight: 800,
-      maxWidth: inner,
+      maxWidth: inner * 0.5,
     });
-    uiText(ctx, triggerText(syn.trigger), cr.x + cr.w / 2, cr.y + r.h * 0.71, fs * 0.8, on ? hue : T.muted, {
-      align: "center",
-      weight: 600,
-      maxWidth: inner,
-    });
+    uiText(
+      ctx,
+      effectLabel(syn.effect),
+      cr.x + cr.w - padX,
+      cr.y + r.h * 0.72,
+      fs * 0.8,
+      on ? T.gold : "rgba(156,139,118,0.6)",
+      { align: "right", weight: 600, maxWidth: inner * 0.6 },
+    );
   });
 }
 

@@ -2,19 +2,20 @@ import { BALANCE } from "./balance.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import {
   BOARD_SIZE,
+  cellCol,
   cellToField,
   emptyBoard,
   livingCats,
   type Board,
   type Breed,
   type Cat,
-  type CatColor,
   type Side,
 } from "./types.ts";
 import {
   isTriggered,
   PRESET_SYNERGIES,
   validateAll,
+  type BoardUnit,
   type SynergyRule,
 } from "../validate/synergy-schema.ts";
 // import attribute를 붙여야 Vite와 Node 양쪽에서 같은 모듈이 로드된다.
@@ -104,12 +105,22 @@ function pickSynergies(pool: SynergyRule[]): SynergyRule[] {
     list.push(r);
     byTrigger.set(r.trigger, list);
   }
+  // 트리거가 4종이고 한 판에 3개만 쓰므로, 그룹 순서를 섞어야 판마다 다른 조합이 나온다.
+  const groups = [...byTrigger.values()].sort(() => Math.random() - 0.5);
   const out: SynergyRule[] = [];
-  for (const list of byTrigger.values()) {
-    const pick = list[Math.floor(Math.random() * list.length)];
-    if (pick) out.push(pick);
+  const usedEffects = new Set<string>();
+
+  for (const list of groups) {
+    if (out.length >= SYNERGIES_PER_RUN) break;
+    const shuffled = [...list].sort(() => Math.random() - 0.5);
+    // 효과까지 겹치면 세 목표가 전부 "공격 속도"인 판이 나와 선택의 맛이 사라진다.
+    // 아직 안 쓴 효과를 우선하고, 없으면 아무거나 쓴다.
+    const pick = shuffled.find((r) => !usedEffects.has(r.effect.key)) ?? shuffled[0];
+    if (!pick) continue;
+    usedEffects.add(pick.effect.key);
+    out.push(pick);
   }
-  return out.slice(0, SYNERGIES_PER_RUN);
+  return out;
 }
 
 export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat {
@@ -173,11 +184,17 @@ export function newRun(): RunState {
     lossReason: null,
   };
 
-  // 시작 3마리를 가운데 줄에 세운다. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
-  const starters = [BREEDS[0], BREEDS[3], BREEDS[7]].slice(0, BALANCE.starterCount);
+  // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
+  // 근접 둘과 원거리 하나를 섞어서 두 종류를 처음부터 보여준다.
+  // 전부 근접으로 시작하면 '뒷줄 원거리' 목표가 1웨이브부터 달성 불가로 보인다.
+  // 가운데 줄에 앞·중간·뒤로 하나씩 세운다. 근접이 앞, 원거리가 뒤라는 형태를
+  // 보여주되 배치 목표는 한 칸씩 모자라게 둔다(앞줄 근접 1/2, 뒷줄 원거리 1/2).
+  // 목표가 처음부터 달성돼 있으면 플레이어가 할 일이 없다.
+  const starters = [BREEDS[0], BREEDS[3], BREEDS[1]].slice(0, BALANCE.starterCount);
+  const startCells = [5, 4, 3];
   starters.forEach((b, i) => {
     if (!b) return;
-    const cell = 3 + i;
+    const cell = startCells[i] ?? 3 + i;
     state.ally[cell] = makeCat(b, "ally", cell);
   });
 
@@ -209,13 +226,22 @@ export function buildEnemyWave(state: RunState): void {
 }
 
 /** 아군 보드 구성으로 활성 시너지를 판정하고 스탯에 반영한다. */
+/** 시너지 판정용 보드 스냅샷. 배치(열)까지 포함해야 앞줄/뒷줄 조건을 볼 수 있다. */
+export function boardUnits(state: RunState): BoardUnit[] {
+  return livingCats(state.ally).map((c) => ({
+    color: c.breed.color,
+    breedId: c.breed.id,
+    kind: c.breed.kind,
+    col: cellCol(c.cell),
+  }));
+}
+
 export function applySynergies(state: RunState): void {
   const cats = livingCats(state.ally);
-  const colors: CatColor[] = cats.map((c) => c.breed.color);
-  const breedIds = cats.map((c) => c.breed.id);
+  const units = boardUnits(state);
 
   state.activeSynergyIds = new Set(
-    state.synergies.filter((s) => isTriggered(s.trigger, colors, breedIds)).map((s) => s.id),
+    state.synergies.filter((s) => isTriggered(s.trigger, units)).map((s) => s.id),
   );
 
   for (const cat of cats) {
@@ -263,19 +289,9 @@ export function rollOffers(state: RunState): void {
   const hasFreeSlot = state.ally.some((c) => c === null);
 
   if (hasFreeSlot) {
-    /**
-     * all_different_5가 켜져 있을 때 이미 보드에 있는 색을 영입하면 시너지가
-     * 즉시 꺼지는데, 고양이를 파는 수단이 없어 되돌릴 수 없다.
-     * (실측: rainbow_roar 활성 5마리에서 중복 색 1마리 영입 → 팀 공격력 31% 영구 상실)
-     * 그래서 시너지를 깨지 않는 색만 제시한다. 낼 게 없으면 강화로만 채워진다.
-     */
-    const allDifferentOn = state.synergies.some(
-      (s) => s.trigger === "all_different_5" && state.activeSynergyIds.has(s.id),
-    );
-    const ownedColors = new Set(owned.map((c) => c.breed.color));
-    const eligible = allDifferentOn ? BREEDS.filter((b) => !ownedColors.has(b.color)) : [...BREEDS];
-
-    const pool = eligible.sort(() => Math.random() - 0.5).slice(0, 2);
+    // 조건이 전부 "모으면 좋은" 방향이라, 영입이 시너지를 깨뜨리는 경우가 없다.
+    // (예전 all_different_5는 반대라서 영입 후보를 걸러내야 했다)
+    const pool = [...BREEDS].sort(() => Math.random() - 0.5).slice(0, 2);
     for (const b of pool) {
       offers.push({ kind: "recruit", cost: b.cost, breed: b, label: `${b.name} 영입` });
     }
