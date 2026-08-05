@@ -102,8 +102,8 @@ export const BALANCE = {
  * 절반이 어차피 맞아서 개입 격차가 +8.7%p에 머물렀다.
  */
   dodgeCharges: 6,
-  telegraphDmgFirst: 0.135,
-  telegraphDmg: 0.45,
+  telegraphDmgFirst: 0.17,
+  telegraphDmg: 0.58,
 };
 
 export type Balance = typeof BALANCE;

@@ -587,7 +587,17 @@ export function rollOffers(state: RunState): void {
     // 무작위로 고르면 레벨 높은 애가 후보로 떠서 카드를 아예 안 누르게 된다.
     const weakest = [...owned].sort((a, b) => a.level - b.level || (a.uid < b.uid ? -1 : 1))[0];
     if (weakest) {
-      for (const b of pool.filter((x) => x.id !== weakest.breed.id).slice(0, 2)) {
+      // **교체는 한 장만.**
+      //
+      // 예전에는 만석일 때 교체 두 장 + 강화 한 장이 나왔다. 교체는 시너지
+      // 적합도를 모르면 순손실이라 대부분 안 누르는 카드인데, 그게 후반 오퍼의
+      // 절반을 차지해서 살 것이 없어졌다. 그동안 수입은 웨이브에 비례해 3배로
+      // 늘어나니 생선이 남을 수밖에 없었다(측정: 후반 오퍼의 53%가 교체).
+      //
+      // 강화는 비용이 지수라(레벨 5면 17.7, 레벨 7이면 37) 후반 수입을 자연히
+      // 흡수한다. 만석 이후의 주력은 강화이고 교체는 갈아타기 선택지로 남긴다.
+      const b = pool.find((x) => x.id !== weakest.breed.id);
+      if (b) {
         offers.push({
           kind: "replace",
           cost: b.cost,
