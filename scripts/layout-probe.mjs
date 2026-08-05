@@ -36,9 +36,9 @@ for (const [name, w, h] of DEVICES) {
   const panel = L.offersPanel;
 
   let worst = 0;
-  for (const board of [L.allyBoard, L.enemyBoard]) {
+  for (const side of ["ally", "enemy"]) {
     for (let i = 0; i < BOARD_SIZE; i++) {
-      const cr = cellRect(board, L.cell, L.gap, i);
+      const cr = cellRect(L, side, i);
       worst = Math.max(worst, overlapArea(cr, panel) / (cr.w * cr.h));
     }
   }

@@ -108,7 +108,7 @@ canvas.addEventListener("pointerdown", (e) => {
   // 그러지 않으면 두 번째 손가락이 fromCell을 덮어써서, 첫 손가락을 뗄 때
   // 엉뚱한 고양이가 엉뚱한 칸으로 옮겨진다(핀치줌 시도 시 실제로 발생).
   if (drag.active) return;
-  const cell = hitCell(layout.allyBoard, layout.cell, layout.gap, x, y);
+  const cell = hitCell(layout, "ally", x, y);
   if (cell >= 0 && state.ally[cell]) {
     drag.active = true;
     drag.fromCell = cell;
@@ -125,13 +125,13 @@ canvas.addEventListener("pointermove", (e) => {
     drag.x = x;
     drag.y = y;
   }
-  hoverCell = canRearrange() ? hitCell(layout.allyBoard, layout.cell, layout.gap, x, y) : -1;
+  hoverCell = canRearrange() ? hitCell(layout, "ally", x, y) : -1;
 });
 
 function endDrag(e: PointerEvent): void {
   if (!drag.active || e.pointerId !== drag.pointerId) return;
   const { x, y } = pointerPos(e);
-  const to = hitCell(layout.allyBoard, layout.cell, layout.gap, x, y);
+  const to = hitCell(layout, "ally", x, y);
   if (to >= 0) moveCat(state, drag.fromCell, to);
   cancelDrag();
 }

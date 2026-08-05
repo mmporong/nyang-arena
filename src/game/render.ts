@@ -1,8 +1,8 @@
-import { damagePops, POP_LIFE_MS } from "./battle.ts";
-import { cellRect, type Layout, type Rect } from "./layout.ts";
+import { damagePops, POP_LIFE_MS, shots, SHOT_LIFE_MS } from "./battle.ts";
+import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import type { Offer, RunState } from "./run.ts";
-import { BOARD_SIZE, type Cat } from "./types.ts";
+import { BOARD_SIZE, type Cat, type Side } from "./types.ts";
 
 const C = {
   bg0: "#191527",
@@ -15,6 +15,8 @@ const C = {
   enemy: "#f2798d",
   gold: "#f5c451",
   on: "#ffd76e",
+  melee: "#ffb27d",
+  ranged: "#8fd0ff",
 } as const;
 
 export interface DragState {
@@ -78,12 +80,12 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
 function drawBoard(
   ctx: CanvasRenderingContext2D,
   L: Layout,
-  board: Rect,
+  side: Side,
   accent: string,
   highlightCell: number,
 ): void {
   for (let i = 0; i < BOARD_SIZE; i++) {
-    const cr = cellRect(board, L.cell, L.gap, i);
+    const cr = cellRect(L, side, i);
     roundRect(ctx, cr, L.cell * 0.14);
     ctx.fillStyle = i === highlightCell ? "rgba(255,255,255,0.14)" : C.panel;
     ctx.fill();
@@ -93,24 +95,19 @@ function drawBoard(
   }
 }
 
-/** 공격 돌진 방향. 가로면 상대 보드 쪽 x, 세로면 상대 보드 쪽 y. */
-function lungeOffset(L: Layout, cat: Cat, amount: number): { dx: number; dy: number } {
-  const dist = L.cell * 0.22 * amount;
-  if (L.portrait) return { dx: 0, dy: cat.side === "ally" ? -dist : dist };
-  return { dx: cat.side === "ally" ? dist : -dist, dy: 0 };
-}
+/**
+ * 고양이 하나. 전투 중에는 셀이 아니라 전장 좌표에 그린다.
+ *
+ * 돌진 연출은 화면 좌표가 아니라 **전장 좌표에서** fx를 살짝 밀어 계산한다.
+ * 그래야 가로/세로 어느 방향이든 "적 쪽으로 들이받는" 방향이 저절로 맞는다.
+ */
+function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boolean): void {
+  const dir = cat.side === "ally" ? 1 : -1;
+  const { x: cx, y: cy } = fieldToScreen(L, cat.fx + dir * 0.22 * cat.lunge, cat.fy);
 
-function drawCat(
-  ctx: CanvasRenderingContext2D,
-  L: Layout,
-  cat: Cat,
-  cr: Rect,
-  dimmed: boolean,
-): void {
-  const { dx, dy } = lungeOffset(L, cat, cat.lunge);
   const size = L.cell * 0.88;
-  const x = cr.x + (L.cell - size) / 2 + dx;
-  const y = cr.y + (L.cell - size) / 2 + dy - L.cell * 0.04;
+  const x = cx - size / 2;
+  const y = cy - size / 2 - L.cell * 0.04;
 
   ctx.save();
   if (!cat.alive) ctx.globalAlpha = 0.4;
@@ -134,8 +131,8 @@ function drawCat(
   // 체력 바
   const bw = L.cell * 0.72;
   const bh = Math.max(4, L.cell * 0.06);
-  const bx = cr.x + (L.cell - bw) / 2;
-  const by = cr.y + L.cell - bh - L.cell * 0.03;
+  const bx = cx - bw / 2;
+  const by = cy + L.cell / 2 - bh - L.cell * 0.03;
   const frac = Math.max(0, Math.min(1, cat.hp / cat.maxHp));
 
   roundRect(ctx, { x: bx, y: by, w: bw, h: bh }, bh / 2);
@@ -145,23 +142,77 @@ function drawCat(
   ctx.fillStyle = cat.side === "ally" ? C.ally : C.enemy;
   ctx.fill();
 
-  if (cat.level > 1) {
-    label(ctx, `Lv${cat.level}`, cr.x + L.cell * 0.06, cr.y + L.cell * 0.12, L.cell * 0.15, C.on, "left", 700);
+  // 근접/원거리 뱃지. 작은 화면에서는 글자가 뭉개지므로 생략한다.
+  if (L.cell >= 46) {
+    const ranged = cat.breed.kind === "ranged";
+    const r = L.cell * 0.13;
+    const bxc = cx + L.cell * 0.31;
+    const byc = cy - L.cell * 0.31;
+    ctx.beginPath();
+    ctx.arc(bxc, byc, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(12,10,20,0.88)";
+    ctx.fill();
+    ctx.strokeStyle = ranged ? C.ranged : C.melee;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    label(ctx, ranged ? "원" : "근", bxc, byc + r * 0.05, r * 1.25, ranged ? C.ranged : C.melee, "center", 800);
+  }
+
+  // 레벨도 뱃지로. 글자만 얹으면 스프라이트 무늬에 묻혀 안 읽힌다.
+  if (cat.level > 1 && L.cell >= 40) {
+    const r = L.cell * 0.13;
+    const lx = cx - L.cell * 0.31;
+    const ly = cy - L.cell * 0.31;
+    ctx.beginPath();
+    ctx.arc(lx, ly, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(12,10,20,0.88)";
+    ctx.fill();
+    ctx.strokeStyle = C.on;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    label(ctx, String(cat.level), lx, ly + r * 0.05, r * 1.3, C.on, "center", 800);
+  }
+}
+
+/** 원거리 공격 투사체. 피해는 이미 적용됐고 이건 순수 연출이다. */
+function drawShots(ctx: CanvasRenderingContext2D, L: Layout): void {
+  for (const s of shots) {
+    const t = 1 - s.life / SHOT_LIFE_MS;
+    const fx = s.fromX + (s.toX - s.fromX) * t;
+    const fy = s.fromY + (s.toY - s.fromY) * t;
+    const { x, y } = fieldToScreen(L, fx, fy);
+    const r = Math.max(2.5, L.cell * 0.055);
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = s.ally ? C.ally : C.enemy;
+    ctx.fill();
+    // 짧은 꼬리
+    const back = fieldToScreen(L, fx - (s.toX - s.fromX) * 0.12, fy - (s.toY - s.fromY) * 0.12);
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = s.ally ? C.ally : C.enemy;
+    ctx.lineWidth = r * 1.1;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(back.x, back.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
 function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
   for (const p of damagePops) {
-    const board = p.side === "ally" ? L.allyBoard : L.enemyBoard;
-    const cr = cellRect(board, L.cell, L.gap, p.cell);
+    const { x, y } = fieldToScreen(L, p.fx, p.fy);
     const t = 1 - p.life / POP_LIFE_MS;
     ctx.save();
     ctx.globalAlpha = Math.max(0, 1 - t * t);
     label(
       ctx,
       p.text,
-      cr.x + L.cell / 2 + p.jitter * L.cell,
-      cr.y + L.cell * 0.34 - t * L.cell * 0.4,
+      x + p.jitter * L.cell,
+      y - L.cell * 0.16 - t * L.cell * 0.4,
       L.cell * (p.crit ? 0.26 : 0.2),
       p.text === "회피" ? C.muted : p.crit ? C.gold : "#ffffff",
       "center",
@@ -256,11 +307,22 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
 
     if (o.breed) {
       const img = spriteFor(o.breed.id, "wink");
-      const sz = cr.h * 0.62;
-      if (img) ctx.drawImage(img, cr.x + cr.w / 2 - sz / 2, cr.y + cr.h * 0.06, sz, sz);
+      const sz = cr.h * 0.52;
+      if (img) ctx.drawImage(img, cr.x + cr.w / 2 - sz / 2, cr.y + cr.h * 0.04, sz, sz);
     }
-    label(ctx, o.label, cr.x + cr.w / 2, cr.y + cr.h * 0.78, fs, afford ? C.text : C.muted, "center", 700, cr.w * 0.92);
-    label(ctx, `🐟 ${o.cost}`, cr.x + cr.w / 2, cr.y + cr.h * 0.94, fs * 0.85, afford ? C.gold : C.muted, "center");
+    label(ctx, o.label, cr.x + cr.w / 2, cr.y + cr.h * 0.72, fs * 0.95, afford ? C.text : C.muted, "center", 700, cr.w * 0.92);
+    const kindText = o.breed ? (o.breed.kind === "ranged" ? "원거리 · " : "근접 · ") : "";
+    label(
+      ctx,
+      `${kindText}🐟 ${o.cost}`,
+      cr.x + cr.w / 2,
+      cr.y + cr.h * 0.92,
+      fs * 0.75,
+      afford ? C.gold : C.muted,
+      "center",
+      600,
+      cr.w * 0.92,
+    );
   });
 }
 
@@ -377,20 +439,30 @@ export function render(
   drawBackground(ctx, L);
   drawHud(ctx, L, s);
 
-  const canDrag = s.phase === "prepare" || s.phase === "reward";
   drawDivider(ctx, L);
   drawSideLabels(ctx, L);
-  drawBoard(ctx, L, L.allyBoard, C.ally, canDrag ? hoverCell : -1);
-  drawBoard(ctx, L, L.enemyBoard, C.enemy, -1);
+  drawBoard(ctx, L, "ally", C.ally, hoverCell);
+  drawBoard(ctx, L, "enemy", C.enemy, -1);
 
+  // 화면 아래쪽 고양이가 위에 그려지도록 y로 정렬한다.
+  // 전투 중에는 양쪽이 뒤섞이므로 이게 없으면 겹칠 때 앞뒤가 뒤집혀 보인다.
+  const drawList: { cat: Cat; y: number; dimmed: boolean }[] = [];
   for (let i = 0; i < BOARD_SIZE; i++) {
     const e = s.enemy[i];
-    if (e) drawCat(ctx, L, e, cellRect(L.enemyBoard, L.cell, L.gap, i), false);
-  }
-  for (let i = 0; i < BOARD_SIZE; i++) {
+    if (e) drawList.push({ cat: e, y: fieldToScreen(L, e.fx, e.fy).y, dimmed: false });
     const a = s.ally[i];
-    if (a) drawCat(ctx, L, a, cellRect(L.allyBoard, L.cell, L.gap, i), drag.active && drag.fromCell === i);
+    if (a) {
+      drawList.push({
+        cat: a,
+        y: fieldToScreen(L, a.fx, a.fy).y,
+        dimmed: drag.active && drag.fromCell === i,
+      });
+    }
   }
+  drawList.sort((p, q) => p.y - q.y);
+  for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed);
+
+  drawShots(ctx, L);
 
   // 드래그 중인 고양이는 손가락을 따라다닌다.
   if (drag.active) {

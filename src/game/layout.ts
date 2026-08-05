@@ -1,4 +1,11 @@
-import { BOARD_COLS, BOARD_ROWS, cellCol, cellRow } from "./types.ts";
+import {
+  ALLY_FRONT_FX,
+  BOARD_COLS,
+  BOARD_ROWS,
+  cellToField,
+  ENEMY_FRONT_FX,
+  type Side,
+} from "./types.ts";
 
 export interface Rect {
   x: number;
@@ -157,19 +164,61 @@ export function computeLayout(w: number, h: number): Layout {
   };
 }
 
-export function cellRect(board: Rect, cell: number, gap: number, index: number): Rect {
-  return {
-    x: board.x + cellCol(index) * (cell + gap),
-    y: board.y + cellRow(index) * (cell + gap),
-    w: cell,
-    h: cell,
-  };
+/**
+ * 전투 좌표(fx, fy) → 화면 좌표.
+ *
+ * fx는 "적 쪽으로" 향하는 축이다. 가로에서는 화면 x축(오른쪽이 적), 세로에서는
+ * 화면 y축(위쪽이 적)에 대응한다. 그래서 **세로에서는 보드가 전치된다** —
+ * 열(col)이 세로로 늘어서고 행(row)이 가로로 늘어선다.
+ *
+ * 이렇게 하지 않으면 "적에게 가까운 열이 앞줄"이라는 규칙이 세로에서 깨진다.
+ * 유닛이 실제로 이동하기 시작하면 그 불일치가 바로 눈에 띈다(옆으로 붙어야
+ * 하는데 위로 걸어감).
+ *
+ * 두 보드 사이 구간은 선형 보간한다. 근접 유닛이 그 사이를 가로질러 걸어간다.
+ */
+export function fieldToScreen(L: Layout, fx: number, fy: number): { x: number; y: number } {
+  const pitch = L.cell + L.gap;
+  const half = L.cell / 2;
+
+  // 적 진영 축(fx) 위의 화면 위치
+  // 아군 앞줄과 적 앞줄의 화면 위치. 그 사이는 선형 보간한다.
+  const allyEnd = L.portrait ? L.allyBoard.y + half : L.allyBoard.x + half + ALLY_FRONT_FX * pitch;
+  const enemyStart = L.portrait
+    ? L.enemyBoard.y + half + ALLY_FRONT_FX * pitch
+    : L.enemyBoard.x + half;
+
+  let axis: number;
+  if (fx <= ALLY_FRONT_FX) {
+    axis = L.portrait
+      ? L.allyBoard.y + half + (ALLY_FRONT_FX - fx) * pitch
+      : L.allyBoard.x + half + fx * pitch;
+  } else if (fx >= ENEMY_FRONT_FX) {
+    axis = L.portrait
+      ? L.enemyBoard.y + half + (ENEMY_FRONT_FX + ALLY_FRONT_FX - fx) * pitch
+      : L.enemyBoard.x + half + (fx - ENEMY_FRONT_FX) * pitch;
+  } else {
+    const t = (fx - ALLY_FRONT_FX) / (ENEMY_FRONT_FX - ALLY_FRONT_FX);
+    axis = allyEnd + (enemyStart - allyEnd) * t;
+  }
+
+  // 진영과 나란한 축(fy)
+  const cross = L.portrait ? L.allyBoard.x + half + fy * pitch : L.allyBoard.y + half + fy * pitch;
+
+  return L.portrait ? { x: cross, y: axis } : { x: axis, y: cross };
+}
+
+/** 셀 하나가 차지하는 화면 사각형. 배치와 전투 렌더가 같은 변환을 쓰도록 묶어 둔다. */
+export function cellRect(L: Layout, side: Side, index: number): Rect {
+  const { fx, fy } = cellToField(side, index);
+  const { x, y } = fieldToScreen(L, fx, fy);
+  return { x: x - L.cell / 2, y: y - L.cell / 2, w: L.cell, h: L.cell };
 }
 
 /** 좌표가 어느 셀 위인지. 보드 밖이면 -1. */
-export function hitCell(board: Rect, cell: number, gap: number, x: number, y: number): number {
+export function hitCell(L: Layout, side: Side, x: number, y: number): number {
   for (let i = 0; i < BOARD_COLS * BOARD_ROWS; i++) {
-    if (rectHas(cellRect(board, cell, gap, i), x, y)) return i;
+    if (rectHas(cellRect(L, side, i), x, y)) return i;
   }
   return -1;
 }

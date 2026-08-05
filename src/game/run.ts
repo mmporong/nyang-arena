@@ -2,6 +2,7 @@ import { BALANCE } from "./balance.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import {
   BOARD_SIZE,
+  cellToField,
   emptyBoard,
   livingCats,
   type Board,
@@ -112,6 +113,7 @@ function pickSynergies(pool: SynergyRule[]): SynergyRule[] {
 export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat {
   const scale = levelScale(level);
   const maxHp = Math.round(breed.hp * scale);
+  const { fx, fy } = cellToField(side, cell);
   return {
     uid: nextUid(),
     breed,
@@ -124,6 +126,8 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     cooldown: breed.atkInterval,
     side,
     cell,
+    fx,
+    fy,
     alive: true,
     pose: side === "ally" ? "idle" : "back",
     poseTimer: 0,
@@ -315,12 +319,27 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
   return true;
 }
 
+/** 모든 고양이를 자기 셀 위치로 되돌린다. */
+export function resetPositions(state: RunState): void {
+  for (const board of [state.ally, state.enemy]) {
+    for (const c of board) {
+      if (!c) continue;
+      const { fx, fy } = cellToField(c.side, c.cell);
+      c.fx = fx;
+      c.fy = fy;
+    }
+  }
+}
+
 export function startBattle(state: RunState): void {
   if (livingCats(state.ally).length === 0) {
     state.notice = "고양이를 최소 한 마리는 배치해야 합니다";
     return;
   }
   applySynergies(state);
+  // 지난 전투에서 걸어나간 위치를 배치한 셀로 되돌린다. 이걸 빼먹으면
+  // 다음 웨이브가 적진 한복판에서 시작한다.
+  resetPositions(state);
   for (const c of state.ally) if (c) c.cooldown = c.atkInterval;
   for (const c of state.enemy) if (c) c.cooldown = c.atkInterval;
   state.battleElapsed = 0;
@@ -354,6 +373,9 @@ export function finishWave(state: RunState, won: boolean): void {
     c.poseTimer = 0;
     c.lunge = 0;
     c.flash = 0;
+    const home = cellToField(c.side, c.cell);
+    c.fx = home.fx;
+    c.fy = home.fy;
   }
   buildEnemyWave(state);
   rollOffers(state);
@@ -368,8 +390,18 @@ export function moveCat(state: RunState, from: number, to: number): void {
   const b = state.ally[to] ?? null;
   state.ally[from] = b;
   state.ally[to] = a;
-  if (a) a.cell = to;
-  if (b) b.cell = from;
+  if (a) {
+    a.cell = to;
+    const f = cellToField(a.side, to);
+    a.fx = f.fx;
+    a.fy = f.fy;
+  }
+  if (b) {
+    b.cell = from;
+    const f = cellToField(b.side, from);
+    b.fx = f.fx;
+    b.fy = f.fy;
+  }
   applySynergies(state);
 }
 
