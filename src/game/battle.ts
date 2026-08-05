@@ -53,7 +53,7 @@ export interface Shot {
   ally: boolean;
 }
 
-export const POP_LIFE_MS = 700;
+export const POP_LIFE_MS = 520;
 export const SHOT_LIFE_MS = 220;
 
 export const damagePops: DamagePop[] = [];
@@ -62,7 +62,7 @@ export const shots: Shot[] = [];
 let popSeq = 0;
 
 function pop(target: Cat, text: string, crit: boolean): void {
-  if (damagePops.length > 24) damagePops.shift();
+  if (damagePops.length > 16) damagePops.shift();
   damagePops.push({
     fx: target.fx,
     fy: target.fy,

@@ -65,7 +65,7 @@ function onPrimaryAction(): void {
       break;
     case "reward":
       state.phase = "prepare";
-      state.notice = "배치를 정하고 전투를 시작하세요";
+      state.notice = "근접은 앞줄, 원거리는 뒷줄";
       break;
     case "gameover":
       damagePops.length = 0;

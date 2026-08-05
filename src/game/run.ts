@@ -167,7 +167,7 @@ export function newRun(): RunState {
     synergies: pickSynergies(pool),
     activeSynergyIds: new Set(),
     offers: [],
-    notice: "고양이를 배치하고 전투를 시작하세요",
+    notice: "근접은 앞줄, 원거리는 뒷줄",
     battleElapsed: 0,
     recordBroken: false,
     lossReason: null,
