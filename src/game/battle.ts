@@ -87,7 +87,9 @@ function attack(attacker: Cat, target: Cat): void {
 
   target.hp -= attacker.atk;
   target.flash = FLASH_MS;
-  pop(target, String(attacker.atk), attacker.atk >= 40);
+  // 절대값(>=40)으로 잡으면 웨이브 7쯤부터 모든 타격이 crit이 되어 강조가 무의미해진다.
+  // 대상 최대 체력 대비로 잡아야 "한 방이 컸다"는 신호가 유지된다.
+  pop(target, String(attacker.atk), attacker.atk >= target.maxHp * 0.35);
 
   if (target.hp <= 0) {
     target.hp = 0;

@@ -12,7 +12,8 @@
     "gen:synergies": "node --experimental-strip-types scripts/gen-synergies.mjs",
     "sim": "node --experimental-strip-types scripts/balance-sim.mjs",
     "sweep": "node --experimental-strip-types scripts/balance-sweep.mjs",
-    "test": "node --experimental-strip-types scripts/validator-test.mjs"
+    "test": "node --experimental-strip-types scripts/validator-test.mjs",
+    "probe": "node --experimental-strip-types scripts/layout-probe.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

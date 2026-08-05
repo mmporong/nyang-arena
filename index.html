@@ -33,6 +33,12 @@
         height: 100%;
         display: grid;
         place-items: center;
+        /* viewport-fit=cover를 썼으므로 노치·홈 인디케이터를 피해야 한다.
+           패딩을 여기서 주면 clientWidth/Height가 안전영역만 잡아
+           레이아웃 계산은 그대로 두어도 된다. */
+        padding: env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+        box-sizing: border-box;
       }
       canvas {
         display: block;

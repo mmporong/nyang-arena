@@ -15,8 +15,14 @@ app.appendChild(canvas);
 
 let layout: Layout = computeLayout(800, 600);
 let state: RunState = newRun();
-const drag: DragState = { active: false, fromCell: -1, x: 0, y: 0 };
+const drag: DragState = { active: false, fromCell: -1, x: 0, y: 0, pointerId: -1 };
 let hoverCell = -1;
+
+function cancelDrag(): void {
+  drag.active = false;
+  drag.fromCell = -1;
+  drag.pointerId = -1;
+}
 
 function resize(): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -29,6 +35,9 @@ function resize(): void {
   ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx!.imageSmoothingEnabled = false;
   layout = computeLayout(w, h);
+  // 드래그 중 회전하거나 주소창이 접히면 보드 위치가 통째로 바뀐다.
+  // 옛 레이아웃으로 잡은 출발 셀을 새 레이아웃 좌표에 드롭하면 엉뚱한 칸으로 간다.
+  cancelDrag();
 }
 
 function pointerPos(e: PointerEvent): { x: number; y: number } {
@@ -36,8 +45,15 @@ function pointerPos(e: PointerEvent): { x: number; y: number } {
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
+/**
+ * 배치를 바꿀 수 있는 페이즈.
+ *
+ * reward를 뺀 이유: 보상 카드 패널이 좁은 화면에서 보드를 덮는데, 그 상태로
+ * 보드가 반응하면 고양이를 집으려던 탭이 카드 구매로 새어 들어간다.
+ * 흐름은 전투 → 보상(구매) → 준비(배치) → 전투다.
+ */
 function canRearrange(): boolean {
-  return state.phase === "prepare" || state.phase === "reward";
+  return state.phase === "prepare";
 }
 
 function onPrimaryAction(): void {
@@ -78,26 +94,34 @@ canvas.addEventListener("pointerdown", (e) => {
       const r = rects[i];
       const offer = state.offers[i];
       if (r && offer && rectHas(r, x, y)) {
-        if (!buyOffer(state, offer)) state.notice = "생선이 부족합니다";
-        else state.notice = "";
+        // buyOffer가 실패 사유별로 notice를 세팅한다. 덮어쓰면 거짓 안내가 뜬다.
+        // (보드 만석인데 "생선이 부족합니다"가 뜨던 버그)
+        if (buyOffer(state, offer)) state.notice = "";
+        else if (state.gold < offer.cost) state.notice = "생선이 부족합니다";
         return;
       }
     }
   }
 
   if (!canRearrange()) return;
+  // 이미 다른 손가락이 끌고 있으면 새 포인터는 무시한다.
+  // 그러지 않으면 두 번째 손가락이 fromCell을 덮어써서, 첫 손가락을 뗄 때
+  // 엉뚱한 고양이가 엉뚱한 칸으로 옮겨진다(핀치줌 시도 시 실제로 발생).
+  if (drag.active) return;
   const cell = hitCell(layout.allyBoard, layout.cell, layout.gap, x, y);
   if (cell >= 0 && state.ally[cell]) {
     drag.active = true;
     drag.fromCell = cell;
     drag.x = x;
     drag.y = y;
+    drag.pointerId = e.pointerId;
   }
 });
 
 canvas.addEventListener("pointermove", (e) => {
   const { x, y } = pointerPos(e);
   if (drag.active) {
+    if (e.pointerId !== drag.pointerId) return;
     drag.x = x;
     drag.y = y;
   }
@@ -105,20 +129,19 @@ canvas.addEventListener("pointermove", (e) => {
 });
 
 function endDrag(e: PointerEvent): void {
-  if (!drag.active) return;
+  if (!drag.active || e.pointerId !== drag.pointerId) return;
   const { x, y } = pointerPos(e);
   const to = hitCell(layout.allyBoard, layout.cell, layout.gap, x, y);
   if (to >= 0) moveCat(state, drag.fromCell, to);
-  drag.active = false;
-  drag.fromCell = -1;
+  cancelDrag();
 }
 
-canvas.addEventListener("pointerup", endDrag);
-canvas.addEventListener("pointercancel", (e) => {
-  drag.active = false;
-  drag.fromCell = -1;
-  void e;
-});
+// 캔버스 밖에서 버튼을 떼면 캔버스에는 pointerup이 오지 않는다.
+// setPointerCapture가 실패했을 때(try/catch로 삼킴) 드래그가 영구히 걸린 채
+// 유령 고양이가 커서를 따라다니므로, window에서도 받는다.
+window.addEventListener("pointerup", endDrag);
+window.addEventListener("pointercancel", cancelDrag);
+canvas.addEventListener("lostpointercapture", cancelDrag);
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 let last = 0;

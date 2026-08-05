@@ -22,6 +22,8 @@ export interface DragState {
   fromCell: number;
   x: number;
   y: number;
+  /** 드래그를 시작한 포인터. 멀티터치에서 다른 손가락이 끼어드는 걸 막는다. */
+  pointerId: number;
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, r: Rect, radius: number): void {
@@ -44,12 +46,15 @@ function label(
   color: string,
   align: CanvasTextAlign = "left",
   weight = 600,
+  /** 넘치면 가로로 압축한다. 검증기가 16자까지 허용하므로 칩 폭을 넘길 수 있다. */
+  maxWidth?: number,
 ): void {
   ctx.font = `${weight} ${Math.round(size)}px system-ui, -apple-system, "Segoe UI", sans-serif`;
   ctx.fillStyle = color;
   ctx.textAlign = align;
   ctx.textBaseline = "middle";
-  ctx.fillText(text, x, y);
+  if (maxWidth !== undefined) ctx.fillText(text, x, y, maxWidth);
+  else ctx.fillText(text, x, y);
 }
 
 function drawBackground(ctx: CanvasRenderingContext2D, L: Layout): void {
@@ -183,8 +188,9 @@ function drawSynergies(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
     ctx.lineWidth = on ? 2 : 1;
     ctx.stroke();
 
-    label(ctx, syn.name, cr.x + cr.w / 2, cr.y + r.h * 0.34, fs, on ? C.on : C.muted, "center", 700);
-    label(ctx, triggerText(syn.trigger), cr.x + cr.w / 2, cr.y + r.h * 0.7, fs * 0.82, C.muted, "center", 500);
+    const inner = cr.w * 0.9;
+    label(ctx, syn.name, cr.x + cr.w / 2, cr.y + r.h * 0.34, fs, on ? C.on : C.muted, "center", 700, inner);
+    label(ctx, triggerText(syn.trigger), cr.x + cr.w / 2, cr.y + r.h * 0.7, fs * 0.82, C.muted, "center", 500, inner);
   });
 }
 
@@ -219,15 +225,15 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
   const rects = offerRects(L, s.offers.length);
   const fs = Math.max(12, L.offers.h * 0.22);
 
-  // 카드가 보드 위에 겹치므로, 겹침이 사고가 아니라 패널로 읽히게 배경을 깐다.
+  // 좁은 화면에서는 카드가 보드를 덮으므로 화면 전체를 눌러 모달로 읽히게 한다.
+  // (그동안 보드 입력은 canRearrange가 막는다)
+  if (!L.roomy) {
+    ctx.fillStyle = "rgba(10,8,16,0.55)";
+    ctx.fillRect(0, 0, L.w, L.h);
+  }
   const pad = L.offers.h * 0.18;
-  const back: Rect = {
-    x: 0,
-    y: L.offers.y - pad * 1.6,
-    w: L.w,
-    h: L.offers.h + pad * 2.6,
-  };
-  ctx.fillStyle = "rgba(12,10,20,0.93)";
+  const back = L.offersPanel;
+  ctx.fillStyle = "rgba(12,10,20,0.96)";
   ctx.fillRect(back.x, back.y, back.w, back.h);
   ctx.strokeStyle = "rgba(255,255,255,0.10)";
   ctx.lineWidth = 1;
@@ -253,7 +259,7 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
       const sz = cr.h * 0.62;
       if (img) ctx.drawImage(img, cr.x + cr.w / 2 - sz / 2, cr.y + cr.h * 0.06, sz, sz);
     }
-    label(ctx, o.label, cr.x + cr.w / 2, cr.y + cr.h * 0.78, fs, afford ? C.text : C.muted, "center", 700);
+    label(ctx, o.label, cr.x + cr.w / 2, cr.y + cr.h * 0.78, fs, afford ? C.text : C.muted, "center", 700, cr.w * 0.92);
     label(ctx, `🐟 ${o.cost}`, cr.x + cr.w / 2, cr.y + cr.h * 0.94, fs * 0.85, afford ? C.gold : C.muted, "center");
   });
 }
@@ -351,11 +357,11 @@ function drawGameOver(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): vo
   label(ctx, `${s.wave}웨이브 도달`, L.w / 2, cy - L.scale * 30, L.scale * 46, C.text, "center", 800);
   label(
     ctx,
-    s.wave >= s.best ? "최고 기록 갱신!" : `최고 기록 ${s.best}웨이브`,
+    s.recordBroken ? "최고 기록 갱신!" : `최고 기록 ${s.best}웨이브`,
     L.w / 2,
     cy + L.scale * 14,
     L.scale * 20,
-    s.wave >= s.best ? C.on : C.muted,
+    s.recordBroken ? C.on : C.muted,
     "center",
     600,
   );

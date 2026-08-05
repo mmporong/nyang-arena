@@ -44,6 +44,8 @@ export interface RunState {
   /** 마지막 전투 결과 메시지 */
   notice: string;
   battleElapsed: number;
+  /** 이번 런에서 최고 기록을 깼는지. 동점을 갱신으로 표시하지 않기 위해 따로 둔다. */
+  recordBroken: boolean;
 }
 
 const BEST_KEY = "nyang-arena.best";
@@ -161,6 +163,7 @@ export function newRun(): RunState {
     offers: [],
     notice: "고양이를 배치하고 전투를 시작하세요",
     battleElapsed: 0,
+    recordBroken: false,
   };
 
   // 시작 3마리를 가운데 줄에 세운다. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
@@ -253,7 +256,19 @@ export function rollOffers(state: RunState): void {
   const hasFreeSlot = state.ally.some((c) => c === null);
 
   if (hasFreeSlot) {
-    const pool = [...BREEDS].sort(() => Math.random() - 0.5).slice(0, 2);
+    /**
+     * all_different_5가 켜져 있을 때 이미 보드에 있는 색을 영입하면 시너지가
+     * 즉시 꺼지는데, 고양이를 파는 수단이 없어 되돌릴 수 없다.
+     * (실측: rainbow_roar 활성 5마리에서 중복 색 1마리 영입 → 팀 공격력 31% 영구 상실)
+     * 그래서 시너지를 깨지 않는 색만 제시한다. 낼 게 없으면 강화로만 채워진다.
+     */
+    const allDifferentOn = state.synergies.some(
+      (s) => s.trigger === "all_different_5" && state.activeSynergyIds.has(s.id),
+    );
+    const ownedColors = new Set(owned.map((c) => c.breed.color));
+    const eligible = allDifferentOn ? BREEDS.filter((b) => !ownedColors.has(b.color)) : [...BREEDS];
+
+    const pool = eligible.sort(() => Math.random() - 0.5).slice(0, 2);
     for (const b of pool) {
       offers.push({ kind: "recruit", cost: b.cost, breed: b, label: `${b.name} 영입` });
     }
@@ -318,6 +333,7 @@ export function finishWave(state: RunState, won: boolean): void {
     state.phase = "gameover";
     if (state.wave > state.best) {
       state.best = state.wave;
+      state.recordBroken = true;
       saveBest(state.best);
     }
     state.notice = `${state.wave}웨이브 도달`;
@@ -326,7 +342,10 @@ export function finishWave(state: RunState, won: boolean): void {
 
   state.gold += goldForWave(state.wave);
   state.wave += 1;
-  // 살아남은 고양이는 체력을 회복하고 다음 웨이브로 간다.
+  // 죽은 고양이도 포함해 전원 완전 회복시킨다.
+  // 사망에 영구 손실을 붙이면 한 번 밀린 판이 회복 불가능해져 재도전 동기가 죽는다.
+  // 난이도는 적 성장 곡선으로만 조절한다. 이 전제로 밸런스를 측정했으므로
+  // 여기에 생존 조건을 넣으려면 npm run sim 재측정이 필요하다.
   for (const c of state.ally) {
     if (!c) continue;
     c.alive = true;

@@ -24,6 +24,10 @@ export interface Layout {
   synergyBar: Rect;
   button: Rect;
   offers: Rect;
+  /** 카드 뒤 패널. 카드보다 위아래로 더 뻗는다. */
+  offersPanel: Rect;
+  /** 보드가 카드 패널 위로 올라가 항상 보이는지. false면 보상 단계가 모달이다. */
+  roomy: boolean;
 }
 
 export function rectHas(r: Rect, x: number, y: number): boolean {
@@ -63,8 +67,43 @@ export function computeLayout(w: number, h: number): Layout {
 
   // 보드 위 진영 라벨("우리 편"/"상대")이 안내 문구와 겹치지 않도록 자리를 뗀다.
   const labelH = Math.round(Math.max(14, Math.min(w, h) * 0.032));
+
+  /**
+   * 보상 카드 영역.
+   *
+   * 높이를 cell이 아니라 min(w,h)에서 뽑는 이유: cell 계산이 이 값에 의존하므로
+   * cell 기반으로 잡으면 순환이 생긴다. 아래 roomy 판정이 이 높이를 쓴다.
+   */
+  const offersH = Math.round(Math.max(64, Math.min(w, h) * 0.135));
+  const offers: Rect = {
+    x: pad,
+    y: synergyBar.y - pad * 0.6 - offersH,
+    w: w - pad * 2,
+    h: offersH,
+  };
+  // 렌더러가 카드 뒤에 까는 패널. 카드보다 위아래로 더 뻗으므로 레이아웃이 알아야 한다.
+  const offersPadding = offersH * 0.18;
+  const offersPanel: Rect = {
+    x: 0,
+    y: offers.y - offersPadding * 1.6,
+    w,
+    h: offersH + offersPadding * 2.6,
+  };
+
   const fieldTop = notice.y + notice.h + labelH;
-  const fieldBottom = synergyBar.y - pad * 0.6;
+
+  /**
+   * 여유가 있으면 카드 패널 위로 보드를 올려 항상 보이게 하고, 없으면 보드가
+   * 패널 아래로 들어가게 둔다.
+   *
+   * 짧은 가로 화면(예: 667×275)은 HUD·안내·시너지·버튼만으로 256px를 먹어서
+   * 카드 자리를 떼면 보드에 19px밖에 안 남는다. 그런 화면에서는 보상 단계를
+   * 모달로 취급한다 — 가려도 되지만, 대신 그동안 보드 입력을 막아야 한다
+   * (canRearrange가 prepare 페이즈에서만 참인 이유).
+   */
+  const MIN_BOARD_H = 150;
+  const roomy = offersPanel.y - pad * 0.5 - fieldTop >= MIN_BOARD_H;
+  const fieldBottom = roomy ? offersPanel.y - pad * 0.5 : synergyBar.y - pad * 0.6;
   const fieldH = Math.max(80, fieldBottom - fieldTop);
   const fieldW = w - pad * 2;
   /** 두 보드 사이 간격. 셀 사이 간격보다 훨씬 커야 진영이 구분된다. */
@@ -98,13 +137,6 @@ export function computeLayout(w: number, h: number): Layout {
     enemyBoard = { x: w / 2 + midGap / 2, y: cy, w: bw, h: bh };
   }
 
-  const offers: Rect = {
-    x: pad,
-    y: synergyBar.y - Math.max(70, cell * 0.9) - pad * 0.6,
-    w: w - pad * 2,
-    h: Math.max(70, cell * 0.9),
-  };
-
   return {
     w,
     h,
@@ -120,6 +152,8 @@ export function computeLayout(w: number, h: number): Layout {
     synergyBar,
     button,
     offers,
+    offersPanel,
+    roomy,
   };
 }
 

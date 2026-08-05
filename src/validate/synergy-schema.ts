@@ -49,12 +49,19 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-/** 제어문자·태그 제거. 캔버스에 그리므로 XSS는 아니지만 렌더 깨짐을 막는다. */
+/**
+ * 제어문자·꺾쇠·유니코드 서식문자를 제거하고 코드포인트 단위로 자른다.
+ *
+ * 캔버스에 그리므로 XSS는 아니지만 렌더가 깨진다:
+ * - U+202E(RTL override) 같은 서식문자는 뒤따르는 글자를 역순으로 그린다
+ * - slice()는 UTF-16 코드유닛 기준이라 이모지의 서로게이트 쌍을 반토막 내고,
+ *   짝 잃은 서로게이트는 두부 글자로 렌더된다
+ */
 function cleanText(s: string, max: number): string {
-  return s
-    .replace(/[\u0000-\u001f<>]/g, "")
-    .trim()
-    .slice(0, max);
+  const stripped = s
+    .replace(/[\u0000-\u001f\u007f<>]/g, "")
+    .replace(/\p{Cf}/gu, "");
+  return [...stripped.trim()].slice(0, max).join("");
 }
 
 export function validateRule(raw: unknown): { ok: true; rule: SynergyRule } | { ok: false; reason: string } {
@@ -79,12 +86,20 @@ export function validateRule(raw: unknown): { ok: true; rule: SynergyRule } | { 
   const ek = key as EffectKey;
   const range = EFFECT_RANGE[ek];
 
+  // 비어있음 검사는 반드시 새니타이즈 "뒤"에 한다.
+  // 원본만 검사하면 "<>"나 제어문자로만 이루어진 이름이 통과해서
+  // 화면에 이름 없는 시너지 칩이 뜬다.
+  const cleanName = cleanText(name, MAX_NAME);
+  const cleanDesc = cleanText(desc, MAX_DESC);
+  if (cleanName.length === 0) return { ok: false, reason: "name이 새니타이즈 후 비었음" };
+  if (cleanDesc.length === 0) return { ok: false, reason: "desc가 새니타이즈 후 비었음" };
+
   return {
     ok: true,
     rule: {
       id,
-      name: cleanText(name, MAX_NAME),
-      desc: cleanText(desc, MAX_DESC),
+      name: cleanName,
+      desc: cleanDesc,
       trigger: trigger as Trigger,
       effect: { key: ek, value: Number(clamp(value, range[0], range[1]).toFixed(3)) },
     },
