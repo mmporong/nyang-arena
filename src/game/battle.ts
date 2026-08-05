@@ -1,5 +1,5 @@
 import { BALANCE } from "./balance.ts";
-import { BOSS_THRESHOLDS, TELEGRAPH_FUSE_MS } from "./bosses.ts";
+import { BOSS_ANCHORS, BOSS_THRESHOLDS, TELEGRAPH_FUSE_MS } from "./bosses.ts";
 import { rng } from "./rng.ts";
 import {
   BOARD_COLS,
@@ -732,6 +732,37 @@ function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
   });
 }
 
+/**
+ * 보스를 다음 자리로 옮긴다.
+ *
+ * 근접은 다시 걸어가야 하고, 뒤이어 뜨는 예고의 기준점도 바뀐다. 전투 전에
+ * 한 번 정한 배치가 끝까지 유효하지 않게 만드는 장치다.
+ */
+function teleportBoss(boss: Cat, idx: number): void {
+  const a = BOSS_ANCHORS[idx % BOSS_ANCHORS.length];
+  if (!a) return;
+  const to = cellToField("enemy", a.row * BOARD_COLS + a.col);
+  if (Math.abs(to.fx - boss.fx) < 0.1 && Math.abs(to.fy - boss.fy) < 0.1) return;
+
+  // 사라지는 자리와 나타나는 자리 양쪽에 표시한다. 둘 다 없으면 순간이동이
+  // "갑자기 딴 데 있네"로만 읽히고 무슨 일이 일어났는지 전달되지 않는다.
+  for (const at of [{ fx: boss.fx, fy: boss.fy }, to]) {
+    pushFx({
+      kind: "ring",
+      fx: at.fx,
+      fy: at.fy,
+      tx: 0,
+      ty: 0,
+      radius: boss.radius,
+      angle: 0,
+      life: 420,
+      color: T_ENEMY,
+    });
+  }
+  boss.fx = to.fx;
+  boss.fy = to.fy;
+}
+
 /** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
 function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number): void {
   if (!boss.alive) return;
@@ -748,6 +779,10 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number): void {
   const frac = boss.hp / Math.max(1, boss.maxHp);
   const next = BOSS_THRESHOLDS[boss.thresholdIdx];
   if (next === undefined || frac > next) return;
+
+  // 한 번 걸러 자리를 옮긴 뒤 그 자리에서 예고한다. 순서가 반대면 예고가
+  // 뜬 곳과 터지는 곳이 달라져 화면이 거짓말을 한다.
+  if (boss.thresholdIdx % 2 === 1) teleportBoss(boss, Math.floor(boss.thresholdIdx / 2));
   boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
   boss.thresholdIdx += 1;
 }
