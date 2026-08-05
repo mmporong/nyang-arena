@@ -21,13 +21,18 @@ export const CLASS_LABEL: Record<ClassKind, string> = {
 };
 
 /** 고양이마다 하나씩 갖는 고유 스킬. 실행 로직은 skills.ts에 있다. */
+/**
+ * 패시브 — 마나 없이 늘 켜져 있는 능력. 그 고양이만 가진다.
+ * 액티브와 패시브 비율은 3:1로 둔다. 액티브가 판을 뒤집는 순간을 만들고,
+ * 패시브는 꾸준히 흐르는 성격을 만든다.
+ */
+export type PassiveId = "ricochet" | "combo";
+
 export type SkillId =
   | "whirlwind"
   | "shockwave"
   | "shadow_strike"
-  | "flurry"
   | "pierce"
-  | "multishot"
   | "ember"
   | "frost_nova";
 
@@ -80,9 +85,12 @@ export interface Breed {
   readonly range: number;
   /** 이동 속도(칸/초) */
   readonly moveSpeed: number;
-  /** 공격 한 번에 차는 마나. 100이 되면 스킬을 쓴다. */
+  /** 공격 한 번에 차는 마나. 100이 되면 스킬을 쓴다. 패시브 고양이는 0이다. */
   readonly manaPerAttack: number;
-  readonly skill: SkillId;
+  /** 액티브 스킬. 패시브 고양이는 null. */
+  readonly skill: SkillId | null;
+  /** 패시브. 액티브 고양이는 null. 둘 중 하나만 갖는다. */
+  readonly passive: PassiveId | null;
   readonly cost: number;
 }
 
@@ -129,6 +137,9 @@ export interface Cat {
   shield: number;
   /** 이동 속도 배수. 돌격대 같은 웨이브 성격이 여기를 건드린다. */
   speedMul: number;
+  /** 도적 연격: 연속으로 때린 대상과 쌓인 횟수. 대상이 바뀌면 초기화된다. */
+  comboTarget: string | null;
+  combo: number;
 }
 
 export type Board = (Cat | null)[];

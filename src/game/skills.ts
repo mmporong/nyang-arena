@@ -1,4 +1,4 @@
-import { fieldDistance, type Cat, type SkillId } from "./types.ts";
+import { fieldDistance, type Cat, type PassiveId, type SkillId } from "./types.ts";
 
 /**
  * 스킬 여덟 개. 직업이 같아도 메커니즘이 겹치지 않게 짰다.
@@ -11,6 +11,31 @@ import { fieldDistance, type Cat, type SkillId } from "./types.ts";
  * 그래야 헤드리스 시뮬레이션에서도 같은 코드가 그대로 돈다.
  */
 
+/**
+ * 직업 패시브 — 마나 없이 항상 작동한다.
+ *
+ * WoW에서 가져왔다. 도적의 Slice and Dice는 콤보 포인트로 **공격 속도**를 올린다
+ * ("때릴수록 세진다"의 WoW식 답은 피해량이 아니라 속도다). 궁수는 Multi-Shot 계열의
+ * 연쇄 사격이다.
+ *
+ * 여덟 마리 중 둘만 패시브를 갖는다. 나머지 여섯은 마나가 차면 터지는 액티브다.
+ */
+/** 연격 한 단계당 공격 속도 증가분, 최대 단계 */
+export const COMBO_STEP = 0.1;
+export const COMBO_MAX = 5;
+/** 도탄이 튀는 대상 수와 피해 비율 */
+export const RICOCHET_TARGETS = 2;
+export const RICOCHET_MUL = 0.4;
+export interface PassiveMeta {
+  name: string;
+  desc: string;
+}
+
+export const PASSIVES: Record<PassiveId, PassiveMeta> = {
+  ricochet: { name: "도탄", desc: "공격이 근처의 다른 적 둘에게도 튄다" },
+  combo: { name: "연격", desc: "같은 적을 계속 때릴수록 손이 빨라진다" },
+};
+
 export interface SkillMeta {
   name: string;
   /** 카드와 도감에 뜨는 한 줄 설명 */
@@ -21,9 +46,7 @@ export const SKILLS: Record<SkillId, SkillMeta> = {
   whirlwind: { name: "회전베기", desc: "주변의 적 전부를 크게 후려친다" },
   shockwave: { name: "대지 강타", desc: "주변의 적을 잠시 기절시킨다" },
   shadow_strike: { name: "그림자 일격", desc: "가장 약한 적을 단숨에 노린다" },
-  flurry: { name: "연속 찌르기", desc: "목표를 네 번 연달아 찌른다" },
   pierce: { name: "꿰뚫기", desc: "일직선 위의 적을 전부 관통한다" },
-  multishot: { name: "삼색 화살", desc: "서로 다른 적 셋에게 동시에 쏜다" },
   ember: { name: "불씨", desc: "목표를 태워 한동안 계속 피해를 준다" },
   frost_nova: { name: "서리 발톱", desc: "주변의 적을 얼려 묶어 둔다" },
 };
@@ -106,11 +129,6 @@ export function runSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): 
       if (prey.hp <= caster.atk * 2.6) r.manaRefund = 50;
       break;
     }
-    case "flurry": {
-      // 같은 대상을 네 번. 단일 화력이지만 보호막을 빨리 벗긴다.
-      for (let i = 0; i < 4; i++) r.hits.push({ target, mul: 0.55 });
-      break;
-    }
 
     // ── 궁수 ──────────────────────────────────────────
     case "pierce": {
@@ -118,13 +136,6 @@ export function runSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): 
       const list = line.length > 0 ? line : [target];
       for (const f of list) r.hits.push({ target: f, mul: 1.35 });
       r.shots = list;
-      break;
-    }
-    case "multishot": {
-      // 서로 다른 셋. 가까운 순으로 고른다.
-      const picks = [...foes].sort((a, b) => fieldDistance(caster, a) - fieldDistance(caster, b)).slice(0, 3);
-      for (const f of picks) r.hits.push({ target: f, mul: 1.0 });
-      r.shots = picks;
       break;
     }
 

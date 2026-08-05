@@ -249,6 +249,8 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     dot: null,
     shield: 0,
     speedMul: 1,
+    comboTarget: null,
+    combo: 0,
   };
 }
 
@@ -311,6 +313,14 @@ export function newRun(): RunState {
 
 const MELEE_IDS = BREEDS.filter((b) => b.kind === "melee").map((b) => b.id);
 const RANGED_IDS = BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
+/**
+ * 돌격대는 전사만 낸다.
+ *
+ * 예전에는 "전부 근접"이라 도적이 섞였는데, 도적은 전투가 시작되자마자 우리
+ * 뒷줄로 뛰어든다. 유닛이 셋뿐인 웨이브 2에서 그건 즉사였다(측정: W2에서만 42명).
+ * 돌격은 전사가 하는 것이고, 암살자가 하는 건 돌격이 아니다.
+ */
+const WARRIOR_IDS = BREEDS.filter((b) => b.cls === "warrior").map((b) => b.id);
 
 /** 웨이브 성격에 맞는 적 품종 목록을 뽑는다. */
 function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
@@ -319,7 +329,7 @@ function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
   for (let i = 0; i < count; i++) {
     switch (kind) {
       case "rush":
-        out.push(pick(MELEE_IDS, i));
+        out.push(pick(WARRIOR_IDS, i));
         break;
       case "snipe":
         // 호위 근접 둘 + 나머지 원거리. 호위를 하나만 두면 사실상 전부 원거리가 되어
@@ -568,6 +578,8 @@ export function startBattle(state: RunState): void {
       c.dot = null;
       c.shield = 0;
       c.castFlash = 0;
+      c.comboTarget = null;
+      c.combo = 0;
     }
   }
   state.battleElapsed = 0;

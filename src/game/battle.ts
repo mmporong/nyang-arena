@@ -1,5 +1,24 @@
-import { fieldDistance, livingCats, MANA_MAX, type Cat } from "./types.ts";
-import { runSkill, SKILLS, type SkillResult } from "./skills.ts";
+import {
+  BOARD_COLS,
+  BOARD_ROWS,
+  cellRow,
+  cellToField,
+  fieldDistance,
+  livingCats,
+  MANA_MAX,
+  type Cat,
+  type Side,
+} from "./types.ts";
+import {
+  COMBO_MAX,
+  COMBO_STEP,
+  PASSIVES,
+  RICOCHET_MUL,
+  RICOCHET_TARGETS,
+  runSkill,
+  SKILLS,
+  type SkillResult,
+} from "./skills.ts";
 import { finishWave, type RunState } from "./run.ts";
 
 /** 고정 시뮬레이션 스텝. */
@@ -99,21 +118,13 @@ function pushFx(f: Omit<Fx, "maxLife"> & { maxLife?: number }): void {
   fxs.push({ ...f, maxLife: f.maxLife ?? f.life });
 }
 
-/** 화면 흔들림. 큰 스킬이 터졌다는 걸 몸으로 느끼게 한다. */
-export const shake = { amount: 0, life: 0, maxLife: 1 };
-
-export function addShake(amount: number, ms: number): void {
-  if (amount <= shake.amount && shake.life > 0) return;
-  shake.amount = amount;
-  shake.life = ms;
-  shake.maxLife = ms;
-}
-
 export const BURST_LIFE_MS = 320;
 
 /** 렌더러가 시전 이름표를 그릴 때 쓴다. */
 export function skillName(cat: Cat): string {
-  return SKILLS[cat.breed.skill].name;
+  if (cat.breed.skill) return SKILLS[cat.breed.skill].name;
+  if (cat.breed.passive) return PASSIVES[cat.breed.passive].name;
+  return "";
 }
 
 let popSeq = 0;
@@ -149,6 +160,12 @@ export function pickTarget(attacker: Cat, foes: Cat[], claimed?: Map<string, num
     }
   }
   return best;
+}
+
+/** 패시브 "연격" — 같은 적을 계속 때리면 공격 속도가 붙는다. */
+function comboSpeed(cat: Cat): number {
+  if (cat.breed.passive !== "combo") return 1;
+  return 1 + Math.min(COMBO_MAX, cat.combo) * COMBO_STEP;
 }
 
 /** 실제 피해 적용. 보호막을 먼저 깎는다. */
@@ -245,36 +262,18 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
       for (let i = 0; i < 4; i++) {
         pushFx({ ...base, kind: "slash", radius: 1.5, angle: (Math.PI / 2) * i, life: 340 });
       }
-      addShake(3, 220);
       break;
     }
     case "shockwave": {
       // 두껍고 느린 고리. 땅이 갈라지는 느낌
       pushFx({ ...base, kind: "ring", radius: 2.0, life: 560 });
       pushFx({ ...base, kind: "ring", radius: 1.1, life: 380 });
-      addShake(6, 340);
       break;
     }
     case "shadow_strike": {
       const prey = res.hits[0]?.target ?? target;
       pushFx({ ...base, kind: "streak", tx: prey.fx, ty: prey.fy, radius: 0.5, life: 260 });
       pushFx({ ...base, kind: "ring", fx: prey.fx, fy: prey.fy, radius: 0.9, life: 320 });
-      addShake(4, 200);
-      break;
-    }
-    case "flurry": {
-      // 네 번 찌르니 참격도 네 개, 조금씩 시간차를 준다
-      for (let i = 0; i < 4; i++) {
-        pushFx({
-          ...base,
-          kind: "slash",
-          fx: target.fx,
-          fy: target.fy,
-          radius: 0.85,
-          angle: (Math.PI / 3) * i + 0.3,
-          life: 240 + i * 40,
-        });
-      }
       break;
     }
     case "pierce": {
@@ -290,13 +289,6 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
         radius: 0.34,
         life: 320,
       });
-      addShake(2, 160);
-      break;
-    }
-    case "multishot": {
-      for (const s of res.shots) {
-        pushFx({ ...base, kind: "beam", tx: s.fx, ty: s.fy, radius: 0.16, life: 260 });
-      }
       break;
     }
     case "ember": {
@@ -329,7 +321,6 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
           color: "#BFEBFF",
         });
       }
-      addShake(2, 180);
       break;
     }
   }
@@ -360,10 +351,44 @@ function attack(attacker: Cat, target: Cat): void {
     return;
   }
 
+  // 연격: 같은 대상이면 쌓이고, 바뀌면 처음부터
+  if (attacker.breed.passive === "combo") {
+    if (attacker.comboTarget === target.uid) attacker.combo = Math.min(COMBO_MAX, attacker.combo + 1);
+    else {
+      attacker.comboTarget = target.uid;
+      attacker.combo = 1;
+    }
+  }
+
   damage(target, attacker.atk, attacker.atk >= target.maxHp * 0.35);
+
   if (!target.alive) {
     attacker.pose = "wink";
     attacker.poseTimer = POSE_WINK_MS;
+  }
+}
+
+/** 패시브 "도탄" — 가까운 다른 적 둘에게도 튄다. */
+function ricochet(attacker: Cat, target: Cat, foes: Cat[]): void {
+  if (attacker.breed.passive !== "ricochet") return;
+  const others = foes
+    .filter((f) => f !== target && f.alive)
+    .sort((a, b) => fieldDistance(target, a) - fieldDistance(target, b))
+    .slice(0, RICOCHET_TARGETS);
+
+  for (const f of others) {
+    pushFx({
+      kind: "beam",
+      fx: target.fx,
+      fy: target.fy,
+      tx: f.fx,
+      ty: f.fy,
+      radius: 0.12,
+      angle: 0,
+      life: 220,
+      color: CLASS_FX["archer"] ?? "#FFC46B",
+    });
+    damage(f, attacker.atk * RICOCHET_MUL, false);
   }
 }
 
@@ -439,6 +464,80 @@ function tickEffects(cats: (Cat | null)[], dt: number): void {
   }
 }
 
+/**
+ * 전투가 시작되는 순간 도적이 상대 뒷줄로 뛰어든다. TFT 암살자와 같은 개념이다.
+ *
+ * 목표는 상대의 **뒷줄 같은 행** — 원거리가 서는 자리다. 그 칸이 차 있으면
+ * 주변 빈칸으로 밀린다. 점유 판정은 **전투 시작 시점** 기준이고, 도적끼리
+ * 겹치지 않도록 배정하는 대로 자리를 예약한다.
+ *
+ * 착지 뒤에는 평소와 같이 가장 가까운 적을 노린다.
+ * 양쪽 모두에 적용한다 — 우리만 뛰어들면 도적이 지나치게 강해진다.
+ */
+function findLanding(taken: Set<number>, wantRow: number, landSide: Side): number {
+  // "뒷줄"은 진영마다 반대편이다. 적 보드는 col이 클수록, 아군 보드는 col이
+  // 작을수록 상대에게서 멀다. 이걸 뭉뚱그리면 적 도적이 우리 앞줄로 뛰어든다.
+  const back = landSide === "enemy" ? BOARD_COLS - 1 : 0;
+  const cells: number[] = [];
+  for (let i = 0; i < BOARD_COLS * BOARD_ROWS; i++) cells.push(i);
+  // 뒷줄을 강하게 선호하고(계수 3), 그 안에서 원하는 행에 가까운 순
+  const score = (i: number) =>
+    Math.abs((i % BOARD_COLS) - back) * 3 + Math.abs(Math.floor(i / BOARD_COLS) - wantRow);
+  cells.sort((a, b) => score(a) - score(b));
+  return cells.find((i) => !taken.has(i)) ?? -1;
+}
+
+function assassinLeap(state: RunState): void {
+  const sides: { mine: (Cat | null)[]; foes: (Cat | null)[]; foeSide: Side }[] = [
+    { mine: state.ally, foes: state.enemy, foeSide: "enemy" },
+    { mine: state.enemy, foes: state.ally, foeSide: "ally" },
+  ];
+
+  for (const { mine, foes, foeSide } of sides) {
+    const taken = new Set<number>();
+    foes.forEach((c, i) => {
+      if (c) taken.add(i);
+    });
+
+    for (const c of mine) {
+      if (!c || !c.alive || c.breed.cls !== "rogue") continue;
+      const landing = findLanding(taken, cellRow(c.cell), foeSide);
+      if (landing < 0) continue;
+      taken.add(landing);
+
+      const from = { fx: c.fx, fy: c.fy };
+      const to = cellToField(foeSide, landing);
+      c.fx = to.fx;
+      c.fy = to.fy;
+      c.pose = "run";
+      c.poseTimer = 320;
+
+      pushFx({
+        kind: "streak",
+        fx: from.fx,
+        fy: from.fy,
+        tx: to.fx,
+        ty: to.fy,
+        radius: 0.5,
+        angle: 0,
+        life: 340,
+        color: CLASS_FX["rogue"] ?? "#D98BE8",
+      });
+      pushFx({
+        kind: "ring",
+        fx: to.fx,
+        fy: to.fy,
+        tx: to.fx,
+        ty: to.fy,
+        radius: 0.9,
+        angle: 0,
+        life: 380,
+        color: CLASS_FX["rogue"] ?? "#D98BE8",
+      });
+    }
+  }
+}
+
 /** 한 프레임 분량을 고정 스텝으로 시뮬레이션한다. */
 export function stepBattle(state: RunState, dtMs: number): void {
   tickEffects(state.ally, dtMs);
@@ -462,9 +561,11 @@ export function stepBattle(state: RunState, dtMs: number): void {
     f.life -= dtMs;
     if (f.life <= 0) fxs.splice(i, 1);
   }
-  if (shake.life > 0) shake.life = Math.max(0, shake.life - dtMs);
 
   if (state.phase !== "battle") return;
+
+  // 전투 첫 프레임에 도적이 뛰어든다.
+  if (state.battleElapsed === 0) assassinLeap(state);
 
   let remaining = Math.min(dtMs, SIM_STEP_MS * 4); // 탭 복귀 시 폭주 방지
   while (remaining > 0) {
@@ -503,13 +604,15 @@ export function stepBattle(state: RunState, dtMs: number): void {
       if (fieldDistance(cat, target) <= cat.breed.range) {
         if (cat.cooldown <= 0) {
           // 마나가 가득 찼으면 평타 대신 스킬이 나간다.
-          if (cat.mana >= MANA_MAX) {
+          if (cat.breed.skill && cat.mana >= MANA_MAX) {
             const own = cat.side === "ally" ? livingCats(state.ally) : livingCats(state.enemy);
             castSkill(cat, target, enemies, own);
           } else {
             attack(cat, target);
+            ricochet(cat, target, enemies);
           }
-          cat.cooldown += cat.atkInterval;
+          // 연격이 쌓이면 다음 공격이 빨라진다
+          cat.cooldown += cat.atkInterval / comboSpeed(cat);
         }
       } else {
         stepToward(cat, target, step);
