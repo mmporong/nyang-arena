@@ -15,7 +15,8 @@
  * 실행: npm run intervention
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, startBattle, waveKind } from "../src/game/run.ts";
+import { livingCats } from "../src/game/types.ts";
+import { buyOffer, newRun, startBattle, waveKind , relicActive } from "../src/game/run.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
@@ -56,6 +57,8 @@ function play(policy, seed) {
     if (s.phase === "reward") {
       const afford = s.offers
         .filter((o) => o && o.cost <= s.gold)
+        // 유물은 조건을 채우고 있을 때만. 카드를 읽는 최소한의 플레이어.
+        .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false))
         .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);
       if (afford[0]) {
         if (!buyOffer(s, afford[0])) s.offers = s.offers.map((o) => (o === afford[0] ? null : o));

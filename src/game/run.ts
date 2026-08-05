@@ -1,4 +1,5 @@
 import { BALANCE } from "./balance.ts";
+import { RELICS, type Relic } from "./relics.ts";
 import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import { BOSS_RADIUS, bossForWave } from "./bosses.ts";
@@ -19,6 +20,7 @@ import {
   type Side,
 } from "./types.ts";
 import {
+  type EffectKey,
   isTriggered,
   PRESET_SYNERGIES,
   validateAll,
@@ -31,7 +33,7 @@ import generated from "../data/synergies.json" with { type: "json" };
 
 export type Phase = "prepare" | "battle" | "reward" | "gameover";
 
-export type OfferKind = "recruit" | "upgrade" | "replace";
+export type OfferKind = "recruit" | "upgrade" | "replace" | "relic";
 
 export interface Offer {
   kind: OfferKind;
@@ -41,9 +43,11 @@ export interface Offer {
    * 예전에는 강화 오퍼에 이게 없어서, 보드가 꽉 차 강화 카드만 남는 순간부터
    * 카드에서 고양이 그림이 통째로 사라졌다.
    */
-  breed: Breed;
+  breed?: Breed;
   /** upgrade·replace 대상 uid */
   targetUid?: string;
+  /** relic 카드가 파는 유물 */
+  relic?: Relic;
   label: string;
   /** 카드 두 번째 줄. 무엇을 하는 카드인지 */
   sublabel: string;
@@ -81,6 +85,8 @@ export interface RunState {
   pending: Intervention[];
   /** 남은 회피 횟수. 전투마다 초기화된다. */
   dodgeCharges: number;
+  /** 이번 런에서 모은 유물. 조건을 채운 것만 보너스가 붙고 대가는 항상 붙는다. */
+  relics: Relic[];
 }
 
 const BEST_KEY = "nyang-arena.best";
@@ -330,6 +336,7 @@ export function newRun(seed?: number): RunState {
     seed: runSeed,
     pending: [],
     dodgeCharges: 0,
+    relics: [],
   };
 
   // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
@@ -513,6 +520,23 @@ export function boardUnits(state: RunState): BoardUnit[] {
   }));
 }
 
+/** 유물 조건을 지금 팀이 채우고 있는가. */
+export function relicActive(relic: Relic, cats: Cat[]): boolean {
+  const c = relic.condition;
+  switch (c.kind) {
+    case "class_count":
+      return cats.filter((x) => x.breed.cls === c.cls).length >= c.min;
+    case "unit_max":
+      return cats.length <= c.max;
+    case "unit_min":
+      return cats.length >= c.min;
+    case "level_min":
+      return cats.some((x) => x.level >= c.min);
+    case "breed_variety":
+      return new Set(cats.map((x) => x.breed.id)).size >= c.min;
+  }
+}
+
 export function applySynergies(state: RunState): void {
   const cats = livingCats(state.ally);
   const units = boardUnits(state);
@@ -529,22 +553,33 @@ export function applySynergies(state: RunState): void {
     let interval = cat.breed.atkInterval;
     let evade = 0;
 
-    for (const s of state.synergies) {
-      if (!state.activeSynergyIds.has(s.id)) continue;
-      switch (s.effect.key) {
+    const apply = (key: EffectKey, value: number) => {
+      switch (key) {
         case "atk_mul":
-          atk *= s.effect.value;
+          atk *= value;
           break;
         case "hp_mul":
-          maxHp *= s.effect.value;
+          maxHp *= value;
           break;
         case "atkspd_mul":
-          interval /= s.effect.value;
+          interval /= value;
           break;
         case "evade_add":
-          evade += s.effect.value;
+          evade += value;
           break;
       }
+    };
+
+    for (const s of state.synergies) {
+      if (!state.activeSynergyIds.has(s.id)) continue;
+      apply(s.effect.key, s.effect.value);
+    }
+
+    // 유물: 대가는 항상, 보너스는 조건을 채웠을 때만.
+    // 조건을 못 맞추면 손해만 본다 — 그게 '질렀다'를 만드는 유일한 장치다.
+    for (const r of state.relics) {
+      apply(r.bane.key, r.bane.value);
+      if (relicActive(r, cats)) apply(r.boon.key, r.boon.value);
     }
 
     const ratio = cat.maxHp > 0 ? cat.hp / cat.maxHp : 1;
@@ -624,6 +659,25 @@ export function rollOffers(state: RunState): void {
     });
   }
 
+  // 유물을 한 장 섞는다.
+  //
+  // 웨이브 3부터, 그리고 **세 웨이브에 한 번만** 나온다. 매 웨이브 내면 슬롯
+  // 하나를 상시로 먹어 정상 구매를 밀어낸다 — 측정에서 유물을 안 사는 봇의
+  // 평균이 12.9에서 8.6으로 떨어졌다. 유물은 가끔 오는 큰 결정이어야 한다.
+  if (state.wave >= 3 && state.wave % 3 === 0) {
+    const owned = new Set(state.relics.map((r) => r.id));
+    const pick = shuffle(RELICS.filter((r) => !owned.has(r.id)))[0];
+    if (pick) {
+      offers.splice(Math.min(offers.length, 1), 0, {
+        kind: "relic",
+        cost: pick.cost,
+        relic: pick,
+        label: pick.name,
+        sublabel: pick.want,
+      });
+    }
+  }
+
   // 슬롯은 늘 세 칸. 모자라면 빈 칸으로 채운다.
   state.offers = Array.from({ length: OFFER_SLOTS }, (_, i) => offers[i] ?? null);
 }
@@ -631,7 +685,14 @@ export function rollOffers(state: RunState): void {
 export function buyOffer(state: RunState, offer: Offer): boolean {
   if (state.gold < offer.cost) return false;
 
-  if (offer.kind === "recruit") {
+  if (offer.kind === "relic" && offer.relic) {
+    // 같은 유물을 두 번 사면 대가만 두 배가 된다. 이미 있으면 걷어낸다.
+    if (state.relics.some((r) => r.id === offer.relic!.id)) {
+      state.offers = state.offers.map((o) => (o === offer ? null : o));
+      return false;
+    }
+    state.relics.push(offer.relic);
+  } else if (offer.kind === "recruit" && offer.breed) {
     const owned = state.ally.filter((c) => c !== null).length;
     const free = owned < unitCap(state.wave) ? bestFreeCell(state.ally, offer.breed) : -1;
     if (free < 0) {
@@ -641,7 +702,7 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
       return false;
     }
     state.ally[free] = makeCat(offer.breed, "ally", free);
-  } else if (offer.kind === "replace" && offer.targetUid) {
+  } else if (offer.kind === "replace" && offer.targetUid && offer.breed) {
     const idx = state.ally.findIndex((c) => c?.uid === offer.targetUid);
     if (idx < 0) {
       state.offers = state.offers.map((o) => (o === offer ? null : o));

@@ -10,7 +10,8 @@
  * 실행: npm run sim
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, rerollOffers, startBattle, waveKind } from "../src/game/run.ts";
+import { buyOffer, newRun, relicActive, rerollOffers, startBattle, waveKind } from "../src/game/run.ts";
+import { livingCats } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
@@ -46,7 +47,12 @@ function playOne(seed) {
 
     if (s.phase === "reward") {
       // 살 수 있는 것 중 가장 비싼 것을 산다 (강화 우선이 되는 경향)
-      const affordable = s.offers.filter((o) => o && o.cost <= s.gold)
+      const affordable = s.offers
+        .filter((o) => o && o.cost <= s.gold)
+        // 유물은 조건을 이미 채우고 있을 때만 산다. 조건은 카드에 적혀 있으므로
+        // 이건 '카드를 읽는' 최소한의 플레이어다. 조건을 안 보고 사면 대가만
+        // 쌓여서, 기준 봇이 무작위 구매보다 나빠진다(측정: 8.8 대 9.3).
+        .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false))
         // 봇은 시너지 적합도를 판단하지 못하므로 교체가 순손실이다. 실제 플레이어는
         // 목표에 맞춰 쓰지만, 여기서는 다른 걸 못 살 때만 집는다.
         .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);

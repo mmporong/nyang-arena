@@ -9,6 +9,7 @@
  * 실행: npm test
  */
 import { readFileSync } from "node:fs";
+import { checkRelicTable, RELICS } from "../src/game/relics.ts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,3 +68,19 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("\n전부 통과 — 검증기가 적대 입력을 모두 막거나 안전한 값으로 눌렀다.");
+
+/* ------------------------------------------------------------------ */
+/* 유물 테이블 계약                                                     */
+/* ------------------------------------------------------------------ */
+
+// 유물은 손으로 쓴 상수라 검증기를 만들지 않았다. 대신 되돌리기 쉬운 실수만
+// 막는다 — 대가의 부호를 뒤집어 쓰면 불이익이 아니라 강화가 되고, 그건
+// 타입 시스템이 잡아 주지 않는다(number는 number다).
+const relicProblems = checkRelicTable();
+console.log("\n유물 테이블 계약");
+if (relicProblems.length === 0) {
+  console.log(`  OK   유물 ${RELICS.length}종 — id 중복 없음, 대가는 불이익, 보너스는 이익`);
+} else {
+  for (const p of relicProblems) console.log(`  실패 ${p}`);
+  process.exit(1);
+}

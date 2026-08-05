@@ -13,8 +13,11 @@ const POLICIES = {
   "아무것도 안 삼": () => null,
   "무작위 구매": (afford) => afford[Math.floor(seeded() * afford.length)],
   "가장 싼 것": (afford) => [...afford].sort((a, b) => a.cost - b.cost)[0],
-  "가장 비싼 것(현재)": (afford) =>
-    [...afford].sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost)[0],
+  "가장 비싼 것(현재)": (afford, s) =>
+    [...afford]
+      // 유물은 조건을 채우고 있을 때만. 카드를 읽는 최소한의 플레이어다.
+      .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false))
+      .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost)[0],
   "강화만": (afford) => afford.filter((o) => o.kind === "upgrade")[0] ?? null,
   "영입만": (afford) => afford.filter((o) => o.kind === "recruit")[0] ?? null,
 };
@@ -40,7 +43,7 @@ function run(pick, runSeed) {
     if (s.phase === "gameover") return s.wave;
     if (s.phase === "reward") {
       const afford = s.offers.filter((o) => o && o.cost <= s.gold);
-      const choice = afford.length > 0 ? pick(afford) : null;
+      const choice = afford.length > 0 ? pick(afford, s) : null;
       if (choice) {
         if (!buyOffer(s, choice)) s.offers = s.offers.map((o) => (o === choice ? null : o));
         continue;

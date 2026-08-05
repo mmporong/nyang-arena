@@ -926,16 +926,99 @@ function drawCostBadge(
   ctx.strokeStyle = afford ? T.fish : "rgba(239,224,198,0.16)";
   ctx.lineWidth = 2;
   ctx.stroke();
+  // 두 자리 비용은 글리프 폭이 두 배가 되어 원 밖으로 넘친다. 자릿수만큼 줄인다.
+  // 유물이 9~12생선이라 두 자리가 실제로 나온다.
+  const digits = String(cost).length;
   pixelText(
     ctx,
     String(cost),
     cx,
     cy,
-    Math.max(1, r * 0.26),
+    Math.max(1, (r * 0.52) / (digits + 1)),
     afford ? T.fish : T.muted,
     "center",
     false,
   );
+}
+
+/**
+ * 유물 카드.
+ *
+ * 고양이 카드와 달리 초상이 없다. 대신 **원하는 것과 치르는 것**을 나란히
+ * 보여준다 — 유물의 값은 그 둘의 관계에서 나오므로, 사기 전에 둘 다 보이지
+ * 않으면 도박이 아니라 그냥 뽑기가 된다.
+ */
+function drawRelicCard(
+  ctx: CanvasRenderingContext2D,
+  cr: Rect,
+  relic: { name: string; want: string; toll: string },
+  cost: number,
+  afford: boolean,
+  pad: number,
+): void {
+  const rad = Math.min(cr.w, cr.h) * 0.13;
+  bevelPanel(
+    ctx,
+    cr,
+    rad,
+    afford ? "rgba(111,182,220,0.12)" : "rgba(239,224,198,0.035)",
+    afford ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.25)",
+    3,
+  );
+  roundRect(ctx, cr, rad);
+  ctx.strokeStyle = afford ? T.fish : "rgba(239,224,198,0.12)";
+  ctx.lineWidth = afford ? 2 : 1;
+  ctx.stroke();
+
+  const vertical = cr.h >= cr.w * 0.9;
+  const cx = cr.x + cr.w / 2;
+  const tw = cr.w - pad * 2;
+  const fsName = Math.max(12, Math.min(21, cr.w * 0.11));
+  const fsBody = Math.max(10, fsName * 0.68);
+
+  const br = Math.max(11, (vertical ? cr.w : cr.h) * 0.105);
+  drawCostBadge(ctx, cr.x + cr.w - pad - br * 0.9, cr.y + pad + br * 0.9, br, cost, afford);
+
+  if (!vertical) {
+    uiText(ctx, relic.name, cr.x + pad, cr.y + cr.h * 0.32, fsName, afford ? T.text : T.muted, {
+      align: "left",
+      weight: 800,
+      maxWidth: tw - br * 2,
+    });
+    uiText(ctx, `${relic.want} · ${relic.toll}`, cr.x + pad, cr.y + cr.h * 0.66, fsBody, afford ? T.fish : T.muted, {
+      align: "left",
+      weight: 600,
+      maxWidth: tw - br * 2,
+    });
+    return;
+  }
+
+  let ty = cr.y + cr.h * 0.3;
+  uiText(ctx, "유물", cx, ty - fsName * 0.95, fsBody * 0.95, afford ? T.fish : T.muted, {
+    align: "center",
+    weight: 700,
+    tracking: 2,
+  });
+  uiText(ctx, relic.name, cx, ty, fsName, afford ? T.text : T.muted, {
+    align: "center",
+    weight: 800,
+    maxWidth: tw,
+  });
+
+  // 원하는 것 / 치르는 것을 라벨과 함께. 어느 쪽이 이익인지 헷갈리면 안 된다.
+  ty += fsName * 0.75 + fsBody;
+  for (const [label, text, color] of [
+    ["원하는 것", relic.want, afford ? T.fish : T.muted],
+    ["치르는 것", relic.toll, afford ? T.enemy : T.muted],
+  ] as const) {
+    uiText(ctx, label, cx, ty, fsBody * 0.85, "rgba(156,139,118,0.9)", { align: "center", weight: 600 });
+    ty += fsBody * 1.15;
+    for (const line of wrapLines(ctx, text, fsBody, 700, tw, 2)) {
+      uiText(ctx, line, cx, ty, fsBody, color, { align: "center", weight: 700 });
+      ty += fsBody * 1.2;
+    }
+    ty += fsBody * 0.35;
+  }
 }
 
 function drawOffers(
@@ -978,7 +1061,8 @@ function drawOffers(
 
     const afford = s.gold >= o.cost;
     // 영입·교체는 그 고양이의 직업색으로. 카드만 봐도 무엇이 오는지 알 수 있다.
-    const accent = o.kind === "upgrade" ? T.gold : CLASS_COLOR[o.breed.cls];
+    // 유물은 어느 직업에도 속하지 않으므로 생선색으로 따로 세운다.
+    const accent = o.kind === "relic" ? T.fish : o.kind === "upgrade" ? T.gold : CLASS_COLOR[o.breed!.cls];
 
     bevelPanel(
       ctx,
@@ -993,9 +1077,17 @@ function drawOffers(
     ctx.lineWidth = afford ? 2 : 1;
     ctx.stroke();
 
+    // 짧은 변에서 뽑는다. 폭에서만 뽑으면 넓고 낮은 카드에서 여백이 높이를
+    // 잡아먹어 우물 크기가 음수가 되고, 그래디언트가 던져 rAF 루프가 죽는다.
+    const relicPad = Math.max(5, Math.min(cr.w, cr.h) * 0.07);
+    if (o.kind === "relic" && o.relic) {
+      drawRelicCard(ctx, cr, o.relic, o.cost, afford, relicPad);
+      return;
+    }
+
     // 무엇을 하는 고양이인지 사기 전에 보여준다.
-    const skill = o.breed.skill ? SKILLS[o.breed.skill] : null;
-    const passive = o.breed.passive ? PASSIVES[o.breed.passive] : null;
+    const skill = o.breed!.skill ? SKILLS[o.breed!.skill] : null;
+    const passive = o.breed!.passive ? PASSIVES[o.breed!.passive] : null;
     const abilityName = skill?.name ?? passive?.name ?? "";
     const abilityDesc = skill?.desc ?? passive?.desc ?? "";
     const abilityLine = `${o.sublabel} · ${skill ? "" : "패시브 "}${abilityName}`;
@@ -1014,8 +1106,8 @@ function drawOffers(
       drawPortraitWell(
         ctx,
         well,
-        o.breed.id,
-        o.breed.id * 7 + i,
+        o.breed!.id,
+        o.breed!.id * 7 + i,
         accent,
         afford,
         t,
@@ -1080,8 +1172,8 @@ function drawOffers(
     drawPortraitWell(
       ctx,
       well,
-      o.breed.id,
-      o.breed.id * 7 + i,
+      o.breed!.id,
+      o.breed!.id * 7 + i,
       accent,
       afford,
       t,
