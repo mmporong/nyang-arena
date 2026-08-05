@@ -492,7 +492,8 @@ function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
     const cr = rects[i];
     if (!cr) return;
     const afford = s.gold >= o.cost;
-    const accent = o.kind === "upgrade" ? T.gold : o.kind === "replace" ? T.melee : T.action;
+    // 영입·교체는 그 고양이의 직업색으로. 카드만 봐도 무엇이 오는지 알 수 있다.
+    const accent = o.kind === "upgrade" ? T.gold : CLASS_COLOR[o.breed.cls];
 
     bevelPanel(
       ctx,

@@ -3,6 +3,7 @@ import { BREEDS, breedById } from "./breeds.ts";
 import {
   BOARD_ROWS,
   cellCol,
+  CLASS_LABEL,
   cellRow,
   MANA_MAX,
   cellToField,
@@ -441,7 +442,7 @@ export function rollOffers(state: RunState): void {
         cost: b.cost,
         breed: b,
         label: b.name,
-        sublabel: `${b.kind === "ranged" ? "원거리" : "근접"} 영입`,
+        sublabel: `${CLASS_LABEL[b.cls]} 영입`,
       });
     }
   } else {
