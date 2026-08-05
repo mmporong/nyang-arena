@@ -1,4 +1,5 @@
 import { BALANCE } from "./balance.ts";
+import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import {
   BOARD_ROWS,
@@ -65,6 +66,8 @@ export interface RunState {
   recordBroken: boolean;
   /** 마지막 패배 사유. notice는 다른 문구로 덮이므로 따로 보관한다. */
   lossReason: "wipe" | "timeout" | null;
+  /** 이 런의 난수 시드. 재현이 필요할 때 이 값만 있으면 된다. */
+  seed: number;
 }
 
 const BEST_KEY = "nyang-arena.best";
@@ -173,10 +176,20 @@ export function waveKindInfo(k: WaveKind): { name: string; hint: string } {
   }
 }
 
+/**
+ * 런마다 0으로 되돌린다.
+ *
+ * uid는 battle.ts에서 **동점 처리 기준**으로 쓰인다 — 타겟 선택, 겹침 분리 축,
+ * 행동 순서 셋 다. 그런데 이 카운터가 런 사이에 이어지면 두 번째 런의 고양이가
+ * `c51`부터 시작해 문자열 비교 결과가 통째로 달라진다(`"c9" < "c51"`은 거짓).
+ * 즉 "결정적으로 만든다"고 적어 둔 코드가 실제로는 프로세스에서 몇 번째 런이냐에
+ * 따라 다르게 굴었다. 브라우저에서도 '다시 도전'을 누르면 동점 처리가 바뀐다.
+ */
 let uidSeq = 0;
 function nextUid(): string {
   uidSeq += 1;
-  return `c${uidSeq}`;
+  // 자릿수를 맞춰야 문자열 비교가 생성 순서와 일치한다("c10" > "c2"가 되는 걸 막는다).
+  return `c${String(uidSeq).padStart(4, "0")}`;
 }
 
 /**
@@ -202,13 +215,13 @@ function pickSynergies(pool: SynergyRule[]): SynergyRule[] {
     byTrigger.set(r.trigger, list);
   }
   // 트리거가 4종이고 한 판에 3개만 쓰므로, 그룹 순서를 섞어야 판마다 다른 조합이 나온다.
-  const groups = [...byTrigger.values()].sort(() => Math.random() - 0.5);
+  const groups = shuffle([...byTrigger.values()]);
   const out: SynergyRule[] = [];
   const usedEffects = new Set<string>();
 
   for (const list of groups) {
     if (out.length >= SYNERGIES_PER_RUN) break;
-    const shuffled = [...list].sort(() => Math.random() - 0.5);
+    const shuffled = shuffle([...list]);
     // 효과까지 겹치면 세 목표가 전부 "공격 속도"인 판이 나와 선택의 맛이 사라진다.
     // 아직 안 쓴 효과를 우선하고, 없으면 아무거나 쓴다.
     const pick = shuffled.find((r) => !usedEffects.has(r.effect.key)) ?? shuffled[0];
@@ -271,7 +284,14 @@ function saveBest(v: number): void {
   }
 }
 
-export function newRun(): RunState {
+/**
+ * @param seed 없으면 시계에서 뽑는다. 시뮬은 런마다 결정적 시드를 넘겨
+ *   같은 명령이 같은 수치를 내게 한다.
+ */
+export function newRun(seed?: number): RunState {
+  const runSeed = seed ?? Date.now();
+  seedRng(runSeed);
+  uidSeq = 0;
   const pool = resolveSynergyPool();
   const state: RunState = {
     // 시작부터 상점을 연다. 예전에는 생선 8마리를 쥐여 주고 첫 전투가 끝날 때까지
@@ -290,6 +310,7 @@ export function newRun(): RunState {
     battleElapsed: 0,
     recordBroken: false,
     lossReason: null,
+    seed: runSeed,
   };
 
   // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
@@ -454,7 +475,7 @@ export function rollOffers(state: RunState): void {
   const owned = state.ally.filter((c): c is Cat => c !== null);
   // 빈 칸이 아니라 보유 한도로 판단한다. 5x5에는 칸이 늘 남아 있다.
   const hasFreeSlot = owned.length < unitCap(state.wave);
-  const pool = [...BREEDS].sort(() => Math.random() - 0.5);
+  const pool = shuffle([...BREEDS]);
 
   if (hasFreeSlot) {
     for (const b of pool.slice(0, 2)) {
@@ -485,7 +506,7 @@ export function rollOffers(state: RunState): void {
   }
 
   // 남은 칸을 강화로 채운다. 대상은 중복되지 않게 고른다.
-  const shuffled = [...owned].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle([...owned]);
   for (const target of shuffled) {
     if (offers.length >= OFFER_SLOTS) break;
     offers.push({

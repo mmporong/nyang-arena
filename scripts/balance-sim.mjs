@@ -10,19 +10,33 @@
  * 실행: npm run sim
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
+import { buyOffer, newRun, rerollOffers, startBattle, waveKind } from "../src/game/run.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
 const DT = 100;
 
-function playOne() {
-  const s = newRun();
+/** 웨이브 성격별 시도/패배와 전투 길이. 보스 통과율이 개입 강도의 판정 기준이다. */
+const tried = new Map();
+const lost = new Map();
+const battleMs = [];
+
+/**
+ * @param seed 런마다 고정 시드를 준다. 없으면 같은 명령이 매번 다른 수치를 내고,
+ *   그러면 밸런스 변경이 좋아진 것인지 노이즈인지 구분할 수 없다.
+ */
+function playOne(seed) {
+  const s = newRun(seed);
   let rerolls = 0;
   let lastWave = 0;
+  let kindAtStart = null;
+  let elapsedBeforeTick = 0;
 
   for (let guard = 0; guard < MAX_WAVE * 400; guard++) {
-    if (s.phase === "gameover") return s.wave;
+    if (s.phase === "gameover") {
+      if (kindAtStart) lost.set(kindAtStart, (lost.get(kindAtStart) ?? 0) + 1);
+      return s.wave;
+    }
 
     if (s.phase === "reward") {
       // 살 수 있는 것 중 가장 비싼 것을 산다 (강화 우선이 되는 경향)
@@ -54,24 +68,29 @@ function playOne() {
 
     if (s.phase === "prepare") {
       if (s.wave > MAX_WAVE) return s.wave;
+      kindAtStart = waveKind(s.wave);
+      tried.set(kindAtStart, (tried.get(kindAtStart) ?? 0) + 1);
       startBattle(s);
       if (s.phase !== "battle") return s.wave; // 배치 불가 등
       continue;
     }
 
+    // 전투가 끝나는 틱에는 battleElapsed가 리셋될 수 있으므로 직전 값을 들고 있는다.
+    elapsedBeforeTick = s.battleElapsed;
     stepBattle(s, DT);
+    if (s.phase !== "battle") battleMs.push(elapsedBeforeTick + DT);
   }
   return s.wave;
 }
 
 const results = [];
-for (let i = 0; i < RUNS; i++) results.push(playOne());
+for (let i = 0; i < RUNS; i++) results.push(playOne(i + 1));
 results.sort((a, b) => a - b);
 
 const q = (p) => results[Math.min(results.length - 1, Math.floor(results.length * p))];
 const mean = results.reduce((a, b) => a + b, 0) / results.length;
 
-console.log(`런 ${RUNS}회 (정책: 살 수 있으면 가장 비싼 것 구매, 재배치 없음)`);
+console.log(`런 ${RUNS}회 (정책: 살 수 있으면 가장 비싼 것 구매, 재배치 없음 · 시드 1~${RUNS})`);
 console.log(`  최소 ${results[0]}  p25 ${q(0.25)}  중앙값 ${q(0.5)}  p75 ${q(0.75)}  최대 ${results[results.length - 1]}`);
 console.log(`  평균 ${mean.toFixed(1)}웨이브`);
 
@@ -81,6 +100,20 @@ const bars = [...hist.entries()].sort((a, b) => a[0] - b[0]);
 for (const [wave, n] of bars) {
   console.log(`  ${String(wave).padStart(2)}웨이브 ${"█".repeat(Math.ceil((n / RUNS) * 60))} ${n}`);
 }
+
+console.log("\n웨이브 성격별 통과율");
+for (const kind of ["mixed", "rush", "snipe", "boss"]) {
+  const tn = tried.get(kind) ?? 0;
+  const ln = lost.get(kind) ?? 0;
+  if (tn === 0) continue;
+  const pass = ((tn - ln) / tn) * 100;
+  console.log(`  ${kind.padEnd(6)} 시도 ${String(tn).padStart(5)}  패배 ${String(ln).padStart(4)}  통과율 ${pass.toFixed(1).padStart(5)}%`);
+}
+
+battleMs.sort((a, b) => a - b);
+const bq = (p) => (battleMs[Math.min(battleMs.length - 1, Math.floor(battleMs.length * p))] ?? 0) / 1000;
+console.log(`\n전투 길이  p50 ${bq(0.5).toFixed(1)}초  p90 ${bq(0.9).toFixed(1)}초  최대 ${(battleMs[battleMs.length - 1] / 1000).toFixed(1)}초`);
+console.log(`60웨이브 상한 도달: ${results.filter((r) => r > MAX_WAVE).length}건`);
 
 // 목표: 중앙값 8~15웨이브. 너무 짧으면 좌절, 너무 길면 한 판이 지루하다.
 const med = q(0.5);

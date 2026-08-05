@@ -14,7 +14,8 @@
     "sweep": "node --experimental-strip-types scripts/balance-sweep.mjs",
     "test": "node --experimental-strip-types scripts/validator-test.mjs",
     "probe": "node --experimental-strip-types scripts/layout-probe.mjs",
-    "docs": "python3 scripts/md2pdf.py"
+    "docs": "python3 scripts/md2pdf.py",
+    "decisions": "node --experimental-strip-types scripts/decision-space.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

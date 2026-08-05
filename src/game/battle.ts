@@ -1,3 +1,4 @@
+import { rng } from "./rng.ts";
 import {
   BOARD_COLS,
   BOARD_ROWS,
@@ -346,7 +347,7 @@ function attack(attacker: Cat, target: Cat): void {
   // 마나는 빗나가도 찬다. TFT도 on-attack 기준이다.
   attacker.mana = Math.min(MANA_MAX, attacker.mana + attacker.breed.manaPerAttack);
 
-  if (Math.random() < target.evade) {
+  if (rng() < target.evade) {
     pop(target, "빗나감", false);
     return;
   }
