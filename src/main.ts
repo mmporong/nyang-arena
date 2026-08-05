@@ -1,7 +1,7 @@
 import { damagePops, stepBattle } from "./game/battle.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
-import { offerRects, render, type DragState } from "./game/render.ts";
-import { buyOffer, moveCat, newRun, startBattle, type RunState } from "./game/run.ts";
+import { offerRects, render, rerollRect, type DragState } from "./game/render.ts";
+import { buyOffer, moveCat, newRun, rerollOffers, startBattle, type RunState } from "./game/run.ts";
 import { loadSprites } from "./game/sprites.ts";
 
 const app = document.getElementById("app");
@@ -89,6 +89,10 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 
   if (state.phase === "reward") {
+    if (rectHas(rerollRect(layout), x, y)) {
+      rerollOffers(state);
+      return;
+    }
     const rects = offerRects(layout, state.offers.length);
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];

@@ -10,7 +10,7 @@
  * 실행: npm run sim
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, startBattle } from "../src/game/run.ts";
+import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
@@ -18,13 +18,18 @@ const DT = 100;
 
 function playOne() {
   const s = newRun();
+  let rerolls = 0;
+  let lastWave = 0;
 
   for (let guard = 0; guard < MAX_WAVE * 400; guard++) {
     if (s.phase === "gameover") return s.wave;
 
     if (s.phase === "reward") {
       // 살 수 있는 것 중 가장 비싼 것을 산다 (강화 우선이 되는 경향)
-      const affordable = s.offers.filter((o) => o.cost <= s.gold).sort((a, b) => b.cost - a.cost);
+      const affordable = s.offers.filter((o) => o.cost <= s.gold)
+        // 봇은 시너지 적합도를 판단하지 못하므로 교체가 순손실이다. 실제 플레이어는
+        // 목표에 맞춰 쓰지만, 여기서는 다른 걸 못 살 때만 집는다.
+        .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);
       if (affordable[0]) {
         const pick = affordable[0];
         const before = s.offers.length;
@@ -32,6 +37,15 @@ function playOne() {
         if (!buyOffer(s, pick) && s.offers.length === before) {
           s.offers = s.offers.filter((o) => o !== pick);
         }
+        continue;
+      }
+      // 살 게 없고 생선이 남으면 다시 뽑는다. 잉여를 전력으로 바꾸는 실제 플레이 방식.
+      if (s.wave !== lastWave) {
+        lastWave = s.wave;
+        rerolls = 0;
+      }
+      if (rerolls < 4 && s.gold >= 12 && rerollOffers(s)) {
+        rerolls += 1;
         continue;
       }
       s.phase = "prepare";

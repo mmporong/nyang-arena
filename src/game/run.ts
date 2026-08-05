@@ -24,13 +24,22 @@ import generated from "../data/synergies.json" with { type: "json" };
 
 export type Phase = "prepare" | "battle" | "reward" | "gameover";
 
+export type OfferKind = "recruit" | "upgrade" | "replace";
+
 export interface Offer {
-  kind: "recruit" | "upgrade";
+  kind: OfferKind;
   cost: number;
-  breed?: Breed;
-  /** upgrade일 때 대상 고양이 uid */
+  /**
+   * 카드에 그릴 고양이. 강화면 대상 고양이, 영입·교체면 새로 올 고양이.
+   * 예전에는 강화 오퍼에 이게 없어서, 보드가 꽉 차 강화 카드만 남는 순간부터
+   * 카드에서 고양이 그림이 통째로 사라졌다.
+   */
+  breed: Breed;
+  /** upgrade·replace 대상 uid */
   targetUid?: string;
   label: string;
+  /** 카드 두 번째 줄. 무엇을 하는 카드인지 */
+  sublabel: string;
 }
 
 export interface RunState {
@@ -41,6 +50,8 @@ export interface RunState {
   ally: Board;
   enemy: Board;
   synergies: SynergyRule[];
+  /** 갱신 때 다시 뽑을 후보 전체 */
+  synergyPool: SynergyRule[];
   activeSynergyIds: Set<string>;
   offers: Offer[];
   /** 마지막 전투 결과 메시지 */
@@ -56,6 +67,23 @@ const BEST_KEY = "nyang-arena.best";
 const SYNERGIES_PER_RUN = 3;
 
 /**
+ * 목표를 다시 뽑는 주기(웨이브).
+ *
+ * 목표가 런 내내 고정이면, 한 번 달성한 뒤로는 배치를 다시 볼 이유가 없다.
+ * 주기적으로 갈아주면 그때마다 구성과 배치를 다시 짜게 된다.
+ */
+const SYNERGY_REFRESH_EVERY = 4;
+
+/**
+ * 카드 다시 뽑기 비용.
+ *
+ * 카드가 세 장뿐이라 수입을 쓸 곳이 없었다. 측정해 보니 웨이브 6부터 잔액이
+ * 8 → 14 → 21 → 29로 지수적으로 쌓였다. 리롤은 그 잉여를 선택지로 바꾼다.
+ * "이 카드가 별로면 다시 뽑을까"가 매 웨이브 생기는 결정이다.
+ */
+export const REROLL_COST = 3;
+
+/**
  * 레벨당 성장은 지수여야 한다.
  * 적은 웨이브마다 복리로 성장하는데 플레이어만 선형으로 크면 몇 웨이브 안에
  * 반드시 따라잡힌다. 실제로 선형 성장 버전은 웨이브 2에서 전멸했다.
@@ -69,12 +97,42 @@ export function upgradeCost(level: number): number {
 }
 
 export function goldForWave(wave: number): number {
-  return Math.round(BALANCE.goldBase + wave * BALANCE.goldPerWave);
+  const base = BALANCE.goldBase + wave * BALANCE.goldPerWave;
+  // 보스는 벽이 아니라 사건이어야 한다. 넘으면 그만한 보상이 있어야 다음 판을 계속한다.
+  return Math.round(waveKind(wave) === "boss" ? base * 1.5 : base);
 }
 
 /** 웨이브를 넘길수록 살아남은 전원이 강해진다. 적의 전체 복리 성장에 대응하는 축. */
 export function veterancyScale(wave: number): number {
   return Math.pow(BALANCE.veterancy, wave - 1);
+}
+
+/**
+ * 웨이브 성격.
+ *
+ * 예전에는 적 구성이 BREEDS[(w*3+i*5) % 8]로 결정돼 매 웨이브 비슷했다.
+ * 그래서 배치를 한 번 정하면 다시 손댈 이유가 없고 싸움 구도가 고정됐다.
+ * 성격을 돌려가며 내면 "이번엔 어떻게 맞설까"가 매번 새로 생긴다.
+ */
+export type WaveKind = "mixed" | "rush" | "snipe" | "boss";
+
+const WAVE_CYCLE: readonly WaveKind[] = ["mixed", "rush", "mixed", "snipe", "boss"];
+
+export function waveKind(wave: number): WaveKind {
+  return WAVE_CYCLE[(wave - 1) % WAVE_CYCLE.length] ?? "mixed";
+}
+
+export function waveKindInfo(k: WaveKind): { name: string; hint: string } {
+  switch (k) {
+    case "rush":
+      return { name: "돌격대", hint: "전부 근접이다. 앞줄이 버텨야 한다" };
+    case "snipe":
+      return { name: "저격대", hint: "원거리가 많다. 빨리 붙어야 한다" };
+    case "boss":
+      return { name: "대장묘", hint: "수는 적지만 한 마리가 아주 강하다" };
+    case "mixed":
+      return { name: "혼성대", hint: "근접과 원거리가 섞여 있다" };
+  }
 }
 
 let uidSeq = 0;
@@ -176,6 +234,7 @@ export function newRun(): RunState {
     ally: emptyBoard(),
     enemy: emptyBoard(),
     synergies: pickSynergies(pool),
+    synergyPool: pool,
     activeSynergyIds: new Set(),
     offers: [],
     notice: "근접은 앞줄, 원거리는 뒷줄",
@@ -203,29 +262,67 @@ export function newRun(): RunState {
   return state;
 }
 
-/** 웨이브가 오를수록 적이 많아지고 스탯이 ×1.25^(wave-1)로 커진다. */
+const MELEE_IDS = BREEDS.filter((b) => b.kind === "melee").map((b) => b.id);
+const RANGED_IDS = BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
+
+/** 웨이브 성격에 맞는 적 품종 목록을 뽑는다. */
+function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
+  const pick = (pool: number[], i: number) => pool[(wave * 3 + i * 5) % pool.length] ?? pool[0]!;
+  const out: number[] = [];
+  for (let i = 0; i < count; i++) {
+    switch (kind) {
+      case "rush":
+        out.push(pick(MELEE_IDS, i));
+        break;
+      case "snipe":
+        // 호위 근접 둘 + 나머지 원거리. 호위를 하나만 두면 사실상 전부 원거리가 되어
+        // 아군 근접이 접근하는 내내 일방적으로 얻어맞는다(측정: 사망의 62%가 이 웨이브).
+        out.push(i < 2 ? pick(MELEE_IDS, i) : pick(RANGED_IDS, i));
+        break;
+      case "boss":
+      case "mixed":
+        out.push(BREEDS[(wave * 3 + i * 5) % BREEDS.length]?.id ?? 1);
+        break;
+    }
+  }
+  return out;
+}
+
+/** 웨이브가 오를수록 적이 많아지고 스탯이 커진다. 성격에 따라 수와 배치가 달라진다. */
 export function buildEnemyWave(state: RunState): void {
   const w = state.wave;
+  const kind = waveKind(w);
   const scale = Math.pow(BALANCE.enemyScale, w - 1);
-  const count = Math.min(BOARD_SIZE, Math.ceil(w / BALANCE.enemyCountDivisor));
+
+  let count = Math.min(BOARD_SIZE, Math.ceil(w / BALANCE.enemyCountDivisor));
+  let statBoost = 1;
+  // 돌격대는 전부 근접이라는 것만으로 이미 다른 문제다. 수까지 늘리면 과했다.
+  // 저격대는 원거리가 일방적으로 때리는 구간이 있어 같은 수라도 체감이 세다.
+  if (kind === "snipe") count = Math.max(2, count - 1);
+  if (kind === "boss") {
+    // 수를 반으로 줄이고 그만큼 한 마리를 크게 만든다. 총 전력은 비슷하되 형태가 다르다.
+    count = Math.max(1, Math.ceil(count / 2));
+    statBoost = 1.45;
+  }
 
   state.enemy = emptyBoard();
-  // 앞줄(플레이어와 마주보는 열)부터 채워 전투가 빨리 붙게 한다.
-  const order = [0, 3, 6, 1, 4, 7, 2, 5, 8];
+  // 저격대는 원거리를 뒷줄에 두는 게 자연스럽다. 나머지는 앞줄부터 채워 빨리 붙게 한다.
+  const order = kind === "snipe" ? [0, 2, 5, 8, 3, 6, 1, 4, 7] : [0, 3, 6, 1, 4, 7, 2, 5, 8];
+  const ids = enemyBreedIds(kind, count, w);
+
   for (let i = 0; i < count; i++) {
     const cell = order[i];
-    if (cell === undefined) break;
-    const breed = BREEDS[(w * 3 + i * 5) % BREEDS.length];
-    if (!breed) continue;
+    const id = ids[i];
+    if (cell === undefined || id === undefined) break;
+    const breed = breedById(id);
     const cat = makeCat(breed, "enemy", cell);
-    cat.maxHp = Math.round(cat.maxHp * scale);
+    cat.maxHp = Math.round(cat.maxHp * scale * statBoost);
     cat.hp = cat.maxHp;
-    cat.atk = Math.round(cat.atk * scale);
+    cat.atk = Math.round(cat.atk * scale * statBoost);
     state.enemy[cell] = cat;
   }
 }
 
-/** 아군 보드 구성으로 활성 시너지를 판정하고 스탯에 반영한다. */
 /** 시너지 판정용 보드 스냅샷. 배치(열)까지 포함해야 앞줄/뒷줄 조건을 볼 수 있다. */
 export function boardUnits(state: RunState): BoardUnit[] {
   return livingCats(state.ally).map((c) => ({
@@ -280,20 +377,43 @@ export function applySynergies(state: RunState): void {
 }
 
 /**
- * 보드가 꽉 찼는데 영입 카드를 계속 내밀면, 눌러도 아무 일이 안 일어나고
- * 이유도 보이지 않는다. 자리가 없으면 강화만 제시한다.
+ * 보상 카드 세 장.
+ *
+ * 보드가 꽉 차면 예전에는 강화 카드만 남았다. 그러면 후반 내내 "숫자 키우기"만
+ * 남고 구성에 대한 선택이 사라진다 — 다 배치하고 나면 할 게 없다는 문제의 원인이다.
+ * 자리가 없을 때는 **교체** 카드를 낸다. 무엇을 내보낼지가 새로운 결정이 된다.
  */
 export function rollOffers(state: RunState): void {
   const offers: Offer[] = [];
   const owned = state.ally.filter((c): c is Cat => c !== null);
   const hasFreeSlot = state.ally.some((c) => c === null);
+  const pool = [...BREEDS].sort(() => Math.random() - 0.5);
 
   if (hasFreeSlot) {
-    // 조건이 전부 "모으면 좋은" 방향이라, 영입이 시너지를 깨뜨리는 경우가 없다.
-    // (예전 all_different_5는 반대라서 영입 후보를 걸러내야 했다)
-    const pool = [...BREEDS].sort(() => Math.random() - 0.5).slice(0, 2);
-    for (const b of pool) {
-      offers.push({ kind: "recruit", cost: b.cost, breed: b, label: `${b.name} 영입` });
+    for (const b of pool.slice(0, 2)) {
+      offers.push({
+        kind: "recruit",
+        cost: b.cost,
+        breed: b,
+        label: b.name,
+        sublabel: `${b.kind === "ranged" ? "원거리" : "근접"} 영입`,
+      });
+    }
+  } else {
+    // 내보낼 대상은 투자가 가장 적은 고양이로 고정한다.
+    // 무작위로 고르면 레벨 높은 애가 후보로 떠서 카드를 아예 안 누르게 된다.
+    const weakest = [...owned].sort((a, b) => a.level - b.level || (a.uid < b.uid ? -1 : 1))[0];
+    if (weakest) {
+      for (const b of pool.filter((x) => x.id !== weakest.breed.id).slice(0, 2)) {
+        offers.push({
+          kind: "replace",
+          cost: b.cost,
+          breed: b,
+          targetUid: weakest.uid,
+          label: b.name,
+          sublabel: `${weakest.breed.name} 방출`,
+        });
+      }
     }
   }
 
@@ -304,8 +424,10 @@ export function rollOffers(state: RunState): void {
     offers.push({
       kind: "upgrade",
       cost: upgradeCost(target.level),
+      breed: target.breed,
       targetUid: target.uid,
       label: `${target.breed.name} Lv.${target.level + 1}`,
+      sublabel: "강화",
     });
   }
 
@@ -315,7 +437,7 @@ export function rollOffers(state: RunState): void {
 export function buyOffer(state: RunState, offer: Offer): boolean {
   if (state.gold < offer.cost) return false;
 
-  if (offer.kind === "recruit" && offer.breed) {
+  if (offer.kind === "recruit") {
     const free = state.ally.findIndex((c) => c === null);
     if (free < 0) {
       // 살 수 없는 카드를 목록에 남겨두면 무한히 재시도된다. 즉시 걷어낸다.
@@ -324,6 +446,14 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
       return false;
     }
     state.ally[free] = makeCat(offer.breed, "ally", free);
+  } else if (offer.kind === "replace" && offer.targetUid) {
+    const idx = state.ally.findIndex((c) => c?.uid === offer.targetUid);
+    if (idx < 0) {
+      state.offers = state.offers.filter((o) => o !== offer);
+      return false;
+    }
+    // 자리를 그대로 물려받는다. 배치를 다시 짤 필요가 없어 교체가 부담스럽지 않다.
+    state.ally[idx] = makeCat(offer.breed, "ally", idx);
   } else if (offer.kind === "upgrade" && offer.targetUid) {
     const cat = state.ally.find((c) => c?.uid === offer.targetUid);
     if (!cat) return false;
@@ -348,6 +478,18 @@ export function resetPositions(state: RunState): void {
       c.fy = fy;
     }
   }
+}
+
+/** 카드를 다시 뽑는다. 생선이 모자라면 아무 일도 없다. */
+export function rerollOffers(state: RunState): boolean {
+  if (state.gold < REROLL_COST) {
+    state.notice = "생선이 부족합니다";
+    return false;
+  }
+  state.gold -= REROLL_COST;
+  rollOffers(state);
+  state.notice = "";
+  return true;
 }
 
 export function startBattle(state: RunState): void {
@@ -397,11 +539,19 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
     c.fx = home.fx;
     c.fy = home.fy;
   }
+  let refreshed = false;
+  if ((state.wave - 1) % SYNERGY_REFRESH_EVERY === 0) {
+    state.synergies = pickSynergies(state.synergyPool);
+    refreshed = true;
+  }
+
   buildEnemyWave(state);
   rollOffers(state);
   applySynergies(state);
   state.phase = "reward";
-  state.notice = `웨이브 클리어! +${goldForWave(state.wave - 1)}생선`;
+  state.notice = refreshed
+    ? "새 목표가 걸렸습니다"
+    : `웨이브 클리어! +${goldForWave(state.wave - 1)}생선`;
 }
 
 export function moveCat(state: RunState, from: number, to: number): void {

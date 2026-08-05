@@ -1,8 +1,8 @@
 import { damagePops, POP_LIFE_MS, shots, SHOT_LIFE_MS } from "./battle.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
-import { boardUnits, type Offer, type RunState } from "./run.ts";
-import { bevelPanel, pixelText, pixelTextWidth, roundRect, T, uiText } from "./theme.ts";
+import { boardUnits, REROLL_COST, waveKind, waveKindInfo, type Offer, type RunState } from "./run.ts";
+import { bevelPanel, pixelText, roundRect, T, uiText } from "./theme.ts";
 import { effectLabel, synergyProgress, triggerLabel } from "../validate/synergy-schema.ts";
 import { BOARD_SIZE, livingCats, type Cat, type Side } from "./types.ts";
 
@@ -348,6 +348,18 @@ function drawDivider(ctx: CanvasRenderingContext2D, L: Layout): void {
 /* 하단: 팀 상태 / 보상 카드                                            */
 /* ------------------------------------------------------------------ */
 
+/** 다시 뽑기 버튼. 카드 패널 머리줄 오른쪽 끝에 둔다. */
+export function rerollRect(L: Layout): Rect {
+  const h = Math.max(22, L.offers.h * 0.26);
+  const w = Math.max(84, L.offers.w * 0.19);
+  return {
+    x: L.offers.x + L.offers.w - w,
+    y: L.offers.y - h - L.offers.h * 0.08,
+    w,
+    h,
+  };
+}
+
 export function offerRects(L: Layout, count: number): Rect[] {
   const r = L.offers;
   const n = Math.max(1, count);
@@ -396,55 +408,59 @@ function drawTeamStrip(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
 
 function drawOffers(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const rects = offerRects(L, s.offers.length);
-  const fs = Math.max(11, L.offers.h * 0.2);
+  const fs = Math.max(11, L.offers.h * 0.19);
 
   s.offers.forEach((o: Offer, i) => {
     const cr = rects[i];
     if (!cr) return;
     const afford = s.gold >= o.cost;
+    const accent = o.kind === "upgrade" ? T.gold : o.kind === "replace" ? T.melee : T.action;
 
     bevelPanel(
       ctx,
       cr,
       cr.h * 0.16,
       afford ? "rgba(239,224,198,0.10)" : "rgba(239,224,198,0.035)",
-      afford ? "rgba(232,145,60,0.35)" : "rgba(0,0,0,0.25)",
+      afford ? "rgba(0,0,0,0.35)" : "rgba(0,0,0,0.25)",
       3,
     );
     roundRect(ctx, cr, cr.h * 0.16);
-    ctx.strokeStyle = afford ? T.action : "rgba(239,224,198,0.12)";
+    ctx.strokeStyle = afford ? accent : "rgba(239,224,198,0.12)";
     ctx.lineWidth = afford ? 2 : 1;
     ctx.stroke();
 
-    if (o.breed) {
-      const img = spriteFor(o.breed.id, "wink");
-      const sz = cr.h * 0.5;
-      if (img) ctx.drawImage(img, cr.x + cr.w / 2 - sz / 2, cr.y + cr.h * 0.04, sz, sz);
+    // 강화 카드도 대상 고양이를 그린다. 예전에는 breed가 없어서 보드가 꽉 차는
+    // 순간부터 카드에서 고양이가 통째로 사라졌다.
+    const sz = cr.h * 0.44;
+    const img = spriteFor(o.breed.id, o.kind === "upgrade" ? "wink" : "idle");
+    const left = cr.x + cr.w * 0.06;
+    if (img) {
+      ctx.save();
+      if (!afford) ctx.globalAlpha = 0.45;
+      ctx.drawImage(img, left, cr.y + cr.h / 2 - sz / 2, sz, sz);
+      ctx.restore();
     }
 
-    uiText(ctx, o.label, cr.x + cr.w / 2, cr.y + cr.h * 0.7, fs, afford ? T.text : T.muted, {
-      align: "center",
+    const textX = left + sz + cr.w * 0.05;
+    const textW = cr.x + cr.w - cr.w * 0.06 - textX;
+
+    uiText(ctx, o.label, textX, cr.y + cr.h * 0.34, fs, afford ? T.text : T.muted, {
+      align: "left",
       weight: 800,
-      maxWidth: cr.w * 0.92,
+      maxWidth: textW,
+    });
+    uiText(ctx, o.sublabel, textX, cr.y + cr.h * 0.58, fs * 0.76, afford ? accent : T.muted, {
+      align: "left",
+      weight: 600,
+      maxWidth: textW,
     });
 
-    // 종류 · 가격. 가격은 픽셀 숫자로 통일해 HUD의 생선과 같은 언어를 쓴다.
-    const kind = o.breed ? (o.breed.kind === "ranged" ? "원거리" : "근접") : "강화";
-    const kc = o.breed ? (o.breed.kind === "ranged" ? T.ranged : T.melee) : T.gold;
-    const cs = fs * 0.72;
     const px = Math.max(1, cr.h * 0.03);
-    const numW = pixelTextWidth(String(o.cost), px);
-    // 폭을 재기 전에 실제로 쓸 폰트를 세팅해야 한다. 직전 상태로 재면 어긋난다.
-    ctx.font = `700 ${Math.round(cs)}px "Pretendard", "Apple SD Gothic Neo", system-ui, sans-serif`;
-    const kindW = ctx.measureText(kind).width;
-    const total = kindW + cr.w * 0.05 + numW;
-    const startX = cr.x + cr.w / 2 - total / 2;
-    uiText(ctx, kind, startX, cr.y + cr.h * 0.9, cs, kc, { align: "left", weight: 700 });
     pixelText(
       ctx,
       String(o.cost),
-      cr.x + cr.w / 2 + total / 2,
-      cr.y + cr.h * 0.9,
+      cr.x + cr.w - cr.w * 0.06,
+      cr.y + cr.h * 0.8,
       px,
       afford ? T.fish : T.muted,
       "right",
@@ -472,15 +488,36 @@ function drawBottomZone(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
   ctx.stroke();
 
   if (reward) {
-    uiText(
+    const headY = panel.y + (L.offers.y - panel.y) * 0.5;
+    uiText(ctx, "생선을 쓰거나, 그냥 다음 웨이브로", L.offers.x, headY, Math.max(10, L.offers.h * 0.16), T.muted, {
+      align: "left",
+      weight: 600,
+    });
+
+    const rr = rerollRect(L);
+    const canRoll = s.gold >= REROLL_COST;
+    roundRect(ctx, rr, rr.h * 0.5);
+    ctx.fillStyle = canRoll ? "rgba(111,182,220,0.14)" : "rgba(239,224,198,0.04)";
+    ctx.fill();
+    ctx.strokeStyle = canRoll ? T.fish : "rgba(239,224,198,0.12)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    const rfs = Math.max(10, rr.h * 0.46);
+    uiText(ctx, "다시 뽑기", rr.x + rr.w * 0.42, rr.y + rr.h / 2, rfs, canRoll ? T.text : T.muted, {
+      align: "right",
+      weight: 700,
+    });
+    pixelText(
       ctx,
-      "생선을 쓰거나, 그냥 다음 웨이브로",
-      L.w / 2,
-      panel.y + (L.offers.y - panel.y) * 0.55,
-      Math.max(10, L.offers.h * 0.16),
-      T.muted,
-      { align: "center", weight: 600 },
+      String(REROLL_COST),
+      rr.x + rr.w - rr.w * 0.12,
+      rr.y + rr.h / 2,
+      Math.max(1, rr.h * 0.09),
+      canRoll ? T.fish : T.muted,
+      "right",
+      false,
     );
+
     drawOffers(ctx, L, s);
   } else {
     drawTeamStrip(ctx, L, s);
@@ -585,13 +622,32 @@ function drawButton(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void
   });
 }
 
+/**
+ * 안내 띠. 준비 단계에서는 이번 상대의 성격을 알려준다.
+ * 무엇이 오는지 모르면 배치를 바꿀 이유가 없다.
+ */
 function drawNotice(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
-  if (!s.notice || s.phase === "gameover") return;
+  if (s.phase === "gameover") return;
   const r = L.notice;
-  uiText(ctx, s.notice, L.w / 2, r.y + r.h / 2, Math.max(11, r.h * 0.58), T.paperDim, {
-    align: "center",
-    weight: 600,
-  });
+  const size = Math.max(11, r.h * 0.56);
+  const cy = r.y + r.h / 2;
+
+  if (s.phase === "prepare") {
+    const info = waveKindInfo(waveKind(s.wave));
+    const nameW = ctx.measureText(info.name).width;
+    uiText(ctx, info.name, L.w / 2 - nameW * 0.5 - r.h * 0.2, cy, size, T.action, {
+      align: "right",
+      weight: 800,
+    });
+    uiText(ctx, info.hint, L.w / 2 - nameW * 0.5, cy, size * 0.94, T.paperDim, {
+      align: "left",
+      weight: 600,
+    });
+    return;
+  }
+
+  if (!s.notice) return;
+  uiText(ctx, s.notice, L.w / 2, cy, size, T.paperDim, { align: "center", weight: 600 });
 }
 
 function drawGameOver(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {

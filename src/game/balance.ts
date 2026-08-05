@@ -11,8 +11,12 @@ export const BALANCE = {
   goldBase: 5,
   goldPerWave: 1.5,
 
-  /** 적 스탯 배수 = enemyScale^(wave-1) */
-  enemyScale: 1.25,
+  /**
+   * 적 스탯 배수 = enemyScale^(wave-1).
+   * 웨이브 성격(돌격·저격·보스)이 들어오면서 체감 난이도가 올라, 사이클을 두 바퀴
+   * 이상 보도록 1.25에서 낮췄다.
+   */
+  enemyScale: 1.22,
   /** 적 수 = ceil(wave / enemyCountDivisor), 최대 9 */
   enemyCountDivisor: 1.4,
 
