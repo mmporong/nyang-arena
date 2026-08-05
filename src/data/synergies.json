@@ -1,0 +1,122 @@
+[
+  {
+    "id": "night_pack",
+    "name": "야행성",
+    "desc": "같은 색 3마리가 어둠 속에서 발톱을 세운다",
+    "trigger": "same_color_3",
+    "effect": {
+      "key": "atk_mul",
+      "value": 1.35
+    }
+  },
+  {
+    "id": "shadow_veil",
+    "name": "그림자막",
+    "desc": "같은 털빛이 겹쳐 윤곽이 흐려진다",
+    "trigger": "same_color_3",
+    "effect": {
+      "key": "evade_add",
+      "value": 0.16
+    }
+  },
+  {
+    "id": "same_hue_rush",
+    "name": "동색 돌격",
+    "desc": "같은 색끼리 박자를 맞춰 달려든다",
+    "trigger": "same_color_3",
+    "effect": {
+      "key": "atkspd_mul",
+      "value": 1.25
+    }
+  },
+  {
+    "id": "clan_pride",
+    "name": "한핏줄",
+    "desc": "같은 색 셋이 서로를 지키며 버틴다",
+    "trigger": "same_color_3",
+    "effect": {
+      "key": "hp_mul",
+      "value": 1.28
+    }
+  },
+  {
+    "id": "litter_bond",
+    "name": "한배 형제",
+    "desc": "같은 품종 둘이 서로 등을 맡긴다",
+    "trigger": "same_breed_2",
+    "effect": {
+      "key": "hp_mul",
+      "value": 1.3
+    }
+  },
+  {
+    "id": "twin_claws",
+    "name": "쌍발톱",
+    "desc": "같은 품종의 발톱이 같은 곳을 노린다",
+    "trigger": "same_breed_2",
+    "effect": {
+      "key": "atk_mul",
+      "value": 1.22
+    }
+  },
+  {
+    "id": "mirror_step",
+    "name": "거울걸음",
+    "desc": "닮은 둘이 같은 리듬으로 움직인다",
+    "trigger": "same_breed_2",
+    "effect": {
+      "key": "atkspd_mul",
+      "value": 1.18
+    }
+  },
+  {
+    "id": "kin_guard",
+    "name": "동기 엄호",
+    "desc": "같은 품종이 서로의 사각을 메운다",
+    "trigger": "same_breed_2",
+    "effect": {
+      "key": "evade_add",
+      "value": 0.12
+    }
+  },
+  {
+    "id": "motley_crew",
+    "name": "잡색 부대",
+    "desc": "제각각인 다섯이 어수선하게 흩어진다",
+    "trigger": "all_different_5",
+    "effect": {
+      "key": "evade_add",
+      "value": 0.18
+    }
+  },
+  {
+    "id": "rainbow_roar",
+    "name": "무지개 포효",
+    "desc": "다섯 색이 한꺼번에 울부짖는다",
+    "trigger": "all_different_5",
+    "effect": {
+      "key": "atk_mul",
+      "value": 1.45
+    }
+  },
+  {
+    "id": "patchwork_guard",
+    "name": "조각보",
+    "desc": "다른 색들이 겹쳐 두꺼운 이불이 된다",
+    "trigger": "all_different_5",
+    "effect": {
+      "key": "hp_mul",
+      "value": 1.4
+    }
+  },
+  {
+    "id": "scatter_dash",
+    "name": "흩어지기",
+    "desc": "제각각이라 서로 걸리지 않고 내달린다",
+    "trigger": "all_different_5",
+    "effect": {
+      "key": "atkspd_mul",
+      "value": 1.3
+    }
+  }
+]

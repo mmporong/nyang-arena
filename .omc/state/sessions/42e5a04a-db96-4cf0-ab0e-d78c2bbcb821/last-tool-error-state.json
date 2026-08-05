@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"pkill -f \\\"vite preview\\\" ; sleep 1; pwd && (npx vite preview --port 4180 --strictPort --outDir dist > /tmp/claude-1000/-home-lim/42e5a04a-db96-4cf0-ab0e-d78c2bbcb821/scratchpad/preview2.l...",
+  "error": "Exit code 144",
+  "timestamp": "2026-08-05T02:11:37.458Z",
+  "retry_count": 1
+}

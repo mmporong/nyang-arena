@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>냥 아레나 — Nyang Arena</title>
+    <meta
+      name="description"
+      content="픽셀 고양이 오토배틀러. 배치하고, 관전하고, 몇 웨이브까지 버티는지 겨루세요."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+        background: #14121c;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #app {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+      }
+      canvas {
+        display: block;
+        touch-action: none;
+        image-rendering: pixelated;
+        cursor: default;
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #cfc6e8;
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        background: #14121c;
+        transition: opacity 0.3s;
+      }
+      #boot.gone {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="boot">고양이 부르는 중…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,73 @@
+[
+  {
+    "id": "quad_color",
+    "name": "네색",
+    "desc": "화이트리스트에 없는 트리거",
+    "trigger": "same_color_4",
+    "effect": { "key": "atk_mul", "value": 1.3 }
+  },
+  {
+    "id": "finisher",
+    "name": "즉사",
+    "desc": "허용되지 않은 효과 키",
+    "trigger": "same_color_3",
+    "effect": { "key": "instant_kill", "value": 1 }
+  },
+  {
+    "id": "9bad_id",
+    "name": "잘못된 아이디",
+    "desc": "id가 숫자로 시작",
+    "trigger": "same_breed_2",
+    "effect": { "key": "atk_mul", "value": 1.2 }
+  },
+  {
+    "id": "dup_id",
+    "name": "중복 원본",
+    "desc": "같은 id가 배치 안에 두 번 등장하는 첫 번째",
+    "trigger": "same_color_3",
+    "effect": { "key": "hp_mul", "value": 1.2 }
+  },
+  {
+    "id": "dup_id",
+    "name": "중복 사본",
+    "desc": "같은 id 두 번째 — 폐기 대상",
+    "trigger": "same_color_3",
+    "effect": { "key": "atk_mul", "value": 1.3 }
+  },
+  {
+    "id": "stringy",
+    "name": "문자열 수치",
+    "desc": "value가 숫자가 아님",
+    "trigger": "all_different_5",
+    "effect": { "key": "atk_mul", "value": "아주 높음" }
+  },
+  {
+    "id": "no_effect",
+    "name": "효과 없음",
+    "desc": "effect가 객체가 아님",
+    "trigger": "same_color_3",
+    "effect": "강함"
+  },
+  {
+    "id": "nan_value",
+    "name": "무한대",
+    "desc": "유한하지 않은 수",
+    "trigger": "same_breed_2",
+    "effect": { "key": "hp_mul", "value": 1e999 }
+  },
+  {
+    "id": "tag_soup",
+    "name": "태그<script>alert(1)</script>",
+    "desc": "이름에 태그가 섞임 — 새니타이즈 대상",
+    "trigger": "same_breed_2",
+    "effect": { "key": "hp_mul", "value": 1.2 }
+  },
+  {
+    "id": "overshoot",
+    "name": "폭주",
+    "desc": "범위를 크게 벗어난 배수 — 클램프 대상",
+    "trigger": "same_color_3",
+    "effect": { "key": "atk_mul", "value": 9.9 }
+  },
+  "이건 객체가 아니라 문자열입니다"
+]

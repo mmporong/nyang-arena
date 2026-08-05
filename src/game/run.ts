@@ -1,0 +1,359 @@
+import { BALANCE } from "./balance.ts";
+import { BREEDS, breedById } from "./breeds.ts";
+import {
+  BOARD_SIZE,
+  emptyBoard,
+  livingCats,
+  type Board,
+  type Breed,
+  type Cat,
+  type CatColor,
+  type Side,
+} from "./types.ts";
+import {
+  isTriggered,
+  PRESET_SYNERGIES,
+  validateAll,
+  type SynergyRule,
+} from "../validate/synergy-schema.ts";
+// import attribute를 붙여야 Vite와 Node 양쪽에서 같은 모듈이 로드된다.
+// (밸런스 하네스가 이 모듈을 Node에서 직접 임포트한다)
+import generated from "../data/synergies.json" with { type: "json" };
+
+export type Phase = "prepare" | "battle" | "reward" | "gameover";
+
+export interface Offer {
+  kind: "recruit" | "upgrade";
+  cost: number;
+  breed?: Breed;
+  /** upgrade일 때 대상 고양이 uid */
+  targetUid?: string;
+  label: string;
+}
+
+export interface RunState {
+  phase: Phase;
+  wave: number;
+  gold: number;
+  best: number;
+  ally: Board;
+  enemy: Board;
+  synergies: SynergyRule[];
+  activeSynergyIds: Set<string>;
+  offers: Offer[];
+  /** 마지막 전투 결과 메시지 */
+  notice: string;
+  battleElapsed: number;
+}
+
+const BEST_KEY = "nyang-arena.best";
+const SYNERGIES_PER_RUN = 3;
+
+/**
+ * 레벨당 성장은 지수여야 한다.
+ * 적은 웨이브마다 복리로 성장하는데 플레이어만 선형으로 크면 몇 웨이브 안에
+ * 반드시 따라잡힌다. 실제로 선형 성장 버전은 웨이브 2에서 전멸했다.
+ */
+export function levelScale(level: number): number {
+  return Math.pow(BALANCE.levelScale, level - 1);
+}
+
+export function upgradeCost(level: number): number {
+  return Math.round(BALANCE.upgradeCostBase * Math.pow(BALANCE.upgradeCostGrowth, level - 1));
+}
+
+export function goldForWave(wave: number): number {
+  return Math.round(BALANCE.goldBase + wave * BALANCE.goldPerWave);
+}
+
+/** 웨이브를 넘길수록 살아남은 전원이 강해진다. 적의 전체 복리 성장에 대응하는 축. */
+export function veterancyScale(wave: number): number {
+  return Math.pow(BALANCE.veterancy, wave - 1);
+}
+
+let uidSeq = 0;
+function nextUid(): string {
+  uidSeq += 1;
+  return `c${uidSeq}`;
+}
+
+/**
+ * 런에 쓸 시너지 풀을 결정한다.
+ * 빌드타임 생성분(synergies.json)을 검증기에 통과시키고, 통과분이 부족하면
+ * 프리셋으로 채운다. AC-12: 생성 데이터가 비어도 게임은 정상 동작해야 한다.
+ */
+export function resolveSynergyPool(): SynergyRule[] {
+  const { accepted } = validateAll(generated);
+  if (accepted.length >= SYNERGIES_PER_RUN) return accepted;
+  const byId = new Map(accepted.map((r) => [r.id, r]));
+  for (const p of PRESET_SYNERGIES) if (!byId.has(p.id)) byId.set(p.id, p);
+  return [...byId.values()];
+}
+
+function pickSynergies(pool: SynergyRule[]): SynergyRule[] {
+  // 트리거가 겹치면 한 조합으로 여러 개가 동시에 켜져 밸런스가 무너진다.
+  // 트리거당 최대 1개만 뽑는다.
+  const byTrigger = new Map<string, SynergyRule[]>();
+  for (const r of pool) {
+    const list = byTrigger.get(r.trigger) ?? [];
+    list.push(r);
+    byTrigger.set(r.trigger, list);
+  }
+  const out: SynergyRule[] = [];
+  for (const list of byTrigger.values()) {
+    const pick = list[Math.floor(Math.random() * list.length)];
+    if (pick) out.push(pick);
+  }
+  return out.slice(0, SYNERGIES_PER_RUN);
+}
+
+export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat {
+  const scale = levelScale(level);
+  const maxHp = Math.round(breed.hp * scale);
+  return {
+    uid: nextUid(),
+    breed,
+    level,
+    maxHp,
+    hp: maxHp,
+    atk: Math.round(breed.atk * scale),
+    atkInterval: breed.atkInterval,
+    evade: 0,
+    cooldown: breed.atkInterval,
+    side,
+    cell,
+    alive: true,
+    pose: side === "ally" ? "idle" : "back",
+    poseTimer: 0,
+    lunge: 0,
+    flash: 0,
+  };
+}
+
+export function loadBest(): number {
+  try {
+    const v = Number(localStorage.getItem(BEST_KEY));
+    return Number.isFinite(v) && v > 0 ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveBest(v: number): void {
+  try {
+    localStorage.setItem(BEST_KEY, String(v));
+  } catch {
+    /* 사파리 프라이빗 모드 등에서 실패해도 게임 진행에는 영향 없음 */
+  }
+}
+
+export function newRun(): RunState {
+  const pool = resolveSynergyPool();
+  const state: RunState = {
+    phase: "prepare",
+    wave: 1,
+    gold: BALANCE.startGold,
+    best: loadBest(),
+    ally: emptyBoard(),
+    enemy: emptyBoard(),
+    synergies: pickSynergies(pool),
+    activeSynergyIds: new Set(),
+    offers: [],
+    notice: "고양이를 배치하고 전투를 시작하세요",
+    battleElapsed: 0,
+  };
+
+  // 시작 3마리를 가운데 줄에 세운다. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
+  const starters = [BREEDS[0], BREEDS[3], BREEDS[7]].slice(0, BALANCE.starterCount);
+  starters.forEach((b, i) => {
+    if (!b) return;
+    const cell = 3 + i;
+    state.ally[cell] = makeCat(b, "ally", cell);
+  });
+
+  buildEnemyWave(state);
+  rollOffers(state);
+  return state;
+}
+
+/** 웨이브가 오를수록 적이 많아지고 스탯이 ×1.25^(wave-1)로 커진다. */
+export function buildEnemyWave(state: RunState): void {
+  const w = state.wave;
+  const scale = Math.pow(BALANCE.enemyScale, w - 1);
+  const count = Math.min(BOARD_SIZE, Math.ceil(w / BALANCE.enemyCountDivisor));
+
+  state.enemy = emptyBoard();
+  // 앞줄(플레이어와 마주보는 열)부터 채워 전투가 빨리 붙게 한다.
+  const order = [0, 3, 6, 1, 4, 7, 2, 5, 8];
+  for (let i = 0; i < count; i++) {
+    const cell = order[i];
+    if (cell === undefined) break;
+    const breed = BREEDS[(w * 3 + i * 5) % BREEDS.length];
+    if (!breed) continue;
+    const cat = makeCat(breed, "enemy", cell);
+    cat.maxHp = Math.round(cat.maxHp * scale);
+    cat.hp = cat.maxHp;
+    cat.atk = Math.round(cat.atk * scale);
+    state.enemy[cell] = cat;
+  }
+}
+
+/** 아군 보드 구성으로 활성 시너지를 판정하고 스탯에 반영한다. */
+export function applySynergies(state: RunState): void {
+  const cats = livingCats(state.ally);
+  const colors: CatColor[] = cats.map((c) => c.breed.color);
+  const breedIds = cats.map((c) => c.breed.id);
+
+  state.activeSynergyIds = new Set(
+    state.synergies.filter((s) => isTriggered(s.trigger, colors, breedIds)).map((s) => s.id),
+  );
+
+  for (const cat of cats) {
+    // 항상 기본값에서 다시 계산한다. 배치를 바꿀 때마다 배수가 누적되면 안 된다.
+    const scale = levelScale(cat.level) * veterancyScale(state.wave);
+    let maxHp = cat.breed.hp * scale;
+    let atk = cat.breed.atk * scale;
+    let interval = cat.breed.atkInterval;
+    let evade = 0;
+
+    for (const s of state.synergies) {
+      if (!state.activeSynergyIds.has(s.id)) continue;
+      switch (s.effect.key) {
+        case "atk_mul":
+          atk *= s.effect.value;
+          break;
+        case "hp_mul":
+          maxHp *= s.effect.value;
+          break;
+        case "atkspd_mul":
+          interval /= s.effect.value;
+          break;
+        case "evade_add":
+          evade += s.effect.value;
+          break;
+      }
+    }
+
+    const ratio = cat.maxHp > 0 ? cat.hp / cat.maxHp : 1;
+    cat.maxHp = Math.round(maxHp);
+    cat.hp = Math.max(1, Math.round(cat.maxHp * ratio));
+    cat.atk = Math.round(atk);
+    cat.atkInterval = Math.round(interval);
+    cat.evade = Math.min(0.6, evade);
+  }
+}
+
+/**
+ * 보드가 꽉 찼는데 영입 카드를 계속 내밀면, 눌러도 아무 일이 안 일어나고
+ * 이유도 보이지 않는다. 자리가 없으면 강화만 제시한다.
+ */
+export function rollOffers(state: RunState): void {
+  const offers: Offer[] = [];
+  const owned = state.ally.filter((c): c is Cat => c !== null);
+  const hasFreeSlot = state.ally.some((c) => c === null);
+
+  if (hasFreeSlot) {
+    const pool = [...BREEDS].sort(() => Math.random() - 0.5).slice(0, 2);
+    for (const b of pool) {
+      offers.push({ kind: "recruit", cost: b.cost, breed: b, label: `${b.name} 영입` });
+    }
+  }
+
+  // 남은 칸을 강화로 채운다. 대상은 중복되지 않게 고른다.
+  const shuffled = [...owned].sort(() => Math.random() - 0.5);
+  for (const target of shuffled) {
+    if (offers.length >= 3) break;
+    offers.push({
+      kind: "upgrade",
+      cost: upgradeCost(target.level),
+      targetUid: target.uid,
+      label: `${target.breed.name} Lv.${target.level + 1}`,
+    });
+  }
+
+  state.offers = offers;
+}
+
+export function buyOffer(state: RunState, offer: Offer): boolean {
+  if (state.gold < offer.cost) return false;
+
+  if (offer.kind === "recruit" && offer.breed) {
+    const free = state.ally.findIndex((c) => c === null);
+    if (free < 0) {
+      // 살 수 없는 카드를 목록에 남겨두면 무한히 재시도된다. 즉시 걷어낸다.
+      state.offers = state.offers.filter((o) => o !== offer);
+      state.notice = "보드가 꽉 찼습니다";
+      return false;
+    }
+    state.ally[free] = makeCat(offer.breed, "ally", free);
+  } else if (offer.kind === "upgrade" && offer.targetUid) {
+    const cat = state.ally.find((c) => c?.uid === offer.targetUid);
+    if (!cat) return false;
+    cat.level += 1;
+  } else {
+    return false;
+  }
+
+  state.gold -= offer.cost;
+  state.offers = state.offers.filter((o) => o !== offer);
+  applySynergies(state);
+  return true;
+}
+
+export function startBattle(state: RunState): void {
+  if (livingCats(state.ally).length === 0) {
+    state.notice = "고양이를 최소 한 마리는 배치해야 합니다";
+    return;
+  }
+  applySynergies(state);
+  for (const c of state.ally) if (c) c.cooldown = c.atkInterval;
+  for (const c of state.enemy) if (c) c.cooldown = c.atkInterval;
+  state.battleElapsed = 0;
+  state.phase = "battle";
+  state.notice = "";
+}
+
+export function finishWave(state: RunState, won: boolean): void {
+  if (!won) {
+    state.phase = "gameover";
+    if (state.wave > state.best) {
+      state.best = state.wave;
+      saveBest(state.best);
+    }
+    state.notice = `${state.wave}웨이브 도달`;
+    return;
+  }
+
+  state.gold += goldForWave(state.wave);
+  state.wave += 1;
+  // 살아남은 고양이는 체력을 회복하고 다음 웨이브로 간다.
+  for (const c of state.ally) {
+    if (!c) continue;
+    c.alive = true;
+    c.hp = c.maxHp;
+    c.pose = "idle";
+    c.poseTimer = 0;
+    c.lunge = 0;
+    c.flash = 0;
+  }
+  buildEnemyWave(state);
+  rollOffers(state);
+  applySynergies(state);
+  state.phase = "reward";
+  state.notice = `웨이브 클리어! +${goldForWave(state.wave - 1)}생선`;
+}
+
+export function moveCat(state: RunState, from: number, to: number): void {
+  if (from === to) return;
+  const a = state.ally[from] ?? null;
+  const b = state.ally[to] ?? null;
+  state.ally[from] = b;
+  state.ally[to] = a;
+  if (a) a.cell = to;
+  if (b) b.cell = from;
+  applySynergies(state);
+}
+
+export function breedFor(id: number): Breed {
+  return breedById(id);
+}

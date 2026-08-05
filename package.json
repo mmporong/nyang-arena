@@ -1,0 +1,21 @@
+{
+  "name": "nyang-arena",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "픽셀 고양이 오토배틀러 — 배치하고, 관전하고, 몇 웨이브까지 버티는지 겨룬다",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "slice": "python3 scripts/slice-sprites.py",
+    "gen:synergies": "node --experimental-strip-types scripts/gen-synergies.mjs",
+    "sim": "node --experimental-strip-types scripts/balance-sim.mjs",
+    "sweep": "node --experimental-strip-types scripts/balance-sweep.mjs",
+    "test": "node --experimental-strip-types scripts/validator-test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}
