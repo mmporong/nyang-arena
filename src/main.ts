@@ -1,4 +1,4 @@
-import { damagePops, stepBattle } from "./game/battle.ts";
+import { clearBattleFx, stepBattle } from "./game/battle.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
 import { offerRects, render, rerollRect, type DragState } from "./game/render.ts";
 import { buyOffer, moveCat, newRun, rerollOffers, startBattle, type RunState } from "./game/run.ts";
@@ -68,7 +68,7 @@ function onPrimaryAction(): void {
       state.notice = "근접은 앞줄, 원거리는 뒷줄";
       break;
     case "gameover":
-      damagePops.length = 0;
+      clearBattleFx();
       state = newRun();
       break;
   }

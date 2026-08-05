@@ -114,6 +114,19 @@ export interface Fx {
 
 export const fxs: Fx[] = [];
 
+/**
+ * 연출 큐를 전부 비운다. 새 런을 시작할 때 부른다.
+ *
+ * 이 셋은 모듈 전역이라 런을 넘어 살아남는다. 예전에는 재시작 경로가
+ * damagePops만 비워서, '다시 도전' 직후 첫 프레임에 지난 런의 참격과
+ * 화살이 그려졌다.
+ */
+export function clearBattleFx(): void {
+  fxs.length = 0;
+  damagePops.length = 0;
+  shots.length = 0;
+}
+
 function pushFx(f: Omit<Fx, "maxLife"> & { maxLife?: number }): void {
   if (fxs.length > 90) fxs.shift();
   fxs.push({ ...f, maxLife: f.maxLife ?? f.life });

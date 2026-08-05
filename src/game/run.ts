@@ -2,6 +2,7 @@ import { BALANCE } from "./balance.ts";
 import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import {
+  BOARD_COLS,
   BOARD_ROWS,
   cellCol,
   CLASS_LABEL,
@@ -345,6 +346,39 @@ const RANGED_IDS = BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
  */
 const WARRIOR_IDS = BREEDS.filter((b) => b.cls === "warrior").map((b) => b.id);
 
+/**
+ * 적 배치 순서.
+ *
+ * 예전에는 3x3 시절 인덱스(0~8)가 그대로 남아 있었다. 5x5로 바꾼 뒤에도 적이
+ * **위쪽 두 행에만** 앉았고 아래 15칸은 한 번도 쓰이지 않았다. 우리 고양이는
+ * 다섯 행에 흩어 놓을 수 있는데 적이 두 행에 몰려 있으면 세로 배치가 전투에
+ * 거의 영향을 주지 않는다 — 측정된 "배치가 결정이 아니다"의 원인 중 하나다.
+ *
+ * 열 0이 우리와 가까운 앞줄이다. 행은 중앙(2)에서 바깥으로 퍼뜨려 한 덩어리로
+ * 뭉치지 않게 한다. 뭉치면 광역기가 과도하게 잘 맞는다.
+ */
+const ROW_ORDER = [2, 1, 3, 0, 4] as const;
+
+/** 한 열에 세울 최대 수. 넘기면 세로로 한 줄이 되어 광역기에 통째로 맞는다. */
+const PER_COL = 3;
+
+function enemyOrder(kind: WaveKind): number[] {
+  const cols = kind === "snipe" ? [4, 3, 2, 1, 0] : [0, 1, 2, 3, 4];
+  const near = ROW_ORDER.slice(0, PER_COL); // 중앙 세 행
+  const far = ROW_ORDER.slice(PER_COL); // 바깥 두 행
+  // 열마다 중앙 세 행을 먼저 채우고 다음 열로 넘어간다 → 두세 열짜리 덩어리가 된다.
+  const out = cols.flatMap((c) => near.map((r) => r * BOARD_COLS + c));
+  // 그래도 모자라면 바깥 행을 쓴다.
+  out.push(...cols.flatMap((c) => far.map((r) => r * BOARD_COLS + c)));
+
+  if (kind === "snipe") {
+    // 호위 근접 둘은 앞줄(열 0)에 세워야 원거리가 뒤에서 쏠 수 있다.
+    const escorts = [2 * BOARD_COLS + 0, 1 * BOARD_COLS + 0];
+    return [...escorts, ...out.filter((c) => !escorts.includes(c))];
+  }
+  return out;
+}
+
 /** 웨이브 성격에 맞는 적 품종 목록을 뽑는다. */
 function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
   const pick = (pool: number[], i: number) => pool[(wave * 3 + i * 5) % pool.length] ?? pool[0]!;
@@ -390,8 +424,7 @@ export function buildEnemyWave(state: RunState): void {
   }
 
   state.enemy = emptyBoard();
-  // 저격대는 원거리를 뒷줄에 두는 게 자연스럽다. 나머지는 앞줄부터 채워 빨리 붙게 한다.
-  const order = kind === "snipe" ? [0, 2, 5, 8, 3, 6, 1, 4, 7] : [0, 3, 6, 1, 4, 7, 2, 5, 8];
+  const order = enemyOrder(kind);
   const ids = enemyBreedIds(kind, count, w);
 
   for (let i = 0; i < count; i++) {
