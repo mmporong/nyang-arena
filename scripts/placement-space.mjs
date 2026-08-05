@@ -12,73 +12,71 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, moveCat, newRun, startBattle } from "../src/game/run.ts";
-import { BOARD_COLS, BOARD_ROWS } from "../src/game/types.ts";
+import { BOARD_COLS } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
 
-/** 살아 있는 아군을 (셀, 고양이) 쌍으로. 보드 인덱스 순서라 결정적이다. */
-function occupied(board) {
+/** 살아 있는 아군을 보드 순서대로. */
+function livingUnits(state) {
   const out = [];
-  board.forEach((c, i) => {
-    if (c && c.alive) out.push([i, c]);
+  state.ally.forEach((c) => {
+    if (c && c.alive) out.push(c);
   });
   return out;
 }
 
-/** 원하는 셀 목록으로 순서대로 옮긴다. 이미 그 자리면 건너뛴다. */
-function placeInto(state, wanted) {
-  const units = occupied(state.ally);
-  for (let i = 0; i < units.length; i++) {
-    const target = wanted[i];
-    if (target === undefined) break;
-    const from = state.ally.findIndex((c) => c === units[i][1]);
-    if (from >= 0 && from !== target) moveCat(state, from, target);
-  }
+/**
+ * 고양이 목록을 원하는 셀로 옮긴다.
+ *
+ * 이전 구현은 `occupied()`가 준 보드 순서와 원하는 셀 목록의 순서가 어긋나서
+ * "역할 반대" 배치가 실제로는 역할을 뒤집지 않았다. 그래서 배치 격차가
+ * 2.3으로 과소 측정됐다. 고양이와 목적지를 같은 인덱스로 짝지어야 한다.
+ */
+function put(state, cats, wanted) {
+  cats.forEach((cat, i) => {
+    const to = wanted[i];
+    if (to === undefined) return;
+    const from = state.ally.indexOf(cat);
+    if (from >= 0 && from !== to) moveCat(state, from, to);
+  });
 }
 
 const CENTER_OUT = [2, 1, 3, 0, 4];
+/** 열 0이 우리 뒷줄, 열 4가 적과 맞닿는 앞줄이다. */
+const cellsIn = (col) => CENTER_OUT.map((r) => r * BOARD_COLS + col);
 
 const ARRANGERS = {
   "그대로 (bestFreeCell)": null,
 
   "한 칸에 몰기": (state) => {
-    // 앞줄 가운데부터 뭉친다. 광역기에 통째로 맞는 최악의 형태.
-    const cells = [];
-    for (const col of [4, 3, 2, 1, 0]) for (const r of CENTER_OUT) cells.push(r * BOARD_COLS + col);
-    placeInto(state, cells);
+    const cells = [4, 3, 2, 1, 0].flatMap(cellsIn);
+    put(state, livingUnits(state), cells);
   },
 
   "역할 반대 (근접 뒤)": (state) => {
-    const units = occupied(state.ally);
-    const melee = units.filter(([, c]) => c.breed.kind === "melee");
-    const ranged = units.filter(([, c]) => c.breed.kind === "ranged");
-    // 원거리를 앞줄(열 4)에, 근접을 뒷줄(열 0)에 — 정확히 반대로 세운다.
-    const front = CENTER_OUT.map((r) => r * BOARD_COLS + (BOARD_COLS - 1));
-    const back = CENTER_OUT.map((r) => r * BOARD_COLS + 0);
-    const wanted = [];
-    ranged.forEach((_, i) => front[i] !== undefined && wanted.push(front[i]));
-    melee.forEach((_, i) => back[i] !== undefined && wanted.push(back[i]));
-    placeInto(state, [...ranged, ...melee].map((_, i) => wanted[i]).filter((v) => v !== undefined));
+    const u = livingUnits(state);
+    const melee = u.filter((c) => c.breed.kind === "melee");
+    const ranged = u.filter((c) => c.breed.kind === "ranged");
+    const front = cellsIn(BOARD_COLS - 1);
+    const back = cellsIn(0);
+    // 원거리를 앞줄에, 근접을 뒷줄에 — 정확히 반대로 세운다.
+    put(state, [...ranged, ...melee], [
+      ...ranged.map((_, i) => front[i % front.length]),
+      ...melee.map((_, i) => back[i % back.length]),
+    ]);
   },
 
   "세로로 분산": (state) => {
-    const units = occupied(state.ally);
-    const melee = units.filter(([, c]) => c.breed.kind === "melee").map(([, c]) => c);
-    const ranged = units.filter(([, c]) => c.breed.kind === "ranged").map(([, c]) => c);
-    // 근접은 앞줄(열 4)에 행을 벌려 세우고, 원거리는 뒷줄(열 0~1)에 벌려 세운다.
-    const wanted = [];
-    const meleeCells = CENTER_OUT.map((r) => r * BOARD_COLS + (BOARD_COLS - 1));
-    const rangedCells = [...CENTER_OUT.map((r) => r * BOARD_COLS + 0), ...CENTER_OUT.map((r) => r * BOARD_COLS + 1)];
-    const order = [...melee, ...ranged];
-    melee.forEach((_, i) => wanted.push(meleeCells[i % meleeCells.length]));
-    ranged.forEach((_, i) => wanted.push(rangedCells[i % rangedCells.length]));
-    // placeInto는 보드 순서를 쓰므로 역할별 순서를 직접 맞춰 준다
-    for (let i = 0; i < order.length; i++) {
-      const from = state.ally.findIndex((c) => c === order[i]);
-      const to = wanted[i];
-      if (from >= 0 && to !== undefined && from !== to) moveCat(state, from, to);
-    }
+    const u = livingUnits(state);
+    const melee = u.filter((c) => c.breed.kind === "melee");
+    const ranged = u.filter((c) => c.breed.kind === "ranged");
+    const front = cellsIn(BOARD_COLS - 1);
+    const back = [...cellsIn(0), ...cellsIn(1)];
+    put(state, [...melee, ...ranged], [
+      ...melee.map((_, i) => front[i % front.length]),
+      ...ranged.map((_, i) => back[i % back.length]),
+    ]);
   },
 };
 
