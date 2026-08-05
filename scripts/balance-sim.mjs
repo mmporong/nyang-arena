@@ -21,6 +21,9 @@ const tried = new Map();
 const lost = new Map();
 const battleMs = [];
 const battleMsByKind = new Map();
+// 보스는 웨이브별로 따로 센다. 첫 보스(5)는 기믹을 가르치는 자리라 성격이 다르다.
+const bossTried = new Map();
+const bossLost = new Map();
 
 /**
  * @param seed 런마다 고정 시드를 준다. 없으면 같은 명령이 매번 다른 수치를 내고,
@@ -31,11 +34,13 @@ function playOne(seed) {
   let rerolls = 0;
   let lastWave = 0;
   let kindAtStart = null;
+  let waveAtStart = 0;
   let elapsedBeforeTick = 0;
 
   for (let guard = 0; guard < MAX_WAVE * 400; guard++) {
     if (s.phase === "gameover") {
       if (kindAtStart) lost.set(kindAtStart, (lost.get(kindAtStart) ?? 0) + 1);
+      if (kindAtStart === "boss") bossLost.set(waveAtStart, (bossLost.get(waveAtStart) ?? 0) + 1);
       return s.wave;
     }
 
@@ -71,6 +76,10 @@ function playOne(seed) {
       if (s.wave > MAX_WAVE) return s.wave;
       kindAtStart = waveKind(s.wave);
       tried.set(kindAtStart, (tried.get(kindAtStart) ?? 0) + 1);
+      if (kindAtStart === "boss") {
+        waveAtStart = s.wave;
+        bossTried.set(s.wave, (bossTried.get(s.wave) ?? 0) + 1);
+      }
       startBattle(s);
       if (s.phase !== "battle") return s.wave; // 배치 불가 등
       continue;
@@ -119,6 +128,13 @@ for (const kind of ["mixed", "rush", "snipe", "boss"]) {
 
 battleMs.sort((a, b) => a - b);
 const bq = (p) => (battleMs[Math.min(battleMs.length - 1, Math.floor(battleMs.length * p))] ?? 0) / 1000;
+console.log("\n보스 웨이브별 통과율");
+for (const w of [...bossTried.keys()].sort((a, b) => a - b).slice(0, 5)) {
+  const tn = bossTried.get(w) ?? 0;
+  const ln = bossLost.get(w) ?? 0;
+  console.log(`  W${String(w).padStart(2)}  시도 ${String(tn).padStart(4)}  패배 ${String(ln).padStart(3)}  통과율 ${(((tn - ln) / tn) * 100).toFixed(1).padStart(5)}%`);
+}
+
 console.log("\n전투 길이 (초)");
 for (const kind of ["mixed", "rush", "snipe", "boss"]) {
   const list = (battleMsByKind.get(kind) ?? []).slice().sort((a, b) => a - b);

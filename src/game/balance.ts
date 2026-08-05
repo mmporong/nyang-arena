@@ -72,7 +72,7 @@ export const BALANCE = {
   bossHpMulFirst: 50,
   bossHpMul: 60,
   /** 배수가 First에서 Mul까지 올라가는 데 걸리는 웨이브 수 */
-  bossHpRampWaves: 20,
+  bossHpRampWaves: 8,
   /**
    * 보스 평타는 **약하다**. 위험은 예고 광역에서 온다.
    *
@@ -82,6 +82,20 @@ export const BALANCE = {
    */
   bossAtkMul: 0.8,
   bossEscortCount: 3,
+  /**
+   * 예고 광역이 적중했을 때 **최대 체력 대비** 피해 비율.
+   *
+   * 절대값이 아니라 비율인 이유: 팀 구성과 웨이브에 상관없이 "뭉쳐 있으면
+   * 아프다"가 일정하게 성립해야 배치가 결정이 된다.
+   *
+   * 이 값이 보스 통과율의 주 손잡이다.
+   *
+   * 체력 배수와 같은 램프를 건다. 첫 보스에서 팀은 다섯 마리뿐이라 흩어질
+   * 자리조차 없는데, 후반과 같은 비율을 맞으면 p25가 5로 무너진다.
+   * 첫 보스는 기믹을 **가르치는** 자리이지 죽이는 자리가 아니다.
+   */
+  telegraphDmgFirst: 0.10,
+  telegraphDmg: 0.34,
 };
 
 export type Balance = typeof BALANCE;

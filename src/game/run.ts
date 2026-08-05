@@ -249,6 +249,8 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     evade: 0,
     cooldown: breed.atkInterval,
     radius: 0,
+    telegraph: null,
+    thresholdIdx: 0,
     side,
     cell,
     fx,
@@ -411,6 +413,16 @@ function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
  * 호위를 붙이는 이유는 보스만 있으면 우리 원거리가 사거리 밖에서 할 일이 없기
  * 때문이다. 앞줄에 세워 근접이 먼저 부딪히게 한다.
  */
+/**
+ * 보스 강도가 첫 보스에서 후반까지 올라가는 정도(0~1).
+ *
+ * 체력과 광역 피해에 **같은** 램프를 쓴다. 하나만 램프를 걸면 첫 보스가
+ * "두껍지만 안 아프다" 또는 "얇지만 즉사"가 되어 둘 다 학습에 나쁘다.
+ */
+export function bossRamp(wave: number): number {
+  return Math.min(1, Math.max(0, (wave - 5) / BALANCE.bossHpRampWaves));
+}
+
 function buildBossWave(state: RunState, wave: number, scale: number): void {
   state.enemy = emptyBoard();
 
@@ -420,7 +432,7 @@ function buildBossWave(state: RunState, wave: number, scale: number): void {
   const boss = makeCat(breed, "enemy", bossCell);
   boss.radius = BOSS_RADIUS;
   // 첫 보스는 얇게, 후반으로 갈수록 두껍게. 고정 배수는 5웨이브를 벽으로 만든다.
-  const ramp = Math.min(1, Math.max(0, (wave - 5) / BALANCE.bossHpRampWaves));
+  const ramp = bossRamp(wave);
   const hpMul = BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp;
   boss.maxHp = Math.round(boss.maxHp * scale * hpMul);
   boss.hp = boss.maxHp;

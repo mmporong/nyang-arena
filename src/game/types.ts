@@ -4,6 +4,27 @@ export type CatColor = "black" | "cream" | "gray" | "white" | "calico" | "orange
 
 export type Side = "ally" | "enemy";
 
+/** 보스 광역기의 예고 모양. 터지기 전에 화면에 그려진다. */
+export type TelegraphShape = "circle" | "line" | "cone";
+
+export interface Telegraph {
+  shape: TelegraphShape;
+  /** 원형이면 중심, 직선·부채꼴이면 시작점 */
+  fx: number;
+  fy: number;
+  /** 조준 방향 (단위 벡터). 원형은 쓰지 않는다 */
+  dirX: number;
+  dirY: number;
+  /** 원형: 반경 / 직선: 폭의 절반 / 부채꼴: 반각(라디안) */
+  arg: number;
+  /** 직선·부채꼴의 사거리 */
+  reach: number;
+  /** 남은 예고 시간(ms). 0이 되면 터진다 */
+  fuse: number;
+  /** 예고 전체 길이(ms). 렌더가 차오르는 정도를 계산한다 */
+  fuseMax: number;
+}
+
 /** 근접은 붙어야 때리고, 원거리는 제자리에서 쏜다. */
 export type AttackKind = "melee" | "ranged";
 
@@ -110,6 +131,10 @@ export interface Cat {
   cooldown: number;
   /** 몸 크기(칸). 보스만 0보다 크다. 사거리·겹침 계산이 이걸 뺀다. */
   radius: number;
+  /** 예고 중인 광역기. 보스만 쓴다. */
+  telegraph: Telegraph | null;
+  /** 다음에 발동할 체력 문턱의 인덱스. 보스만 쓴다. */
+  thresholdIdx: number;
   side: Side;
   /** 보드 셀 인덱스 0..8, 보드 밖(벤치)이면 -1 */
   cell: number;

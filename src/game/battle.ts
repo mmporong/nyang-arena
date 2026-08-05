@@ -1,3 +1,5 @@
+import { BALANCE } from "./balance.ts";
+import { BOSS_THRESHOLDS, TELEGRAPH_FUSE_MS } from "./bosses.ts";
 import { rng } from "./rng.ts";
 import {
   BOARD_COLS,
@@ -10,6 +12,8 @@ import {
   MANA_MAX,
   type Cat,
   type Side,
+  type Telegraph,
+  type TelegraphShape,
 } from "./types.ts";
 import {
   COMBO_MAX,
@@ -21,7 +25,7 @@ import {
   SKILLS,
   type SkillResult,
 } from "./skills.ts";
-import { finishWave, waveKind, type RunState } from "./run.ts";
+import { bossRamp, finishWave, waveKind, type RunState } from "./run.ts";
 
 /** 고정 시뮬레이션 스텝. */
 export const SIM_STEP_MS = 100;
@@ -65,6 +69,9 @@ const SEPARATION = 1.0;
  * 순수 최단거리로만 고르면 근접이 전부 같은 적에게 달려들어 한 점에 쌓인다.
  */
 const CROWD_PENALTY = 0.7;
+
+/** 예고 광역의 연출 색. 전투 모듈이 테마를 임포트하지 않도록 리터럴로 둔다. */
+const T_ENEMY = "#C24B3A";
 
 /** 전사가 피격 한 번에 얻는 마나 */
 const MANA_ON_HIT_WARRIOR = 11;
@@ -577,6 +584,118 @@ function assassinLeap(state: RunState): void {
   }
 }
 
+
+/* ------------------------------------------------------------------ */
+/* 보스 광역기 — 체력 문턱에 걸리면 예고하고 터진다                        */
+/* ------------------------------------------------------------------ */
+
+/** 살아 있는 대상들의 무게중심. 뭉쳐 있으면 그 한가운데가 나온다. */
+function centroid(cats: Cat[]): { fx: number; fy: number } {
+  let sx = 0;
+  let sy = 0;
+  for (const c of cats) {
+    sx += c.fx;
+    sy += c.fy;
+  }
+  const n = Math.max(1, cats.length);
+  return { fx: sx / n, fy: sy / n };
+}
+
+/**
+ * 문턱 번호에 따라 예고를 만든다. 패턴은 원형 → 직선 → 부채꼴로 돈다.
+ *
+ * 원형은 **무게중심**을 노린다. 흩어져 있으면 한가운데가 비어 아무도 안 맞고,
+ * 뭉쳐 있으면 통째로 맞는다. 배치가 결과를 가르는 지점이 정확히 여기다.
+ */
+function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
+  if (foes.length === 0) return null;
+  const shape: TelegraphShape = (["circle", "line", "cone"] as const)[idx % 3]!;
+  const base = { shape, fuse: TELEGRAPH_FUSE_MS, fuseMax: TELEGRAPH_FUSE_MS };
+
+  if (shape === "circle") {
+    const c = centroid(foes);
+    return { ...base, fx: c.fx, fy: c.fy, dirX: 0, dirY: 0, arg: 1.6, reach: 0 };
+  }
+
+  // 직선은 가장 먼 대상을 향해 쏜다 — 뒷줄까지 닿아야 원거리도 위험해진다.
+  // 부채꼴은 무게중심을 향한다.
+  const aim =
+    shape === "line"
+      ? foes.reduce((a, b) => (fieldDistance(boss, a) >= fieldDistance(boss, b) ? a : b))
+      : centroid(foes);
+  const dx = aim.fx - boss.fx;
+  const dy = aim.fy - boss.fy;
+  const len = Math.hypot(dx, dy) || 1;
+  return {
+    ...base,
+    fx: boss.fx,
+    fy: boss.fy,
+    dirX: dx / len,
+    dirY: dy / len,
+    arg: shape === "line" ? 0.75 : 0.7,
+    reach: shape === "line" ? 14 : 5.5,
+  };
+}
+
+/** 이 좌표가 예고 범위 안인가. 판정은 전부 정준 좌표에서 한다. */
+export function inTelegraph(t: Telegraph, fx: number, fy: number): boolean {
+  const rx = fx - t.fx;
+  const ry = fy - t.fy;
+  if (t.shape === "circle") return Math.hypot(rx, ry) <= t.arg;
+
+  const along = rx * t.dirX + ry * t.dirY;
+  if (along < 0 || along > t.reach) return false;
+  if (t.shape === "line") return Math.abs(rx * t.dirY - ry * t.dirX) <= t.arg;
+
+  // 부채꼴: 시작점에 붙어 있으면 각도가 의미 없으므로 무조건 맞는다.
+  const d = Math.hypot(rx, ry);
+  if (d < 1e-6) return true;
+  return Math.acos(Math.min(1, Math.max(-1, along / d))) <= t.arg;
+}
+
+function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
+  const t = boss.telegraph;
+  if (!t) return;
+  const ramp = bossRamp(wave);
+  const frac = BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp;
+  for (const f of foes) {
+    if (!inTelegraph(t, f.fx, f.fy)) continue;
+    // 최대 체력 대비 비율이라 웨이브·팀 구성과 무관하게 "뭉치면 아프다"가 성립한다.
+    damage(f, Math.max(1, Math.round(f.maxHp * frac)), false);
+  }
+  pushFx({
+    kind: "ring",
+    fx: t.shape === "circle" ? t.fx : t.fx + t.dirX * t.reach * 0.4,
+    fy: t.shape === "circle" ? t.fy : t.fy + t.dirY * t.reach * 0.4,
+    tx: 0,
+    ty: 0,
+    radius: t.shape === "circle" ? t.arg : 1.4,
+    angle: 0,
+    life: 420,
+    color: T_ENEMY,
+  });
+}
+
+/** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
+function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number): void {
+  if (!boss.alive) return;
+
+  if (boss.telegraph) {
+    boss.telegraph.fuse -= dt;
+    if (boss.telegraph.fuse <= 0) {
+      fireTelegraph(boss, foes, wave);
+      boss.telegraph = null;
+    }
+    return; // 예고 중에는 다음 문턱을 밟아도 겹쳐 걸지 않는다
+  }
+
+  const frac = boss.hp / Math.max(1, boss.maxHp);
+  const next = BOSS_THRESHOLDS[boss.thresholdIdx];
+  if (next === undefined || frac > next) return;
+  boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
+  boss.thresholdIdx += 1;
+}
+
 /** 한 프레임 분량을 고정 스텝으로 시뮬레이션한다. */
 export function stepBattle(state: RunState, dtMs: number): void {
   tickEffects(state.ally, dtMs);
@@ -613,6 +732,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
     state.battleElapsed += step;
 
     const allies = livingCats(state.ally);
+    for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state.wave);
     const foes = livingCats(state.enemy);
 
     if (allies.length === 0 || foes.length === 0) {

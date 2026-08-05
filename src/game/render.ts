@@ -120,6 +120,80 @@ function arenaBox(L: Layout): Rect {
   return { x, y, w: right - x, h: bottom - y };
 }
 
+
+/**
+ * 보스 광역기 예고.
+ *
+ * 보이지 않는 경고는 경고가 아니다. 터지기 전에 어디가 위험한지 보여주고,
+ * 남은 시간에 따라 차오르게 해서 "곧 터진다"가 읽히게 한다.
+ *
+ * 판정은 battle.ts가 정준 좌표에서 하고 여기서는 그리기만 한다. 두 곳에서
+ * 따로 계산하면 보이는 곳과 맞는 곳이 갈라진다.
+ */
+function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  // 예고는 반경이 커서 그냥 그리면 HUD와 하단 UI까지 침범한다. 전장 안으로 자른다.
+  const x0 = Math.min(L.allyBoard.x, L.enemyBoard.x);
+  const y0 = Math.min(L.allyBoard.y, L.enemyBoard.y);
+  const x1 = Math.max(L.allyBoard.x + L.allyBoard.w, L.enemyBoard.x + L.enemyBoard.w);
+  const y1 = Math.max(L.allyBoard.y + L.allyBoard.h, L.enemyBoard.y + L.enemyBoard.h);
+  const m = L.cell * 0.25;
+
+  for (const c of s.enemy) {
+    const tg = c?.telegraph;
+    if (!c || !tg) continue;
+
+    // 0 → 1로 차오른다. 다 차면 터진다.
+    const fill = 1 - Math.max(0, tg.fuse) / tg.fuseMax;
+    const origin = fieldToScreen(L, tg.fx, tg.fy);
+    const pitch = L.cell + L.gap;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0 - m, y0 - m, x1 - x0 + m * 2, y1 - y0 + m * 2);
+    ctx.clip();
+    ctx.lineJoin = "round";
+
+    if (tg.shape === "circle") {
+      const r = tg.arg * pitch;
+      ctx.beginPath();
+      ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(194,75,58,${0.10 + fill * 0.28})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(194,75,58,${0.5 + fill * 0.5})`;
+      ctx.lineWidth = 2 + fill * 2;
+      ctx.stroke();
+      // 안쪽에서 차오르는 원. 남은 시간이 한눈에 보인다.
+      ctx.beginPath();
+      ctx.arc(origin.x, origin.y, r * fill, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(194,75,58,0.22)";
+      ctx.fill();
+    } else {
+      // 직선·부채꼴은 방향이 있으므로 화면에서도 같은 방향으로 돌린다.
+      const tip = fieldToScreen(L, tg.fx + tg.dirX * tg.reach, tg.fy + tg.dirY * tg.reach);
+      const ang = Math.atan2(tip.y - origin.y, tip.x - origin.x);
+      const len = Math.hypot(tip.x - origin.x, tip.y - origin.y);
+
+      ctx.translate(origin.x, origin.y);
+      ctx.rotate(ang);
+      ctx.beginPath();
+      if (tg.shape === "line") {
+        const half = tg.arg * pitch;
+        ctx.rect(0, -half, len, half * 2);
+      } else {
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, len, -tg.arg, tg.arg);
+        ctx.closePath();
+      }
+      ctx.fillStyle = `rgba(194,75,58,${0.10 + fill * 0.26})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(194,75,58,${0.5 + fill * 0.5})`;
+      ctx.lineWidth = 2 + fill * 2;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 function drawArena(ctx: CanvasRenderingContext2D, L: Layout): void {
   const r = arenaBox(L);
   roundRect(ctx, r, L.cell * 0.22);
@@ -1488,6 +1562,7 @@ export function render(
   drawSideLabels(ctx, L);
   drawBoard(ctx, L, "ally", T.ally, hoverCell);
   drawBoard(ctx, L, "enemy", T.enemy, -1);
+  drawTelegraphs(ctx, L, s);
 
   // 화면 아래쪽 고양이가 위에 그려지도록 y로 정렬한다.
   // 전투 중에는 양쪽이 뒤섞이므로 이게 없으면 겹칠 때 앞뒤가 뒤집혀 보인다.
