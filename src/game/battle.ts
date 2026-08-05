@@ -19,10 +19,12 @@ const FLASH_MS = 160;
 
 /**
  * 같은 편끼리 겹쳐 서지 않게 하는 최소 간격(칸).
- * 스프라이트가 0.88칸이라 0.8이면 살짝 겹치는 정도 — 난전처럼 보이면서도
- * 개별 유닛이 구분된다. 0.55에서는 근접이 한 덩어리로 뭉쳐 보였다.
+ *
+ * 스프라이트를 0.66칸으로 줄였으므로 1.0이면 유닛 사이에 확실히 틈이 생긴다.
+ * 0.55 → 0.8 → 1.0 순으로 키웠는데, 좁을수록 근접이 한 덩어리로 뭉쳐 보였다.
+ * 더 키우면 뒷줄 근접이 사거리 안에 못 들어와 전투가 늘어지므로 여기서 멈춘다.
  */
-const SEPARATION = 0.8;
+const SEPARATION = 1.0;
 
 /**
  * 이미 그 적을 노리는 아군 한 명당 더해지는 거리 페널티(칸).
@@ -257,8 +259,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
     separate(foes);
 
     if (state.battleElapsed >= BATTLE_TIMEOUT_MS) {
-      state.notice = "시간 초과";
-      finishWave(state, false);
+      finishWave(state, false, "timeout");
       return;
     }
   }

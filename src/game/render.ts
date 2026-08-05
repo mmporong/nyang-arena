@@ -19,6 +19,13 @@ const C = {
   ranged: "#8fd0ff",
 } as const;
 
+/**
+ * 셀 대비 고양이 그리기 크기.
+ * 작을수록 전장이 넓어 보이고 유닛이 겹칠 일이 줄어든다.
+ * 체력바·뱃지는 셀이 아니라 이 크기에 비례시켜야 축소해도 비율이 안 깨진다.
+ */
+const CAT_SCALE = 0.66;
+
 export interface DragState {
   active: boolean;
   fromCell: number;
@@ -105,9 +112,9 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
   const dir = cat.side === "ally" ? 1 : -1;
   const { x: cx, y: cy } = fieldToScreen(L, cat.fx + dir * 0.22 * cat.lunge, cat.fy);
 
-  const size = L.cell * 0.88;
+  const size = L.cell * CAT_SCALE;
   const x = cx - size / 2;
-  const y = cy - size / 2 - L.cell * 0.04;
+  const y = cy - size / 2 - L.cell * 0.03;
 
   ctx.save();
   if (!cat.alive) ctx.globalAlpha = 0.4;
@@ -128,11 +135,11 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
 
   if (!cat.alive) return;
 
-  // 체력 바
-  const bw = L.cell * 0.72;
-  const bh = Math.max(4, L.cell * 0.06);
+  // 체력 바 — 셀이 아니라 고양이 크기에 맞춘다
+  const bw = size * 0.88;
+  const bh = Math.max(3, size * 0.09);
   const bx = cx - bw / 2;
-  const by = cy + L.cell / 2 - bh - L.cell * 0.03;
+  const by = cy + size * 0.5;
   const frac = Math.max(0, Math.min(1, cat.hp / cat.maxHp));
 
   roundRect(ctx, { x: bx, y: by, w: bw, h: bh }, bh / 2);
@@ -143,11 +150,11 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
   ctx.fill();
 
   // 근접/원거리 뱃지. 작은 화면에서는 글자가 뭉개지므로 생략한다.
-  if (L.cell >= 46) {
+  if (size >= 34) {
     const ranged = cat.breed.kind === "ranged";
-    const r = L.cell * 0.13;
-    const bxc = cx + L.cell * 0.31;
-    const byc = cy - L.cell * 0.31;
+    const r = size * 0.2;
+    const bxc = cx + size * 0.44;
+    const byc = cy - size * 0.44;
     ctx.beginPath();
     ctx.arc(bxc, byc, r, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(12,10,20,0.88)";
@@ -159,10 +166,10 @@ function drawCat(ctx: CanvasRenderingContext2D, L: Layout, cat: Cat, dimmed: boo
   }
 
   // 레벨도 뱃지로. 글자만 얹으면 스프라이트 무늬에 묻혀 안 읽힌다.
-  if (cat.level > 1 && L.cell >= 40) {
-    const r = L.cell * 0.13;
-    const lx = cx - L.cell * 0.31;
-    const ly = cy - L.cell * 0.31;
+  if (cat.level > 1 && size >= 30) {
+    const r = size * 0.2;
+    const lx = cx - size * 0.44;
+    const ly = cy - size * 0.44;
     ctx.beginPath();
     ctx.arc(lx, ly, r, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(12,10,20,0.88)";
@@ -417,6 +424,9 @@ function drawGameOver(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): vo
   ctx.fillRect(0, 0, L.w, L.h);
   const cy = L.h / 2;
   label(ctx, `${s.wave}웨이브 도달`, L.w / 2, cy - L.scale * 30, L.scale * 46, C.text, "center", 800);
+  if (s.lossReason === "timeout") {
+    label(ctx, "시간 안에 정리하지 못했습니다", L.w / 2, cy - L.scale * 2, L.scale * 15, C.enemy, "center", 600);
+  }
   label(
     ctx,
     s.recordBroken ? "최고 기록 갱신!" : `최고 기록 ${s.best}웨이브`,
@@ -468,7 +478,7 @@ export function render(
   if (drag.active) {
     const cat = s.ally[drag.fromCell];
     if (cat) {
-      const size = L.cell * 0.9;
+      const size = L.cell * CAT_SCALE;
       const img = spriteFor(cat.breed.id, "move");
       ctx.save();
       ctx.globalAlpha = 0.92;

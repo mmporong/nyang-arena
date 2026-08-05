@@ -47,6 +47,8 @@ export interface RunState {
   battleElapsed: number;
   /** 이번 런에서 최고 기록을 깼는지. 동점을 갱신으로 표시하지 않기 위해 따로 둔다. */
   recordBroken: boolean;
+  /** 마지막 패배 사유. notice는 다른 문구로 덮이므로 따로 보관한다. */
+  lossReason: "wipe" | "timeout" | null;
 }
 
 const BEST_KEY = "nyang-arena.best";
@@ -168,6 +170,7 @@ export function newRun(): RunState {
     notice: "고양이를 배치하고 전투를 시작하세요",
     battleElapsed: 0,
     recordBroken: false,
+    lossReason: null,
   };
 
   // 시작 3마리를 가운데 줄에 세운다. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
@@ -347,8 +350,9 @@ export function startBattle(state: RunState): void {
   state.notice = "";
 }
 
-export function finishWave(state: RunState, won: boolean): void {
+export function finishWave(state: RunState, won: boolean, reason: "wipe" | "timeout" = "wipe"): void {
   if (!won) {
+    state.lossReason = reason;
     state.phase = "gameover";
     if (state.wave > state.best) {
       state.best = state.wave;
