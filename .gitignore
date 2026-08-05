@@ -3,3 +3,6 @@ dist/
 .DS_Store
 *.log
 .playwright-mcp/
+
+# 오케스트레이션 도구 세션 상태 — 게임과 무관하고 커밋 히스토리는 제출물이다
+.omc/

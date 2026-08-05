@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"set -e\\ncd /home/lim/nyang-arena\\npython3 - <<'PY'\\nfrom pathlib import Path\\np = Path(\\\"src/game/render.ts\\\"); t = p.read_text(encoding=\\\"utf-8\\\")\\n\\nt = t.replace('import { boardUnits, t...",
-  "error": "Exit code 2\n렌더러 갱신\nsrc/game/render.ts(5,33): error TS6133: 'pixelTextWidth' is declared but its value is never read.",
-  "timestamp": "2026-08-05T05:30:21.702Z",
-  "retry_count": 1
-}
