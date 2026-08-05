@@ -274,7 +274,9 @@ function saveBest(v: number): void {
 export function newRun(): RunState {
   const pool = resolveSynergyPool();
   const state: RunState = {
-    phase: "prepare",
+    // 시작부터 상점을 연다. 예전에는 생선 8마리를 쥐여 주고 첫 전투가 끝날 때까지
+    // 쓸 데가 없었다 — 자원이 있는데 쓸 수 없으면 자원이 아니라 장식이다.
+    phase: "reward",
     wave: 1,
     gold: BALANCE.startGold,
     best: loadBest(),
@@ -284,7 +286,7 @@ export function newRun(): RunState {
     synergyPool: pool,
     activeSynergyIds: new Set(),
     offers: [],
-    notice: "근접은 앞줄, 원거리는 뒷줄",
+    notice: `생선 ${BALANCE.startGold}마리로 시작한다`,
     battleElapsed: 0,
     recordBroken: false,
     lossReason: null,

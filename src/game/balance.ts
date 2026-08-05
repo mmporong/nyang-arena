@@ -51,7 +51,7 @@ export const BALANCE = {
    * 배치 수를 묶는 것과 같은 이유로 한도를 따로 둔다. 5x5는 칸이 늘어난 게
    * 아니라 **배치 자유도**다.
    */
-  unitCapBase: 3,
+  unitCapBase: 4,
   unitCapEvery: 2,
   unitCapMax: 10,
 };
