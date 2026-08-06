@@ -14,6 +14,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { EFFECT_RANGE, validateAll } from "../src/validate/synergy-schema.ts";
+import { checkStage, isBossStep, makeStage } from "../src/game/map.ts";
+import { seedRng } from "../src/game/rng.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const raw = JSON.parse(readFileSync(resolve(HERE, "synergy-adversarial.json"), "utf8"));
@@ -82,5 +84,52 @@ if (relicProblems.length === 0) {
   console.log(`  OK   유물 ${RELICS.length}종 — id 중복 없음, 대가는 불이익, 보너스는 이익`);
 } else {
   for (const p of relicProblems) console.log(`  실패 ${p}`);
+  process.exit(1);
+}
+
+/* ------------------------------------------------------------------ */
+/* 지도 계약                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 지도는 **수렴하는 DAG**다. 갈래는 벌어졌다가 보스에서 하나로 만난다.
+ *
+ * 트리로 짜면 잎이 기하급수로 늘어 보스를 여럿 둬야 하고, 그물로 짜면 지금
+ * 고르는 것이 다음 선택지를 좁힌다는 감각이 사라진다. 그 감각이 지도의 본체다.
+ *
+ * 생성기가 조용히 망가지면(모든 걸음이 한 갈래가 되거나, 닿을 수 없는 칸이
+ * 생기거나) 지도는 화면에만 남고 결정은 사라진다. 눈으로는 잘 안 보이는
+ * 고장이라 계약으로 묶는다. 시드를 200개 돌려 전부 검사한다.
+ */
+const mapFailures = [];
+let laneTotal = 0;
+let laneSteps = 0;
+for (let seed = 1; seed <= 200; seed++) {
+  seedRng(seed);
+  for (let stage = 1; stage <= 4; stage++) {
+    const m = makeStage(stage);
+    for (const p of checkStage(m)) mapFailures.push(`시드 ${seed} 스테이지 ${stage}: ${p}`);
+    m.steps.forEach((row, i) => {
+      if (!isBossStep(i)) { laneTotal += row.length; laneSteps += 1; }
+    });
+  }
+}
+
+// 같은 시드는 같은 지도를 내야 한다. 이게 깨지면 "시드 하나로 판을 재현한다"가 거짓말이 된다.
+seedRng(4242);
+const mapA = JSON.stringify(makeStage(2));
+seedRng(4242);
+const mapB = JSON.stringify(makeStage(2));
+if (mapA !== mapB) mapFailures.push("같은 시드가 다른 지도를 냈다");
+
+console.log("\n지도 계약");
+if (mapFailures.length === 0) {
+  console.log(
+    `  OK   시드 200 x 스테이지 4 — 보스에서 수렴, 끊긴 선 없음, 닿을 수 없는 칸 없음`,
+  );
+  console.log(`  OK   갈림길 한 걸음당 평균 ${(laneTotal / laneSteps).toFixed(2)}갈래`);
+} else {
+  for (const p of mapFailures.slice(0, 10)) console.log(`  실패 ${p}`);
+  console.log(`  (총 ${mapFailures.length}건)`);
   process.exit(1);
 }
