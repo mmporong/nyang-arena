@@ -6,6 +6,7 @@ import {
   SHOT_LIFE_MS,
   skillName,
 } from "./battle.ts";
+import { bossKit } from "./bosses.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -296,6 +297,90 @@ function drawBoard(
  * 돌진 연출은 화면 좌표가 아니라 전장 좌표에서 fx를 살짝 밀어 계산한다.
  * 그래야 가로/세로 어느 방향이든 "적 쪽으로 들이받는" 방향이 저절로 맞는다.
  */
+/**
+ * 취약 창 표시.
+ *
+ * 이 창은 "지금 때려라"의 유일한 순간인데 알려 주는 것이 버튼 글자뿐이었다.
+ * 판을 보다가 버튼을 봐야 알 수 있으니 실제로 놓친다 — 브라우저에서 돌려 보고
+ * 알았다. 레이드에서 버스트 창은 언제나 보스 쪽에 뜬다.
+ *
+ * 고리 하나로 끝낸다. 남은 시간은 고리가 닳는 것으로 보이고, 콤보는 고리의
+ * 두께와 맥동 속도로 돌아온다 — 숫자를 하나 더 띄우는 대신 **같은 물건이 두
+ * 가지를 말하게** 했다. 콤보 숫자는 버튼에 이미 있다.
+ *
+ * 붉은 예고(나가라)·푸른 예고(들어와라)와 섞이면 안 되므로 색은 금빛이다.
+ */
+const VULN_HUE = "255,214,106";
+
+/** 콤보가 쌓일수록 빨리 뛴다. 연타의 보람이 화면에 남는다. */
+function vulnerablePulse(cat: Cat, t: number): number {
+  const speed = 380 - Math.min(cat.strikeCombo, 12) * 18;
+  return 0.5 + 0.5 * Math.sin(t / speed);
+}
+
+/**
+ * 몸 뒤에 깔리는 맥동.
+ *
+ * 반경을 스프라이트 안(0.5)으로 묶는 이유는 보스가 판 가장자리 자리에 앉으면
+ * 그보다 큰 것은 전부 판을 넘기 때문이다. 예고와 달리 여기는 잘라 주는 경로가
+ * 없다. 가장자리 알파가 0이므로 넘더라도 보이지 않는다.
+ */
+function drawVulnerableGlow(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  cat: Cat,
+): void {
+  const pulse = vulnerablePulse(cat, performance.now());
+  const inner = size * 0.18;
+  const outer = size * (0.44 + pulse * 0.06);
+  if (!(outer > inner)) return;
+
+  const g = ctx.createRadialGradient(cx, cy, inner, cx, cy, outer);
+  g.addColorStop(0, `rgba(${VULN_HUE},${0.26 + pulse * 0.18})`);
+  g.addColorStop(1, `rgba(${VULN_HUE},0)`);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, outer, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.restore();
+}
+
+/** 닳아 가는 고리. 12시에서 시계 방향으로 줄어든다. */
+function drawVulnerableRing(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  cat: Cat,
+): void {
+  const max = Math.max(1, bossKit(cat.breed.id).vulnerableMs);
+  const left = Math.max(0, Math.min(1, cat.vulnerableMs / max));
+  const pulse = vulnerablePulse(cat, performance.now());
+  // 보스 반경 1.5칸 안으로 묶는다. 스프라이트가 3.15칸에 그려지므로 0.47이 그 선이다.
+  const r = size * 0.47;
+  const w = Math.max(3, size * 0.05);
+
+  ctx.save();
+  ctx.lineCap = "round";
+  // 닳은 자리를 어둡게 남긴다. 얼마나 지났는지도 같이 읽힌다.
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(12,8,6,0.5)";
+  ctx.lineWidth = w;
+  ctx.stroke();
+
+  const from = -Math.PI / 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, from, from + Math.PI * 2 * left);
+  ctx.strokeStyle = `rgba(${VULN_HUE},${0.75 + pulse * 0.25})`;
+  ctx.lineWidth = w * (1 + Math.min(cat.strikeCombo, 12) * 0.04);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawCat(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -333,6 +418,9 @@ function drawCat(
     ctx.restore();
   }
 
+  // 맥동은 몸 뒤, 고리는 몸 위. 순서를 지켜야 보스가 빛 속에 서 있는 것으로 읽힌다.
+  if (cat.alive && cat.vulnerableMs > 0) drawVulnerableGlow(ctx, cx, cy, size, cat);
+
   ctx.save();
   if (!cat.alive) ctx.globalAlpha = 0.32;
   else if (dimmed) ctx.globalAlpha = 0.35;
@@ -350,6 +438,8 @@ function drawCat(
   ctx.restore();
 
   if (!cat.alive) return;
+
+  if (cat.vulnerableMs > 0) drawVulnerableRing(ctx, cx, cy, size, cat);
 
   // 체력 바 — 셀이 아니라 고양이 크기에 맞춘다
   const bw = size * 0.88;
