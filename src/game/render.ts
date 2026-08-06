@@ -7,6 +7,7 @@ import {
   skillName,
 } from "./battle.ts";
 import { bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
+import { drawScene, type Scene } from "./backdrop.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -93,18 +94,54 @@ export interface DragState {
 /* 배경과 아레나                                                        */
 /* ------------------------------------------------------------------ */
 
-function drawBackground(ctx: CanvasRenderingContext2D, L: Layout): void {
+/**
+ * 이번 웨이브의 무대.
+ *
+ * 보스는 자기 무대를 갖는다 — 성격을 공간이 먼저 말하기 때문이다. 정면 대결은
+ * 콜로세움, 순간이동은 겹친 지붕, 제자리 원형 장판은 얼어붙은 수면. 나머지
+ * 웨이브는 전부 숲이고, 숲만 하루가 흐른다.
+ */
+function sceneForWave(s: RunState): Scene {
+  const boss = s.enemy.find((c) => c?.radius && c.radius > 0 && c.breed.id !== SNIPER_BREED.id);
+  if (boss) {
+    if (boss.breed.id === 10) return "alley";
+    if (boss.breed.id === 11) return "frost";
+    return "stone";
+  }
+  return "forest";
+}
+
+/**
+ * 하루의 진행. 열 웨이브가 하루다.
+ *
+ * 웨이브 번호를 그대로 쓰면 판이 길어질수록 영원히 밤이다. 스테이지가 넘어가면
+ * 다시 아침으로 돌아와야 "또 하루가 시작됐다"가 읽히고, 그게 곧 진행감이다.
+ */
+const STAGE_WAVES = 10;
+function dayProgress(wave: number): number {
+  return ((wave - 1) % STAGE_WAVES) / (STAGE_WAVES - 1);
+}
+
+function drawBackground(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   ctx.fillStyle = T.ink;
   ctx.fillRect(0, 0, L.w, L.h);
 
-  // 아레나 바닥에만 빛이 드는 느낌. 전장이 어디인지 색으로 말한다.
-  const cx = (L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2;
-  const cy = (L.allyBoard.y + L.enemyBoard.y + L.enemyBoard.h) / 2;
-  const rad = Math.max(L.w, L.h) * 0.55;
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
-  g.addColorStop(0, "rgba(232,145,60,0.10)");
-  g.addColorStop(0.55, "rgba(232,145,60,0.03)");
-  g.addColorStop(1, "rgba(0,0,0,0)");
+  drawScene(ctx, L.w, L.h, sceneForWave(s), dayProgress(s.wave));
+
+  /**
+   * 어둠을 세로로 다르게 깐다.
+   *
+   * 평평하게 덮으면 둘 중 하나를 잃는다 — 옅으면 밝은 하늘 위에서 HUD 글자가
+   * 날아가고, 짙으면 씬이 진흙이 된다. 글자가 있는 위아래는 짙게, 판이 있는
+   * 가운데는 옅게 두면 씬은 살고 글자는 읽힌다.
+   */
+  const top = L.notice.y + L.notice.h;
+  const bottom = L.offersPanel.y;
+  const g = ctx.createLinearGradient(0, 0, 0, L.h);
+  g.addColorStop(0, "rgba(9,6,5,0.80)");
+  g.addColorStop(Math.max(0.02, Math.min(0.98, top / L.h)), "rgba(9,6,5,0.30)");
+  g.addColorStop(Math.max(0.03, Math.min(0.99, bottom / L.h)), "rgba(9,6,5,0.42)");
+  g.addColorStop(1, "rgba(9,6,5,0.86)");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, L.w, L.h);
 }
@@ -270,10 +307,17 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
   }
 }
 
+/**
+ * 판은 씬 위에 얹히는 반투명 슬랩이다.
+ *
+ * 불투명하게 채우면 씬이 판 뒤에서만 보여서 액자 속 그림이 된다. 비쳐 보이게
+ * 두면 판이 그 무대 **위에** 놓인 것으로 읽히고, 동시에 어둡게 눌러 두므로
+ * 판 위의 고양이와 예고는 그대로 또렷하다.
+ */
 function drawArena(ctx: CanvasRenderingContext2D, L: Layout): void {
   const r = arenaBox(L);
   roundRect(ctx, r, L.cell * 0.22);
-  ctx.fillStyle = T.floor;
+  ctx.fillStyle = "rgba(20,13,10,0.62)";
   ctx.fill();
   ctx.strokeStyle = T.floorEdge;
   ctx.lineWidth = 1;
@@ -1959,7 +2003,7 @@ export function render(
   drag: DragState,
   hoverCell: number,
 ): void {
-  drawBackground(ctx, L);
+  drawBackground(ctx, L, s);
   drawArena(ctx, L);
   drawHud(ctx, L, s);
 
