@@ -72,7 +72,7 @@ export const BALANCE = {
   bossHpMulFirst: 50,
   bossHpMul: 60,
   /** 배수가 First에서 Mul까지 올라가는 데 걸리는 웨이브 수 */
-  bossHpRampWaves: 8,
+  bossHpRampWaves: 14,
   /**
    * 보스 평타는 **약하다**. 위험은 예고 광역에서 온다.
    *
@@ -102,8 +102,20 @@ export const BALANCE = {
  * 절반이 어차피 맞아서 개입 격차가 +8.7%p에 머물렀다.
  */
   dodgeCharges: 6,
-  telegraphDmgFirst: 0.14,
-  telegraphDmg: 0.48,
+  /**
+   * 약점 공격 한 번이 주는 피해(보스 최대 체력 대비).
+   *
+   * 연타할수록 콤보가 쌓여 배수가 붙는다. 창이 3초이고 스텝당 하나만 소비하니
+   * 최대 30번, 실제로는 사람 손 기준 20번쯤이다. 창 하나를 완벽히 살리면
+   * 보스 체력의 15~20%를 깎는 정도로 잡는다 — 판을 뒤집지는 않되
+   * "잘 눌렀다"가 눈에 보이는 크기다.
+   */
+  strikeFrac: 0.0024,
+  /** 콤보 한 단계당 배수 증가분과 상한 */
+  strikeComboStep: 0.12,
+  strikeComboMax: 12,
+  telegraphDmgFirst: 0.135,
+  telegraphDmg: 0.45,
 };
 
 export type Balance = typeof BALANCE;

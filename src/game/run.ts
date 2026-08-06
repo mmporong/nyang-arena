@@ -268,6 +268,9 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     radius: 0,
     telegraph: null,
     thresholdIdx: 0,
+    vulnerableMs: 0,
+    strikeCombo: 0,
+    vulnerableUsed: false,
     moveLock: 0,
     side,
     cell,
@@ -770,6 +773,9 @@ export function startBattle(state: RunState): void {
       c.comboTarget = null;
       c.combo = 0;
       c.moveLock = 0;
+      c.vulnerableMs = 0;
+      c.strikeCombo = 0;
+      c.vulnerableUsed = false;
     }
   }
   // 개입 상태는 전투마다 초기화한다. 남아 있으면 다음 전투 첫 틱에 한꺼번에 터진다.

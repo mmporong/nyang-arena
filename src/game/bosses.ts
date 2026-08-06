@@ -1,4 +1,4 @@
-import type { Breed } from "./types.ts";
+import type { Breed, TelegraphShape } from "./types.ts";
 
 /**
  * 보스.
@@ -18,6 +18,44 @@ import type { Breed } from "./types.ts";
  * 보스도 그냥 `Cat`이다. 별도 타입을 만들면 타겟팅·이동·피해 판정을 전부 다시
  * 써야 하는데, 반경 하나만 추가하면 기존 전투 로직이 그대로 돈다.
  */
+/**
+ * 보스마다 다른 기믹 조합.
+ *
+ * 같은 보스가 반복되면 두 번째부터는 그냥 체력 많은 적이다. 레이드의 재미는
+ * **"이 보스는 이렇게 잡는다"가 학습되는 것**이고, 그러려면 보스마다 요구하는
+ * 대응이 달라야 한다.
+ *
+ * 축을 세 개만 둔다 — 예고 패턴 순서, 순간이동 빈도, 취약 창의 길이와 시점.
+ * 축이 더 늘면 플레이어가 무엇이 다른지 못 읽는다.
+ */
+export interface BossKit {
+  /** 문턱마다 순환할 예고 패턴 */
+  readonly patterns: readonly TelegraphShape[];
+  /** 문턱 몇 개마다 순간이동하는가. 0이면 안 한다 */
+  readonly teleportEvery: number;
+  /** 취약 창이 열리는 체력 비율 */
+  readonly vulnerableAt: number;
+  /** 취약 창 길이(ms) */
+  readonly vulnerableMs: number;
+}
+
+export const BOSS_KITS: Record<number, BossKit> = {
+  // 무쇠발톱 — 교과서. 세 패턴을 다 보여주고 절반에서 한 번 크게 연다.
+  9: { patterns: ["circle", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
+  // 살금이 — 계속 자리를 옮긴다. 근접이 붙기 어렵고 예고 기준점이 매번 바뀐다.
+  //   대신 창이 일찍 열리고 짧다. 준비된 팀이 짧은 창을 잡는 보스.
+  // teleportEvery를 1로 뒀더니 근접이 영영 못 붙어 W10 통과율이 1.1%였다.
+  // 순간이동은 "붙었다 놓쳤다"의 리듬이어야지 추격전이 되면 안 된다.
+  10: { patterns: ["cone", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
+  // 서리귀 — 제자리에서 원형만 던진다. 흩어지기가 유일한 답이고,
+  //   대신 창이 늦게 열리지만 길다. 오래 버티고 한 번에 몰아치는 보스.
+  11: { patterns: ["circle", "circle", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
+};
+
+export function bossKit(breedId: number): BossKit {
+  return BOSS_KITS[breedId] ?? BOSS_KITS[9]!;
+}
+
 export const BOSS_BREEDS: readonly Breed[] = [
   {
     id: 9,
@@ -32,6 +70,40 @@ export const BOSS_BREEDS: readonly Breed[] = [
     range: 0.8,
     // 느리게 걷는다. 보스가 빠르면 뒷줄이 순식간에 지워져 배치가 무의미해진다.
     moveSpeed: 0.45,
+    manaPerAttack: 0,
+    skill: null,
+    passive: null,
+    cost: 0,
+  },
+  {
+    id: 10,
+    name: "살금이",
+    color: "black",
+    cls: "rogue",
+    kind: "melee",
+    hp: 100,
+    atk: 12,
+    atkInterval: 850,
+    range: 0.8,
+    // 계속 순간이동하므로 걸음은 느려도 된다. 빠르면 추격전이 된다.
+    moveSpeed: 0.4,
+    manaPerAttack: 0,
+    skill: null,
+    passive: null,
+    cost: 0,
+  },
+  {
+    id: 11,
+    name: "서리귀",
+    color: "white",
+    cls: "mage",
+    kind: "ranged",
+    hp: 130,
+    atk: 12,
+    atkInterval: 1000,
+    // 제자리에서 던지는 보스라 사거리가 길다. 근접이 붙어야 할 이유가 된다.
+    range: 3.2,
+    moveSpeed: 0.25,
     manaPerAttack: 0,
     skill: null,
     passive: null,
@@ -76,7 +148,15 @@ export const BOSS_ANCHORS = [
 /** 보스가 차지하는 반경(칸). 일반 고양이는 0이라 기존 계산이 그대로다. */
 export const BOSS_RADIUS = 1.5;
 
+/**
+ * 첫 보스(5웨이브)는 반드시 무쇠발톱이다.
+ *
+ * `floor(wave/5)`를 그대로 쓰면 5웨이브에 두 번째 보스가 나온다. 실제로 그렇게
+ * 두었더니 첫 보스가 순간이동을 매 문턱마다 하는 살금이가 되어 비개입 통과율이
+ * 41%로 떨어졌다. 첫 보스는 기믹을 **가르치는** 자리다 — 세 패턴을 다 보여주고
+ * 창을 한 번 크게 여는 교과서가 먼저 와야 한다.
+ */
 export function bossForWave(wave: number): Breed {
-  const i = Math.floor(wave / 5) % BOSS_BREEDS.length;
+  const i = (Math.max(1, Math.floor(wave / 5)) - 1) % BOSS_BREEDS.length;
   return BOSS_BREEDS[i] ?? BOSS_BREEDS[0]!;
 }

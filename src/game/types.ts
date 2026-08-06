@@ -11,7 +11,7 @@ export type Side = "ally" | "enemy";
  * 시뮬이 **같은 함수**를 통과해야 개입의 값을 잴 수 있다. 판정은 전부
  * stepBattle 안에서 일어난다.
  */
-export type Intervention = { kind: "dodge" };
+export type Intervention = { kind: "dodge" } | { kind: "strike" };
 
 /** 보스 광역기의 예고 모양. 터지기 전에 화면에 그려진다. */
 export type TelegraphShape = "circle" | "line" | "cone";
@@ -144,6 +144,17 @@ export interface Cat {
   telegraph: Telegraph | null;
   /** 다음에 발동할 체력 문턱의 인덱스. 보스만 쓴다. */
   thresholdIdx: number;
+  /**
+   * 남은 취약 시간(ms). 0보다 크면 보스가 공격을 멈추고 약점이 열린다.
+   *
+   * 회피 버튼이 이 동안 **약점 공격**으로 바뀐다. 버튼은 하나이고 역할만
+   * 바뀐다 — 조작을 늘리지 않고 레이드의 '버스트 창'을 넣는 방법이다.
+   */
+  vulnerableMs: number;
+  /** 이번 취약 창에서 쌓은 연타 수. 창이 닫히면 0으로 돌아간다. */
+  strikeCombo: number;
+  /** 취약 창을 이미 한 번 열었는가. 보스전당 한 번만 열린다. */
+  vulnerableUsed: boolean;
   /**
    * 남은 이동 금지 시간(ms).
    *

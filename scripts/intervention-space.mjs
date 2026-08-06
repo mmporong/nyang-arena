@@ -27,17 +27,24 @@ function telegraphUp(state) {
   return state.enemy.some((c) => c?.telegraph);
 }
 
+/** 취약 창이 열려 있는가. 이때 버튼은 약점 공격이 된다. */
+function windowOpen(state) {
+  return state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+}
+
 const POLICIES = {
   "개입 없음": null,
 
-  // 예고가 뜨자마자 누른다. 사람이 낼 수 있는 상한.
-  "완벽 회피": () => true,
+  // 회피와 약점을 갈라 잰다. 둘 중 무엇이 값을 하는지 모르면 어느 쪽을
+  // 다듬어야 하는지도 모른다.
+  "회피만": { dodge: () => true, strike: false },
+  "약점만": { dodge: () => false, strike: true },
 
-  // 예고가 뜨고 두 틱(200ms) 뒤에 누른다. 반응 시간을 흉내낸 것.
-  "반응 200ms": (state, upFor) => upFor >= 2,
+  // 예고가 뜨자마자 누른다. 사람이 낼 수 있는 상한.
+  "완벽(둘 다)": { dodge: () => true, strike: true },
 
   // 반응이 늦고 네 번에 한 번은 놓친다. 결정적으로 놓치게 해야 시드가 의미를 갖는다.
-  "사람 흉내": (state, upFor, seen) => seen % 4 !== 3 && upFor >= 3,
+  "사람 흉내": { dodge: (upFor, seen) => seen % 4 !== 3 && upFor >= 3, strike: true },
 };
 
 function play(policy, seed) {
@@ -86,9 +93,13 @@ function play(policy, seed) {
         upFor = 0;
       }
       wasUp = up;
-      if (up) {
+      // 창이 열리면 무조건 연타한다. 창 자체가 3초로 제한돼 있으므로
+      // '얼마나 누를까'는 결정이 아니고 '놓치지 않는가'만 남는다.
+      if (windowOpen(s)) {
+        if (policy.strike) s.pending.push({ kind: "strike" });
+      } else if (up) {
         upFor += 1;
-        if (s.dodgeCharges > 0 && policy(s, upFor, seen)) s.pending.push({ kind: "dodge" });
+        if (s.dodgeCharges > 0 && policy.dodge(upFor, seen)) s.pending.push({ kind: "dodge" });
       }
     }
 

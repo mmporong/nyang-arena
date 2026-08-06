@@ -104,7 +104,10 @@ canvas.addEventListener("pointerdown", (e) => {
   if (rectHas(layout.button, x, y)) {
     // 보스전 중에는 기본 버튼 자리가 회피 버튼이다.
     if (state.phase === "battle") {
-      if (state.dodgeCharges > 0) state.pending.push({ kind: "dodge" });
+      // 같은 자리, 상황에 따라 다른 일. 취약 창이 열려 있으면 약점 공격이다.
+      const openBoss = state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+      if (openBoss) state.pending.push({ kind: "strike" });
+      else if (state.dodgeCharges > 0) state.pending.push({ kind: "dodge" });
       return;
     }
     onPrimaryAction();

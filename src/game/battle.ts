@@ -1,5 +1,5 @@
 import { BALANCE } from "./balance.ts";
-import { BOSS_ANCHORS, BOSS_THRESHOLDS, TELEGRAPH_FUSE_MS } from "./bosses.ts";
+import { BOSS_ANCHORS, BOSS_THRESHOLDS, bossKit, TELEGRAPH_FUSE_MS } from "./bosses.ts";
 import { rng } from "./rng.ts";
 import {
   BOARD_COLS,
@@ -463,6 +463,34 @@ function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | nu
   return null;
 }
 
+/**
+ * 약점 공격. 취약 창이 열린 보스에게만 들어간다.
+ *
+ * 연타가 콤보로 쌓여 배수가 붙는다. 창이 닫히면 콤보도 0으로 돌아가므로,
+ * "언제 창이 열리는지 알고 준비했다가 몰아치는 것"이 보상받는다 —
+ * WoW 레이드의 버스트 창과 같은 구조다.
+ */
+function doStrike(state: RunState): boolean {
+  const boss = state.enemy.find((c) => c?.alive && c.radius > 0 && c.vulnerableMs > 0);
+  if (!boss) return false;
+
+  boss.strikeCombo = Math.min(BALANCE.strikeComboMax, boss.strikeCombo + 1);
+  const mul = 1 + boss.strikeCombo * BALANCE.strikeComboStep;
+  damage(boss, Math.max(1, Math.round(boss.maxHp * BALANCE.strikeFrac * mul)), boss.strikeCombo >= 6);
+  pushFx({
+    kind: "slash",
+    fx: boss.fx,
+    fy: boss.fy,
+    tx: 0,
+    ty: 0,
+    radius: boss.radius * 0.8,
+    angle: (boss.strikeCombo % 6) * 0.5,
+    life: 200,
+    color: "#F0BA4A",
+  });
+  return true;
+}
+
 /** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
 function doDodge(state: RunState): boolean {
   const zones: Telegraph[] = [];
@@ -665,7 +693,8 @@ function centroid(cats: Cat[]): { fx: number; fy: number } {
  */
 function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
   if (foes.length === 0) return null;
-  const shape: TelegraphShape = (["circle", "line", "cone"] as const)[idx % 3]!;
+  const kit = bossKit(boss.breed.id);
+  const shape: TelegraphShape = kit.patterns[idx % kit.patterns.length]!;
   const base = { shape, fuse: TELEGRAPH_FUSE_MS, fuseMax: TELEGRAPH_FUSE_MS };
 
   if (shape === "circle") {
@@ -766,6 +795,14 @@ function teleportBoss(boss: Cat, idx: number): void {
 /** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
 function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number): void {
   if (!boss.alive) return;
+  const kit = bossKit(boss.breed.id);
+
+  // 취약 창이 열려 있는 동안에는 예고를 걸지 않는다. 이 3초가 플레이어의 차례다.
+  if (boss.vulnerableMs > 0) {
+    boss.vulnerableMs = Math.max(0, boss.vulnerableMs - dt);
+    if (boss.vulnerableMs === 0) boss.strikeCombo = 0;
+    return;
+  }
 
   if (boss.telegraph) {
     boss.telegraph.fuse -= dt;
@@ -782,7 +819,29 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number): void {
 
   // 한 번 걸러 자리를 옮긴 뒤 그 자리에서 예고한다. 순서가 반대면 예고가
   // 뜬 곳과 터지는 곳이 달라져 화면이 거짓말을 한다.
-  if (boss.thresholdIdx % 2 === 1) teleportBoss(boss, Math.floor(boss.thresholdIdx / 2));
+  // 취약 창은 문턱보다 먼저 본다. 여기서 예고를 걸면 창과 겹쳐 회피와 공격을
+  // 동시에 요구하게 되고, 버튼이 하나라 둘 다 못 한다.
+  if (!boss.vulnerableUsed && frac <= kit.vulnerableAt) {
+    boss.vulnerableUsed = true;
+    boss.vulnerableMs = kit.vulnerableMs;
+    boss.strikeCombo = 0;
+    pushFx({
+      kind: "ring",
+      fx: boss.fx,
+      fy: boss.fy,
+      tx: 0,
+      ty: 0,
+      radius: boss.radius * 1.3,
+      angle: 0,
+      life: 520,
+      color: "#F0BA4A",
+    });
+    return;
+  }
+
+  if (kit.teleportEvery > 0 && boss.thresholdIdx % kit.teleportEvery === 0) {
+    teleportBoss(boss, Math.floor(boss.thresholdIdx / Math.max(1, kit.teleportEvery)));
+  }
   boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
   boss.thresholdIdx += 1;
 }
@@ -828,6 +887,9 @@ export function stepBattle(state: RunState, dtMs: number): void {
     const intent = state.pending.shift();
     if (intent?.kind === "dodge" && state.dodgeCharges > 0 && doDodge(state)) {
       state.dodgeCharges -= 1;
+    } else if (intent?.kind === "strike") {
+      // 약점 공격은 차지를 쓰지 않는다. 창이 열려 있는 3초 자체가 제한이다.
+      doStrike(state);
     }
 
     const allies = livingCats(state.ally);
