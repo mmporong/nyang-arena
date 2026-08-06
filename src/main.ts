@@ -205,6 +205,69 @@ window.addEventListener("pointercancel", () => {
 canvas.addEventListener("lostpointercapture", cancelDrag);
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
+/* ------------------------------------------------------------------ */
+/* 키보드                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 데스크톱에서는 개입을 **두 키로 갈라 준다.**
+ *
+ * 탭이냐 꾹이냐로 나눈 것은 손가락 하나로 해야 하는 폰의 제약이었다. 키보드가
+ * 있으면 그 제약이 없고, 같은 키를 얼마나 오래 눌렀는지로 의도를 가르는 것은
+ * 그 자체가 오해의 씨앗이다 — 급하게 누르면 뭉치려던 것이 흩어짐이 된다.
+ *
+ * 두 경로가 **같은 큐(`state.pending`)로 들어가는 것**이 중요하다. 판정은 전부
+ * `stepBattle` 안에서 일어나므로 키보드를 붙여도 헤드리스 시뮬과 갈라지지 않는다.
+ *
+ *   Space   흩어져 (취약 창에는 약점 공격)
+ *   Shift   모여
+ *   1 2 3   카드 구매 · R 다시 뽑기 · Enter 다음 단계
+ */
+function pushIntent(kind: "dodge" | "gather"): void {
+  if (state.phase !== "battle") return;
+  const openBoss = state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+  if (openBoss) {
+    state.pending.push({ kind: "strike" });
+    return;
+  }
+  if (state.dodgeCharges <= 0) return;
+  state.pending.push({ kind });
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.repeat && e.code !== "Space") return;
+  if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
+
+  switch (e.code) {
+    case "Space":
+      e.preventDefault();
+      // 취약 창에는 연타가 곧 화력이라 자동 반복도 그대로 받는다.
+      pushIntent("dodge");
+      return;
+    case "ShiftLeft":
+    case "ShiftRight":
+      e.preventDefault();
+      pushIntent("gather");
+      return;
+    case "Enter":
+      if (state.phase !== "battle") onPrimaryAction();
+      return;
+    case "KeyR":
+      if (state.phase === "reward") rerollOffers(state);
+      return;
+    case "Digit1":
+    case "Digit2":
+    case "Digit3": {
+      if (state.phase !== "reward") return;
+      const offer = state.offers[Number(e.code.slice(5)) - 1];
+      if (!offer) return;
+      if (buyOffer(state, offer)) state.notice = "";
+      else if (state.gold < offer.cost) state.notice = "생선이 부족합니다";
+      return;
+    }
+  }
+});
+
 /**
  * `?debug=1`일 때만 런 상태를 창에 노출한다.
  *
@@ -220,6 +283,9 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
     get: () => ({
       phase: state.phase,
       wave: state.wave,
+      gold: state.gold,
+      offers: state.offers.map((o) => (o ? { label: o.label, cost: o.cost } : null)),
+      allies: state.ally.filter(Boolean).length,
       dodgeCharges: state.dodgeCharges,
       pending: [...state.pending],
       telegraphs: state.enemy.filter((c) => c?.telegraph).map((c) => c!.telegraph!.mode),
