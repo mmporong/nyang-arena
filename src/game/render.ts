@@ -1923,10 +1923,25 @@ function drawButton(
   s: RunState,
 ): void {
   const r = L.button;
-  // 누를 수 있는 버튼이면 죽은 색으로 그리지 않는다. 취약 창에는 회피가
-  // 떨어졌어도 약점 공격을 누를 수 있다.
   const openBoss = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
-  const idle = s.phase === "battle" && s.dodgeCharges <= 0 && !openBoss;
+
+  /**
+   * 전투 중 버튼은 **반응할 것이 있을 때만** 살아 있다.
+   *
+   * 개입은 예고가 떠 있는 1.2초 안에서만 일한다. 그 밖에서 누르면 큐에도 안
+   * 들어가고 차지도 안 줄고 아무 일도 안 일어나는데, 버튼은 내내 같은 주황으로
+   * 눌러 달라는 얼굴을 하고 있었다. 그래서 "버튼이 고장 났다"로 읽혔다 —
+   * 실제로 그 보고를 받았고, 계측해 보니 기능은 멀쩡했다.
+   *
+   * 말로 설명하는 대신 버튼이 스스로 때를 알린다. 죽어 있으면 누를 때가 아니고,
+   * 살아나면 지금이다. 무엇을 눌러야 하는지는 여전히 장판 색이 말한다 —
+   * 버튼까지 정답을 알려주면 읽을 이유가 사라진다.
+   */
+  const armed =
+    s.phase !== "battle" ||
+    openBoss ||
+    (s.dodgeCharges > 0 && s.enemy.some((c) => c?.telegraph));
+  const idle = !armed;
   const face = idle ? "rgba(239,224,198,0.07)" : T.action;
   const edge = idle ? "rgba(0,0,0,0.3)" : "#A85E1E";
 
@@ -1938,6 +1953,17 @@ function drawButton(
     edge,
     idle ? 2 : Math.max(3, r.h * 0.08),
   );
+
+  // 살아난 순간을 놓치지 않게 테두리가 한 번 밝아진다. 예고는 1.2초뿐이다.
+  if (armed && s.phase === "battle") {
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 150);
+    ctx.save();
+    roundRect(ctx, r, r.h * 0.26);
+    ctx.strokeStyle = `rgba(255,255,255,${0.18 + pulse * 0.3})`;
+    ctx.lineWidth = Math.max(2, r.h * 0.05);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   if (!idle) {
     // 위쪽 하이라이트. 눌리는 물건처럼 보이게 하는 최소한의 장치.

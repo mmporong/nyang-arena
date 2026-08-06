@@ -205,6 +205,31 @@ window.addEventListener("pointercancel", () => {
 canvas.addEventListener("lostpointercapture", cancelDrag);
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
+/**
+ * `?debug=1`일 때만 런 상태를 창에 노출한다.
+ *
+ * 캔버스 게임은 밖에서 들여다볼 구멍이 없어서, 버그를 잡을 때마다 픽셀 색을
+ * 세어 상태를 추측하게 된다. 그러다 "회피 버튼이 안 먹는다"를 진단하는 데
+ * 세 번을 헛돌았다. 읽기 전용 구멍 하나면 끝날 일이었다.
+ *
+ * 기본 경로에는 없다 — 플래그가 없으면 아무것도 붙지 않으므로 출고 빌드의
+ * 동작과 크기에 영향이 없다.
+ */
+if (new URLSearchParams(location.search).get("debug") === "1") {
+  Object.defineProperty(window, "nyang", {
+    get: () => ({
+      phase: state.phase,
+      wave: state.wave,
+      dodgeCharges: state.dodgeCharges,
+      pending: [...state.pending],
+      telegraphs: state.enemy.filter((c) => c?.telegraph).map((c) => c!.telegraph!.mode),
+      vulnerable: state.enemy.some((c) => c?.alive && c.vulnerableMs > 0),
+      button: { ...layout.button },
+      pressOnButton,
+    }),
+  });
+}
+
 let last = 0;
 function frame(now: number): void {
   if (state.phase !== lastPhase) {
