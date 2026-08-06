@@ -76,13 +76,75 @@ const CLASS_COLOR: Record<ClassKind, string> = {
   mage: "#6E97C4",
 };
 
-/** 뱃지에 넣을 한 글자. 5x5에서는 셀이 작아 한 글자가 한계다. */
-const CLASS_CHAR: Record<ClassKind, string> = {
-  warrior: "전",
-  rogue: "도",
-  archer: "궁",
-  mage: "법",
+/**
+ * 직업 아이콘. 7x7 비트맵으로, 각 행의 하위 7비트가 한 줄이다.
+ *
+ * 전에는 "전·도·궁·법" 한 글자를 시스템 폰트로 뱃지에 찍었다. 지름 20px짜리
+ * 원 안의 한글은 획이 뭉개져서, 결국 **색으로만** 구분하게 된다. 그런데 직업색은
+ * 저채도로 물러난 상태라 그 색조차 약하다.
+ *
+ * 도형은 색을 못 봐도 갈린다. 실루엣이 서로 최대한 안 겹치게 골랐다 —
+ * 넓은 사다리꼴(방패) · 대각선(단검) · 열린 호(활) · 대칭 십자(별).
+ * 무기 고증보다 **7px에서 구분되는가**가 기준이다.
+ *
+ * 픽셀 에셋으로 갈아 끼울 수 있다. `CLASS_ICON_IMG`에 이미지가 들어 있으면
+ * 그쪽을 먼저 쓴다 — 아래 `drawClassIcon`을 볼 것.
+ */
+const CLASS_ICON: Record<ClassKind, readonly number[]> = {
+  // 방패 — 넓게 시작해 아래로 좁아진다
+  warrior: [0x7f, 0x7f, 0x3e, 0x3e, 0x1c, 0x1c, 0x08],
+  // 단검 — 오른쪽 위로 뻗는 대각선
+  rogue: [0x03, 0x06, 0x0c, 0x18, 0x38, 0x70, 0x20],
+  // 활 — 오른쪽으로 열린 호
+  archer: [0x38, 0x44, 0x42, 0x42, 0x42, 0x44, 0x38],
+  // 별 — 상하좌우 대칭 십자
+  mage: [0x08, 0x08, 0x1c, 0x7f, 0x1c, 0x08, 0x08],
 };
+
+/**
+ * 직업 아이콘을 픽셀 에셋으로 갈아 끼우는 자리.
+ *
+ * `public/icons/{warrior|rogue|archer|mage}.png`를 넣고 `loadClassIcons()`를
+ * 부르면 그때부터 그 그림이 쓰인다. 파일이 없으면 위 비트맵이 그대로 남으므로
+ * 에셋이 없어도 게임은 똑같이 돈다.
+ */
+const CLASS_ICON_IMG: Partial<Record<ClassKind, HTMLImageElement>> = {};
+
+export function setClassIcon(cls: ClassKind, img: HTMLImageElement): void {
+  CLASS_ICON_IMG[cls] = img;
+}
+
+/** 뱃지 안에 직업 표식을 그린다. 에셋이 있으면 에셋, 없으면 내장 비트맵. */
+function drawClassIcon(
+  ctx: CanvasRenderingContext2D,
+  cls: ClassKind,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  const img = CLASS_ICON_IMG[cls];
+  if (img && img.complete && img.naturalWidth > 0) {
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, Math.round(cx - size / 2), Math.round(cy - size / 2), size, size);
+    ctx.imageSmoothingEnabled = prev;
+    return;
+  }
+  const rows = CLASS_ICON[cls];
+  // 픽셀을 정수로 떨어뜨린다. 소수 크기로 그리면 7px 도형이 흐려져 아이콘의
+  // 유일한 장점(또렷함)이 사라진다.
+  const p = Math.max(1, Math.round(size / 7));
+  const x0 = Math.round(cx - (p * 7) / 2);
+  const y0 = Math.round(cy - (p * 7) / 2);
+  ctx.fillStyle = color;
+  for (let r = 0; r < 7; r++) {
+    const bits = rows[r] ?? 0;
+    for (let c = 0; c < 7; c++) {
+      if (bits & (1 << (6 - c))) ctx.fillRect(x0 + c * p, y0 + r * p, p, p);
+    }
+  }
+}
 
 const TRIGGER_COLOR: Record<string, string> = {
   same_color_3: "#C9A05C",
@@ -623,10 +685,7 @@ function drawCat(
     ctx.strokeStyle = hue;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    uiText(ctx, CLASS_CHAR[cls], bxc, byc + rad * 0.06, rad * 1.25, hue, {
-      align: "center",
-      weight: 800,
-    });
+    drawClassIcon(ctx, cls, bxc, byc, rad * 1.35, hue);
   }
 
   // 상태이상 — 기절·빙결은 위에 고리, 지속 피해는 아래에 점
