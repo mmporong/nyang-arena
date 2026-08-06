@@ -295,6 +295,9 @@ export function chooseNode(state: RunState, idx: number): boolean {
     return true;
   }
 
+  // **고른 뒤에** 상대를 만든다. 이 순서라야 선택이 상대를 바꾸고, 배치 화면에서
+  // 보이는 적이 실제로 싸울 적이 된다.
+  buildEnemyWave(state);
   state.phase = "prepare";
   state.notice = node.kind === "elite" ? "정예다. 이기면 유물이 나온다" : "근접은 앞줄, 원거리는 뒷줄";
   return true;
@@ -1047,7 +1050,13 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
     refreshed = true;
   }
 
-  buildEnemyWave(state);
+  // 적은 여기서 만들지 않는다.
+  //
+  // 순서가 거꾸로였다 — 전투가 끝나자마자 다음 적을 만들어 두고, 그 뒤에 지도를
+  // 고르게 했다. 그러면 **무엇을 골라도 이미 정해진 적과 싸운다.** 정예를 골랐는데
+  // 평범한 무리가 나오고, 배치 화면에서 본 적이 실제로 나올 적이 아니었다.
+  //
+  // 적은 `chooseNode`가 만든다. 골라야 상대가 정해지고, 상대를 보고 배치한다.
   rollOffers(state);
   applySynergies(state);
   state.phase = "reward";
