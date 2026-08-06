@@ -23,6 +23,33 @@ const DT = 100;
 /** 웨이브 성격별 시도/패배와 전투 길이. 보스 통과율이 개입 강도의 판정 기준이다. */
 const tried = new Map();
 const lost = new Map();
+
+/**
+ * 궁합 표 — 팀 성격 × 웨이브 성격.
+ *
+ * 지도를 '난이도'가 아니라 '성격'으로 가르려면 먼저 **궁합이 실제로 있는지**를
+ * 알아야 한다. 표가 평평하면 "내 팀이 어느 쪽에 강한가"라는 질문 자체가
+ * 성립하지 않고, 그러면 성격으로 갈라 봐야 장식이다.
+ *
+ * 여기서 재는 이유가 있다. 따로 만든 빠른 프로브로는 두 번 틀렸다 — 아군 배수를
+ * 임의로 줬다가 적의 1.24^(w-1)과 어긋났고, 고쳤더니 이번엔 레벨도 시너지도 없는
+ * 4마리로 6마리를 상대하게 했다. **공정한 팀을 만드는 일이 곧 이 시뮬이 하는
+ * 일**이므로, 새로 만들지 않고 여기에 얹는다.
+ */
+const matchup = new Map(); // "팀|웨이브" → { tried, lost }
+function teamShape(state) {
+  const cats = state.ally.filter(Boolean);
+  if (cats.length === 0) return "빈팀";
+  let melee = 0;
+  for (const c of cats) if (c.breed.kind === "melee") melee += 1;
+  const r = melee / cats.length;
+  return r >= 0.67 ? "근접 위주" : r <= 0.33 ? "원거리 위주" : "균형";
+}
+function tally(key, field) {
+  const cur = matchup.get(key) ?? { tried: 0, lost: 0 };
+  cur[field] += 1;
+  matchup.set(key, cur);
+}
 const battleMs = [];
 const battleMsByKind = new Map();
 // 보스는 웨이브별로 따로 센다. 첫 보스(5)는 기믹을 가르치는 자리라 성격이 다르다.
@@ -38,6 +65,7 @@ function playOne(seed) {
   let rerolls = 0;
   let lastWave = 0;
   let kindAtStart = null;
+  let shapeAtStart = null;
   let waveAtStart = 0;
   let elapsedBeforeTick = 0;
   let lastTelegraph = null;
@@ -47,6 +75,7 @@ function playOne(seed) {
   for (let guard = 0; guard < MAX_WAVE * 400; guard++) {
     if (s.phase === "gameover") {
       if (kindAtStart) lost.set(kindAtStart, (lost.get(kindAtStart) ?? 0) + 1);
+      if (kindAtStart && shapeAtStart) tally(`${shapeAtStart}|${kindAtStart}`, "lost");
       if (kindAtStart === "boss") bossLost.set(waveAtStart, (bossLost.get(waveAtStart) ?? 0) + 1);
       return s.wave;
     }
@@ -88,6 +117,8 @@ function playOne(seed) {
       if (s.wave > MAX_WAVE) return s.wave;
       kindAtStart = currentKind(s);
       tried.set(kindAtStart, (tried.get(kindAtStart) ?? 0) + 1);
+      shapeAtStart = teamShape(s);
+      tally(`${shapeAtStart}|${kindAtStart}`, "tried");
       if (kindAtStart === "boss") {
         waveAtStart = s.wave;
         bossTried.set(s.wave, (bossTried.get(s.wave) ?? 0) + 1);
@@ -185,3 +216,34 @@ const med = q(0.5);
 if (med < 6) console.log("\n판정: 너무 어렵다 (중앙값 6 미만)");
 else if (med > 20) console.log("\n판정: 너무 쉽다 (중앙값 20 초과)");
 else console.log("\n판정: 목표 구간(6~20) 안");
+
+
+/* ------------------------------------------------------------------ */
+/* 궁합 표                                                              */
+/* ------------------------------------------------------------------ */
+
+const SHAPES = ["근접 위주", "균형", "원거리 위주"];
+const WK = ["mixed", "rush", "snipe", "boss"];
+console.log("\n궁합 — 팀 성격 x 웨이브 성격 통과율 (표본 40 미만은 -)");
+console.log("팀            " + WK.map((k) => k.padStart(9)).join(""));
+let worst = 0;
+for (const shape of SHAPES) {
+  const cells = WK.map((k) => {
+    const m = matchup.get(`${shape}|${k}`);
+    if (!m || m.tried < 40) return "        -";
+    return `${(((m.tried - m.lost) / m.tried) * 100).toFixed(0)}%`.padStart(9);
+  });
+  // 이 팀이 웨이브 성격에 따라 겪는 최대 차이
+  const rates = WK.filter((k) => k !== "boss")
+    .map((k) => matchup.get(`${shape}|${k}`))
+    .filter((m) => m && m.tried >= 40)
+    .map((m) => ((m.tried - m.lost) / m.tried) * 100);
+  if (rates.length >= 2) worst = Math.max(worst, Math.max(...rates) - Math.min(...rates));
+  console.log(shape.padEnd(12) + cells.join(""));
+}
+console.log(`\n한 팀이 웨이브 성격에 따라 겪는 최대 통과율 차이: ${worst.toFixed(1)}%p`);
+console.log(
+  worst < 8
+    ? "판정: 궁합이 약하다 — 성격으로 길을 가르면 장식이 된다"
+    : "판정: 궁합이 있다 — 성격으로 길을 가를 근거가 된다",
+);
