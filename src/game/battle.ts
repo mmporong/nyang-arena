@@ -84,8 +84,13 @@ export interface DamagePop {
   text: string;
   life: number;
   crit: boolean;
-  /** 같은 자리에 뜬 숫자가 완전히 겹치지 않도록 흩뜨리는 값 */
-  jitter: number;
+  /**
+   * 같은 프레임에 뜬 몇 번째 숫자인가.
+   *
+   * 전에는 난수 흩뿌리기였는데, 셋이 동시에 뜨면 여전히 붙어서 `72 61`처럼
+   * 읽혔다. 계단으로 밀면 겹칠 자리 자체가 없어진다.
+   */
+  step: number;
 }
 
 /** 원거리 공격 연출. 피해는 즉시 적용되고 이것은 순수 시각 효과다. */
@@ -162,17 +167,18 @@ export function skillName(cat: Cat): string {
   return "";
 }
 
-let popSeq = 0;
-
 function pop(target: Cat, text: string, crit: boolean): void {
   if (damagePops.length > 16) damagePops.shift();
+  // 아직 한 틱도 안 지난 팝이 곧 "같은 프레임에 뜬 것"이다. 난수가 아니라
+  // 이 개수로 계단을 만들므로 같은 시드는 같은 화면을 낸다.
+  const step = damagePops.filter((p) => p.life === POP_LIFE_MS).length;
   damagePops.push({
     fx: target.fx,
     fy: target.fy,
     text,
     life: POP_LIFE_MS,
     crit,
-    jitter: ((popSeq++ % 3) - 1) * 0.22,
+    step,
   });
 }
 

@@ -120,6 +120,14 @@ export function pixelText(
   color: string,
   align: PixelAlign = "left",
   shadow = true,
+  /**
+   * 사방 외곽선. 밝은 털 위에 뜨는 피해 숫자용이다.
+   *
+   * 아래 그림자 하나로는 흰 고양이 위에서 흰 숫자가 그대로 사라진다. 사방을
+   * 검정으로 두르면 배경이 무엇이든 살아남는다. 글리프를 아홉 번 그리지만
+   * 한 번에 뜨는 숫자가 열 몇 개라 비용이 문제되는 자리가 아니다.
+   */
+  outline = false,
 ): void {
   const p = Math.max(1, Math.round(px));
   const w = pixelTextWidth(text, p);
@@ -146,7 +154,18 @@ export function pixelText(
   };
 
   // 전장 위에 떠도 읽히도록 한 픽셀 아래에 그림자를 깐다.
-  if (shadow) draw(0, p, "rgba(12,8,6,0.75)");
+  if (outline) {
+    draw(0, p * 2, "rgba(12,8,6,0.85)");
+    for (const [ox, oy] of [
+      [-1, -1], [0, -1], [1, -1],
+      [-1, 0], [1, 0],
+      [-1, 1], [0, 1], [1, 1],
+    ] as const) {
+      draw(ox * p, oy * p, "#0E0A08");
+    }
+  } else if (shadow) {
+    draw(0, p, "rgba(12,8,6,0.75)");
+  }
   draw(0, 0, color);
 }
 

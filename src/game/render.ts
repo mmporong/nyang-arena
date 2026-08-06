@@ -806,8 +806,10 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
     const t = 1 - p.life / POP_LIFE_MS;
     ctx.save();
     ctx.globalAlpha = Math.max(0, 1 - t * t);
-    const ox = x + p.jitter * L.cell;
-    const oy = y - L.cell * 0.34 - t * L.cell * 0.55;
+    // 같은 프레임에 뜬 숫자는 계단으로 민다. 흩뿌리기로는 셋이 겹치면 여전히
+    // `72 61`처럼 붙어 읽혔다. 아래·오른쪽으로 미는 것은 위쪽이 보스와 HUD라서다.
+    const ox = x + p.step * L.cell * 0.38;
+    const oy = y - L.cell * 0.34 - t * L.cell * 0.55 + p.step * L.cell * 0.4;
     if (p.text === "회피") {
       uiText(ctx, "빗나감", ox, oy, Math.max(9, L.cell * 0.16), T.paperDim, {
         align: "center",
@@ -815,14 +817,18 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
         outline: true,
       });
     } else {
+      // 스킬·치명타만 크고 레몬이다. 판 위에서 레몬이 뜨는 경우는 취약 창과
+      // 큰 한 방 둘뿐이라 "지금 뭔가 세게 들어갔다"로 뜻이 통한다.
       pixelText(
         ctx,
         p.text,
         ox,
         oy,
-        Math.max(1, L.cell * (p.crit ? 0.036 : 0.028)),
-        p.crit ? T.gold : "#FFFFFF",
+        Math.max(1, L.cell * (p.crit ? 0.035 : 0.028)),
+        p.crit ? T.vuln : "#FFFFFF",
         "center",
+        true,
+        true,
       );
     }
     ctx.restore();
