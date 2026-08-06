@@ -119,8 +119,16 @@ export const BALANCE = {
   /** 콤보 한 단계당 배수 증가분과 상한 */
   strikeComboStep: 0.12,
   strikeComboMax: 12,
+  /**
+   * 뭉침 예고를 **놓쳤을 때** 피해에 곱하는 배수.
+   *
+   * 1이었을 때는 놓쳐도 전원이 13.5%만 맞아서, 모이느라 뭉치는 위험보다
+   * 그냥 맞는 게 나았다. 측정에서 '늘 탭만' 하는 봇이 '읽고 판단'하는 봇보다
+   * 12%p 높게 나왔다 — 즉 읽을 이유가 없었다.
+   */
+  gatherMissMul: 1.6,
   telegraphDmgFirst: 0.135,
-  telegraphDmg: 0.70,
+  telegraphDmg: 1.0,
 };
 
 export type Balance = typeof BALANCE;

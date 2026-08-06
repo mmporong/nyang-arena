@@ -13,6 +13,7 @@ import {
   type Cat,
   type Side,
   type Telegraph,
+  type TelegraphMode,
   type TelegraphShape,
 } from "./types.ts";
 import {
@@ -491,6 +492,36 @@ function doStrike(state: RunState): boolean {
   return true;
 }
 
+/**
+ * 뭉침 장판 **안으로** 아군을 모은다.
+ *
+ * 흩어짐과 정확히 반대 동작이다. 붉은 장판에 이걸 쓰면 위험 한가운데로
+ * 모이므로, 어느 장판인지 읽지 못하면 벌을 받는다.
+ */
+function doGather(state: RunState): boolean {
+  const zones: Telegraph[] = [];
+  for (const e of state.enemy) if (e?.telegraph) zones.push(e.telegraph);
+  const target = zones[0];
+  if (!target) return false;
+
+  let moved = false;
+  for (const c of livingCats(state.ally)) {
+    if (inTelegraph(target, c.fx, c.fy)) continue;
+    // 장판 중심 쪽으로 당긴다. 가장자리에 걸치면 판정이 아슬아슬해지므로
+    // 반경의 60% 안쪽으로 넣는다.
+    const dx = target.fx - c.fx;
+    const dy = target.fy - c.fy;
+    const d = Math.hypot(dx, dy) || 1;
+    const pull = Math.max(0, d - target.arg * 0.6);
+    c.fx += (dx / d) * pull;
+    c.fy += (dy / d) * pull;
+    c.moveLock = DODGE_LOCK_MS;
+    moved = true;
+    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color: "#6FB6DC" });
+  }
+  return moved;
+}
+
 /** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
 function doDodge(state: RunState): boolean {
   const zones: Telegraph[] = [];
@@ -686,16 +717,35 @@ function centroid(cats: Cat[]): { fx: number; fy: number } {
 }
 
 /**
- * 문턱 번호에 따라 예고를 만든다. 패턴은 원형 → 직선 → 부채꼴로 돈다.
+ * 문턱 번호에 따라 예고를 만든다.
  *
  * 원형은 **무게중심**을 노린다. 흩어져 있으면 한가운데가 비어 아무도 안 맞고,
- * 뭉쳐 있으면 통째로 맞는다. 배치가 결과를 가르는 지점이 정확히 여기다.
+ * 뭉쳐 있으면 통째로 맞는다.
+ *
+ * 뭉침(gather)은 보스와 아군 사이에 선다. 이미 서 있는 자리에 그리면 공짜가
+ * 되므로, 근접은 뒤로 원거리는 앞으로 와야 닿는 지점에 둔다.
  */
 function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
   if (foes.length === 0) return null;
   const kit = bossKit(boss.breed.id);
-  const shape: TelegraphShape = kit.patterns[idx % kit.patterns.length]!;
-  const base = { shape, fuse: TELEGRAPH_FUSE_MS, fuseMax: TELEGRAPH_FUSE_MS };
+  const pattern = kit.patterns[idx % kit.patterns.length]!;
+  const mode: TelegraphMode = pattern === "gather" ? "gather" : "avoid";
+  const shape: TelegraphShape = pattern === "gather" ? "circle" : pattern;
+  const base = { shape, mode, fuse: TELEGRAPH_FUSE_MS, fuseMax: TELEGRAPH_FUSE_MS };
+
+  if (mode === "gather") {
+    const c = centroid(foes);
+    return {
+      ...base,
+      fx: (c.fx + boss.fx) / 2,
+      fy: (c.fy + boss.fy) / 2,
+      dirX: 0,
+      dirY: 0,
+      // 흩어짐 원형(1.6)보다 넓다. 모이라고 해 놓고 못 모이면 규칙이 아니라 벌이다.
+      arg: 1.9,
+      reach: 0,
+    };
+  }
 
   if (shape === "circle") {
     const c = centroid(foes);
@@ -745,10 +795,28 @@ function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
   const frac =
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
     bossKit(boss.breed.id).power;
-  for (const f of foes) {
-    if (!inTelegraph(t, f.fx, f.fy)) continue;
-    // 최대 체력 대비 비율이라 웨이브·팀 구성과 무관하게 "뭉치면 아프다"가 성립한다.
-    damage(f, Math.max(1, Math.round(f.maxHp * frac)), false);
+  if (t.mode === "gather") {
+    // **절반 이상**이 들어와야 나눠진다. 한 마리만으로 성립하면 근접이 보스로
+    // 걸어가다 우연히 지나가는 것만으로 충족되어, 모이라는 요구가 요구가 아니게
+    // 된다. WoW의 soak도 "충분히 안 들어오면 치명적"이라는 같은 규칙을 쓴다.
+    const inside = foes.filter((f) => inTelegraph(t, f.fx, f.fy));
+    const need = Math.max(2, Math.ceil(foes.length / 2));
+    if (inside.length < need) {
+      const miss = frac * BALANCE.gatherMissMul;
+      for (const f of foes) damage(f, Math.max(1, Math.round(f.maxHp * miss)), false);
+    } else {
+      const share = frac / inside.length;
+      for (const f of inside) damage(f, Math.max(1, Math.round(f.maxHp * share)), false);
+    }
+    // 뭉침이 끝나면 곧바로 흩어질 수 있어야 한다. 묶어 두면 다음 원형 예고가
+    // 무게중심을 노려 통째로 맞고, 그러면 모인 것이 벌이 된다.
+    for (const f of foes) f.moveLock = 0;
+  } else {
+    for (const f of foes) {
+      if (!inTelegraph(t, f.fx, f.fy)) continue;
+      // 최대 체력 대비 비율이라 웨이브·팀 구성과 무관하게 "뭉치면 아프다"가 성립한다.
+      damage(f, Math.max(1, Math.round(f.maxHp * frac)), false);
+    }
   }
   pushFx({
     kind: "ring",
@@ -759,7 +827,7 @@ function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
     radius: t.shape === "circle" ? t.arg : 1.4,
     angle: 0,
     life: 420,
-    color: T_ENEMY,
+    color: t.mode === "gather" ? "#6FB6DC" : T_ENEMY,
   });
 }
 
@@ -888,6 +956,8 @@ export function stepBattle(state: RunState, dtMs: number): void {
     if (state.pending.length > PENDING_CAP) state.pending.length = PENDING_CAP;
     const intent = state.pending.shift();
     if (intent?.kind === "dodge" && state.dodgeCharges > 0 && doDodge(state)) {
+      state.dodgeCharges -= 1;
+    } else if (intent?.kind === "gather" && state.dodgeCharges > 0 && doGather(state)) {
       state.dodgeCharges -= 1;
     } else if (intent?.kind === "strike") {
       // 약점 공격은 차지를 쓰지 않는다. 창이 열려 있는 3초 자체가 제한이다.

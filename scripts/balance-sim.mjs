@@ -37,6 +37,9 @@ function playOne(seed) {
   let kindAtStart = null;
   let waveAtStart = 0;
   let elapsedBeforeTick = 0;
+  let lastTelegraph = null;
+  let sinceTelegraph = 0;
+  let telegraphSeen = 0;
 
   for (let guard = 0; guard < MAX_WAVE * 400; guard++) {
     if (s.phase === "gameover") {
@@ -89,6 +92,30 @@ function playOne(seed) {
       startBattle(s);
       if (s.phase !== "battle") return s.wave; // 배치 불가 등
       continue;
+    }
+
+    // 보스 기믹에 반응한다. 예고 색을 읽고 흩어지거나 모이고, 취약 창에는
+    // 연타한다. 이걸 안 하면 이 하네스가 '게임을 안 하는 사람'을 재게 되고,
+    // 그 수치로 밸런스를 잡으면 실제 플레이와 무관한 값이 나온다.
+    //
+    // 다만 사람처럼 조금 늦고 가끔 놓친다 — 완벽하게 반응하는 봇은 상한이지
+    // 기준선이 아니다.
+    const open = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+    if (open) {
+      s.pending.push({ kind: "strike" });
+    } else {
+      const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
+      if (tg && s.dodgeCharges > 0) {
+        sinceTelegraph = tg === lastTelegraph ? sinceTelegraph + 1 : 0;
+        if (tg !== lastTelegraph) telegraphSeen += 1;
+        lastTelegraph = tg;
+        // 네 번에 한 번은 놓치고, 두 틱 늦게 반응한다.
+        if (telegraphSeen % 4 !== 3 && sinceTelegraph >= 2) {
+          s.pending.push({ kind: tg.mode === "gather" ? "gather" : "dodge" });
+        }
+      } else {
+        lastTelegraph = null;
+      }
     }
 
     // 전투가 끝나는 틱에는 battleElapsed가 리셋될 수 있으므로 직전 값을 들고 있는다.

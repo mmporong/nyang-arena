@@ -41,8 +41,13 @@ export interface BossKit {
    * 성격이지 결함이 아니다. 집계 통과율만 목표에 두고 편차는 남긴다.
    */
   readonly power: number;
-  /** 문턱마다 순환할 예고 패턴 */
-  readonly patterns: readonly TelegraphShape[];
+  /**
+   * 문턱마다 순환할 예고 패턴.
+   *
+   * `"gather"`는 원형이되 **안으로 들어가야 하는** 예고다. 흩어짐만 있으면
+   * 예고가 뜰 때마다 그냥 누르면 되므로 판단이 없다.
+   */
+  readonly patterns: readonly (TelegraphShape | "gather")[];
   /** 문턱 몇 개마다 순간이동하는가. 0이면 안 한다 */
   readonly teleportEvery: number;
   /** 취약 창이 열리는 체력 비율 */
@@ -53,15 +58,15 @@ export interface BossKit {
 
 export const BOSS_KITS: Record<number, BossKit> = {
   // 무쇠발톱 — 교과서. 세 패턴을 다 보여주고 절반에서 한 번 크게 연다.
-  9: { power: 1.0, patterns: ["circle", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
+  9: { power: 1.0, patterns: ["circle", "line", "gather", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
   // 살금이 — 계속 자리를 옮긴다. 근접이 붙기 어렵고 예고 기준점이 매번 바뀐다.
   //   대신 창이 일찍 열리고 짧다. 준비된 팀이 짧은 창을 잡는 보스.
   // teleportEvery를 1로 뒀더니 근접이 영영 못 붙어 W10 통과율이 1.1%였다.
   // 순간이동은 "붙었다 놓쳤다"의 리듬이어야지 추격전이 되면 안 된다.
-  10: { power: 0.85, patterns: ["cone", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
+  10: { power: 0.85, patterns: ["cone", "gather", "line"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
   // 서리귀 — 제자리에서 원형만 던진다. 흩어지기가 유일한 답이고,
   //   대신 창이 늦게 열리지만 길다. 오래 버티고 한 번에 몰아치는 보스.
-  11: { power: 1.0, patterns: ["circle", "circle", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
+  11: { power: 1.0, patterns: ["gather", "circle", "gather", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
 };
 
 export function bossKit(breedId: number): BossKit {

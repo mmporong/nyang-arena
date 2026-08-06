@@ -32,19 +32,29 @@ function windowOpen(state) {
   return state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
 }
 
+/** 지금 떠 있는 예고가 요구하는 것. 장판 색이 알려주는 정보와 같다. */
+function telegraphMode(state) {
+  const c = state.enemy.find((x) => x?.telegraph);
+  return c?.telegraph?.mode ?? null;
+}
+
 const POLICIES = {
   "개입 없음": null,
 
   // 회피와 약점을 갈라 잰다. 둘 중 무엇이 값을 하는지 모르면 어느 쪽을
   // 다듬어야 하는지도 모른다.
-  "회피만": { dodge: () => true, strike: false },
-  "약점만": { dodge: () => false, strike: true },
+  "회피만": { dodge: () => true, strike: false, read: true },
+  "약점만": { dodge: () => false, strike: true, read: true },
+  // 장판 색을 안 읽고 늘 탭만 한다. 뭉침 예고에도 흩어지므로 벌을 받는다.
+  "늘 탭만": { dodge: () => true, strike: true, read: false },
+  // 반대로 읽는다. 규칙을 거꾸로 배운 플레이어.
+  "거꾸로 읽음": { dodge: () => true, strike: true, read: "invert" },
 
   // 예고가 뜨자마자 누른다. 사람이 낼 수 있는 상한.
-  "완벽(둘 다)": { dodge: () => true, strike: true },
+  "완벽(읽고 판단)": { dodge: () => true, strike: true, read: true },
 
   // 반응이 늦고 네 번에 한 번은 놓친다. 결정적으로 놓치게 해야 시드가 의미를 갖는다.
-  "사람 흉내": { dodge: (upFor, seen) => seen % 4 !== 3 && upFor >= 3, strike: true },
+  "사람 흉내": { dodge: (upFor, seen) => seen % 4 !== 3 && upFor >= 3, strike: true, read: true },
 };
 
 function play(policy, seed) {
@@ -99,7 +109,20 @@ function play(policy, seed) {
         if (policy.strike) s.pending.push({ kind: "strike" });
       } else if (up) {
         upFor += 1;
-        if (s.dodgeCharges > 0 && policy.dodge(upFor, seen)) s.pending.push({ kind: "dodge" });
+        if (s.dodgeCharges > 0 && policy.dodge(upFor, seen)) {
+          const need = telegraphMode(s);
+          const kind =
+            policy.read === false
+              ? "dodge" // 색을 안 읽고 늘 탭
+              : policy.read === "invert"
+                ? need === "gather"
+                  ? "dodge"
+                  : "gather"
+                : need === "gather"
+                  ? "gather"
+                  : "dodge";
+          s.pending.push({ kind });
+        }
       }
     }
 

@@ -10,14 +10,33 @@ export type Side = "ally" | "enemy";
  * 버튼이 상태를 직접 만지지 않고 큐에 넣기만 하는 이유: 브라우저와 헤드리스
  * 시뮬이 **같은 함수**를 통과해야 개입의 값을 잴 수 있다. 판정은 전부
  * stepBattle 안에서 일어난다.
+ *
+ * 버튼은 하나이고 **누르는 방식**이 의도를 가른다 — 짧게 탭하면 흩어지고,
+ * 꾹 누르면 모인다. 붉은 장판에 꾹 누르면 위험 한가운데로 모이고, 푸른 장판에
+ * 탭하면 나뉘어야 할 피해를 통째로 맞는다. 그래서 "누를까"가 아니라
+ * "어느 쪽인가"가 결정이 된다.
  */
-export type Intervention = { kind: "dodge" } | { kind: "strike" };
+export type Intervention = { kind: "dodge" } | { kind: "gather" } | { kind: "strike" };
 
 /** 보스 광역기의 예고 모양. 터지기 전에 화면에 그려진다. */
 export type TelegraphShape = "circle" | "line" | "cone";
 
+/**
+ * 예고가 요구하는 것.
+ *
+ * - `avoid` — 장판 밖으로 나가라. 안에 있으면 맞는다.
+ * - `gather` — 장판 **안으로** 들어가라. 피해가 안에 있는 수만큼 나뉘고,
+ *   아무도 없으면 전원이 통째로 맞는다.
+ *
+ * 레이드가 레이드인 이유가 이 대비다. 흩어짐만 있으면 예고가 뜰 때마다 그냥
+ * 누르면 되지만, 뭉침이 섞이면 **어느 쪽이 더 급한지**를 읽어야 한다.
+ * 차지가 한정돼 있으므로 그게 곧 우선순위 판단이 된다.
+ */
+export type TelegraphMode = "avoid" | "gather";
+
 export interface Telegraph {
   shape: TelegraphShape;
+  mode: TelegraphMode;
   /** 원형이면 중심, 직선·부채꼴이면 시작점 */
   fx: number;
   fy: number;

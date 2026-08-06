@@ -33,6 +33,17 @@ let phaseChangedAt = 0;
 let lastPhase: RunState["phase"] = state.phase;
 const PHASE_LOCK_MS = 350;
 
+/**
+ * 이 시간 넘게 누르고 있으면 "모여", 그 전에 떼면 "흩어져".
+ *
+ * 260ms인 이유: 사람의 의도적인 길게 누르기와 빠른 탭을 가르는 경계가 대략
+ * 이쯤이다. 더 짧으면 급하게 탭할 때 오인되고, 더 길면 1.2초짜리 예고 안에
+ * 반응할 시간이 모자란다.
+ */
+const HOLD_MS = 260;
+let pressStartedAt = 0;
+let pressOnButton = false;
+
 function cancelDrag(): void {
   drag.active = false;
   drag.fromCell = -1;
@@ -89,6 +100,15 @@ function onPrimaryAction(): void {
   }
 }
 
+/** 버튼에서 손을 뗀 순간 탭인지 꾹인지 판정한다. */
+function resolveButtonPress(): void {
+  if (!pressOnButton) return;
+  pressOnButton = false;
+  if (state.phase !== "battle" || state.dodgeCharges <= 0) return;
+  const held = performance.now() - pressStartedAt;
+  state.pending.push({ kind: held >= HOLD_MS ? "gather" : "dodge" });
+}
+
 canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   try {
@@ -102,12 +122,16 @@ canvas.addEventListener("pointerdown", (e) => {
   if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
 
   if (rectHas(layout.button, x, y)) {
-    // 보스전 중에는 기본 버튼 자리가 회피 버튼이다.
     if (state.phase === "battle") {
-      // 같은 자리, 상황에 따라 다른 일. 취약 창이 열려 있으면 약점 공격이다.
+      // 취약 창에는 연타가 곧 화력이므로 누르는 즉시 들어간다.
       const openBoss = state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
-      if (openBoss) state.pending.push({ kind: "strike" });
-      else if (state.dodgeCharges > 0) state.pending.push({ kind: "dodge" });
+      if (openBoss) {
+        state.pending.push({ kind: "strike" });
+        return;
+      }
+      // 그 외에는 뗄 때 판정한다. 짧으면 흩어짐, 길면 모임.
+      pressStartedAt = performance.now();
+      pressOnButton = true;
       return;
     }
     onPrimaryAction();
@@ -169,8 +193,15 @@ function endDrag(e: PointerEvent): void {
 // 캔버스 밖에서 버튼을 떼면 캔버스에는 pointerup이 오지 않는다.
 // setPointerCapture가 실패했을 때(try/catch로 삼킴) 드래그가 영구히 걸린 채
 // 유령 고양이가 커서를 따라다니므로, window에서도 받는다.
-window.addEventListener("pointerup", endDrag);
-window.addEventListener("pointercancel", cancelDrag);
+window.addEventListener("pointerup", (e) => {
+  resolveButtonPress();
+  endDrag(e);
+});
+window.addEventListener("pointercancel", () => {
+  // 손가락이 취소되면 의도도 버린다. 어중간하게 흩어지면 오히려 손해다.
+  pressOnButton = false;
+  cancelDrag();
+});
 canvas.addEventListener("lostpointercapture", cancelDrag);
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 

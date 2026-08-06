@@ -144,6 +144,8 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
 
     // 0 → 1로 차오른다. 다 차면 터진다.
     const fill = 1 - Math.max(0, tg.fuse) / tg.fuseMax;
+    // 붉으면 나가라, 푸르면 들어와라. 색이 유일한 신호이므로 확실히 갈라야 한다.
+    const hue = tg.mode === "gather" ? "111,182,220" : "194,75,58";
     const origin = fieldToScreen(L, tg.fx, tg.fy);
     const pitch = L.cell + L.gap;
 
@@ -157,15 +159,15 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
       const r = tg.arg * pitch;
       ctx.beginPath();
       ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(194,75,58,${0.10 + fill * 0.28})`;
+      ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.28})`;
       ctx.fill();
-      ctx.strokeStyle = `rgba(194,75,58,${0.5 + fill * 0.5})`;
+      ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
       ctx.lineWidth = 2 + fill * 2;
       ctx.stroke();
       // 안쪽에서 차오르는 원. 남은 시간이 한눈에 보인다.
       ctx.beginPath();
       ctx.arc(origin.x, origin.y, r * fill, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(194,75,58,0.22)";
+      ctx.fillStyle = `rgba(${hue},0.22)`;
       ctx.fill();
     } else {
       // 직선·부채꼴은 방향이 있으므로 화면에서도 같은 방향으로 돌린다.
@@ -184,9 +186,9 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
         ctx.arc(0, 0, len, -tg.arg, tg.arg);
         ctx.closePath();
       }
-      ctx.fillStyle = `rgba(194,75,58,${0.10 + fill * 0.26})`;
+      ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
       ctx.fill();
-      ctx.strokeStyle = `rgba(194,75,58,${0.5 + fill * 0.5})`;
+      ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
       ctx.lineWidth = 2 + fill * 2;
       ctx.stroke();
     }
@@ -1493,7 +1495,9 @@ export function buttonText(s: RunState): string {
       // 평소엔 회피. 조작을 늘리지 않고 레이드의 두 국면을 넣는 방법이다.
       const open = s.enemy.find((c) => c?.alive && c.vulnerableMs > 0);
       if (open) return open.strikeCombo > 0 ? `약점 공격!  x${open.strikeCombo}` : "약점 공격!";
-      return s.dodgeCharges > 0 ? `회피  ${s.dodgeCharges}` : "전투 중";
+      // 무엇을 해야 하는지는 장판 색이 말한다. 버튼은 조작 방식만 알려준다 —
+      // 버튼까지 정답을 알려주면 읽을 이유가 사라진다.
+      return s.dodgeCharges > 0 ? `탭 흩어짐 · 꾹 모임   ${s.dodgeCharges}` : "전투 중";
     }
     case "reward":
       // 1웨이브 상점은 전투 뒤가 아니라 전투 앞이다. "다음 웨이브"라고 하면 거짓말이 된다.
