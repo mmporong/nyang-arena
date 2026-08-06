@@ -60,7 +60,7 @@ function resize(): void {
   canvas.height = Math.round(h * dpr);
   ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx!.imageSmoothingEnabled = false;
-  layout = computeLayout(w, h);
+  layout = computeLayout(w, h, state.phase !== "battle");
   // 드래그 중 회전하거나 주소창이 접히면 보드 위치가 통째로 바뀐다.
   // 옛 레이아웃으로 잡은 출발 셀을 새 레이아웃 좌표에 드롭하면 엉뚱한 칸으로 간다.
   cancelDrag();
@@ -208,8 +208,12 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 let last = 0;
 function frame(now: number): void {
   if (state.phase !== lastPhase) {
+    // 카드가 뜨고 지는 국면에서 아래 띠의 높이가 달라진다. 그때만 판을 다시
+    // 잡는다 — 전투 중에 다시 잡으면 유닛이 눈앞에서 크기가 변한다.
+    const wasBattle = lastPhase === "battle";
     lastPhase = state.phase;
     phaseChangedAt = now;
+    if (wasBattle !== (state.phase === "battle")) resize();
   }
   const dt = last === 0 ? 16 : Math.min(100, now - last);
   last = now;

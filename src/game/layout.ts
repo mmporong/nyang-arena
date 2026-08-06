@@ -54,7 +54,23 @@ export function rectHas(r: Rect, x: number, y: number): boolean {
  * 가로에서는 두 보드를 좌우로, 세로에서는 위아래로 놓는다.
  * 세로에서 좌우 배치를 유지하면 셀이 손가락보다 작아져 드래그가 불가능해진다.
  */
-export function computeLayout(w: number, h: number): Layout {
+/**
+ * 국면에 따라 아래 띠의 높이가 달라진다.
+ *
+ * 측정에서 나온 문제를 정면으로 푼다 — 1280×800에서 판이 화면의 24.9%뿐이고
+ * 아래 정보 띠가 세로의 39%였다. **가장 중요한 신호가 가장 좁은 자리에** 있었다.
+ * 그런데 그 39% 중 카드 자리는 상점에서만 쓰인다. 전투 중에는 비어 있는데도
+ * 계속 자리를 차지하고 있었다.
+ *
+ * 그래서 카드가 보이는 국면(상점)에만 그 자리를 떼고, 배치·전투에서는 판에
+ * 돌려준다. 배치와 전투가 **같은 모드**인 것이 중요하다 — 배치한 자리와 싸우는
+ * 자리가 같아 보여야 하고, 전투 중에 판이 커지면 유닛이 눈앞에서 크기가 변한다.
+ * 국면이 바뀌는 순간은 판이 어차피 카드에 덮이는 때라 전환이 눈에 안 띈다.
+ *
+ * 세로 화면은 이미 판이 세로의 75%를 쓰고 있어서 이 전환이 필요 없다. 그래서
+ * 세로에서는 두 모드가 같은 값을 낸다.
+ */
+export function computeLayout(w: number, h: number, shop = true): Layout {
   const portrait = h > w * 1.05;
   const scale = Math.min(w / 900, h / 600);
   const pad = Math.round(Math.min(w, h) * (Math.min(w, h) < 420 ? 0.022 : 0.03));
@@ -164,7 +180,18 @@ export function computeLayout(w: number, h: number): Layout {
    */
   const MIN_BOARD_H = 150;
   const roomy = offersPanel.y - pad * 0.5 - fieldTop >= MIN_BOARD_H;
-  const fieldBottom = roomy ? offersPanel.y - pad * 0.5 : synergyBar.y - pad * 0.6;
+  /**
+   * 카드가 없는 국면에서는 판이 시너지 바까지 내려간다.
+   *
+   * 세로에서는 원래도 판이 넓어서 이 전환이 오히려 화면을 요동치게 만든다.
+   * 가로에서만 국면을 가른다.
+   */
+  const expand = !shop && !portrait;
+  const fieldBottom = expand
+    ? synergyBar.y - pad * 0.6
+    : roomy
+      ? offersPanel.y - pad * 0.5
+      : synergyBar.y - pad * 0.6;
   const fieldH = Math.max(80, fieldBottom - fieldTop);
   const fieldW = w - pad * 2;
   /** 두 보드 사이 간격. 셀 사이 간격보다 훨씬 커야 진영이 구분된다. */

@@ -43,9 +43,15 @@ function overlapArea(a, b) {
 }
 
 let failed = 0;
-console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  판정");
+console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  전투셀  판정");
 for (const [name, w, h] of DEVICES) {
   const L = computeLayout(w, h);
+  /**
+   * 전투 국면은 아래 띠가 접혀 판이 커진다. 상점 모드만 재면 그 배치는 한 번도
+   * 검사되지 않는다 — 기기 열 종에서 겹치는지 보는 게 이 스크립트의 일이므로
+   * 두 모드를 다 봐야 한다.
+   */
+  const B = computeLayout(w, h, false);
 
   let worst = 0;
   for (const side of ["ally", "enemy"]) {
@@ -65,14 +71,26 @@ for (const [name, w, h] of DEVICES) {
   // roomy=false는 준비 단계 띠까지 보드를 덮는 좁은 화면이다. 그때도 입력은 안 샌다.
   // 5x5는 세로로 10줄이 필요해 3x3보다 셀이 작다. 판정 영역을 셀 간격의 절반만큼
   // 넓혀 두었으므로 시각 셀 24px면 손가락으로 집을 수 있다.
+  // 전투 배치에서도 판이 시너지 바를 침범하면 안 된다.
+  const fieldBottom = Math.max(
+    B.allyBoard.y + B.allyBoard.h,
+    B.enemyBoard.y + B.enemyBoard.h,
+  );
+  const battleClear = fieldBottom <= B.synergyBar.y + 1 && B.cell >= L.cell;
+
   const ok =
-    (L.roomy ? worst < 0.01 : true) && headroom >= 0 && cardsOnScreen && L.cell >= 24 && L.button.h >= 40;
+    (L.roomy ? worst < 0.01 : true) &&
+    headroom >= 0 &&
+    cardsOnScreen &&
+    L.cell >= 24 &&
+    L.button.h >= 40 &&
+    battleClear;
   if (!ok) failed++;
   console.log(
     `${name.padEnd(18)} ${(worst * 100).toFixed(1).padStart(7)}%  ` +
       `${shape} ${String(Math.round(L.offerCards.w / 3)).padStart(3)}x${String(Math.round(L.offerCards.h)).padEnd(4)}` +
       `${String(Math.round(headroom)).padStart(8)}  ${String(Math.round(L.cell)).padStart(5)}  ` +
-      `${String(Math.round(L.button.h)).padStart(4)}  ` +
+      `${String(Math.round(L.button.h)).padStart(4)}  ${String(Math.round(B.cell)).padStart(5)}  ` +
       (ok ? "OK" : "실패"),
   );
 }

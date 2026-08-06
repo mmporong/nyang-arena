@@ -1758,7 +1758,9 @@ function drawBottomZone(
     );
 
     drawOffers(ctx, L, s);
-  } else {
+  } else if (s.phase !== "battle") {
+    // 전투에는 이 자리를 판에게 넘긴다. 직업 수는 무엇을 살지 정할 때 쓰는
+    // 정보라 상점과 배치에서만 필요하고, 전투 중에는 판이 그 자리를 쓴다.
     drawTeamStrip(ctx, L, s);
   }
 }
