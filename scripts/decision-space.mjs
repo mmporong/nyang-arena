@@ -4,8 +4,9 @@
  * 좋은 정책과 나쁜 정책의 도달 웨이브가 비슷하다면, 그 선택은 결정이 아니라 절차다.
  * 구매 정책 넷을 같은 조건에서 돌려 분포를 비교한다.
  */
-import { stepBattle } from "/home/lim/nyang-arena/src/game/battle.ts";
-import { buyOffer, newRun, rerollOffers, startBattle } from "/home/lim/nyang-arena/src/game/run.ts";
+import { stepBattle } from "../src/game/battle.ts";
+import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
+import { affordable, makeBossBot } from "./bot-policy.mjs";
 
 const RUNS = 300;
 
@@ -13,11 +14,8 @@ const POLICIES = {
   "아무것도 안 삼": () => null,
   "무작위 구매": (afford) => afford[Math.floor(seeded() * afford.length)],
   "가장 싼 것": (afford) => [...afford].sort((a, b) => a.cost - b.cost)[0],
-  "가장 비싼 것(현재)": (afford, s) =>
-    [...afford]
-      // 유물은 조건을 채우고 있을 때만. 카드를 읽는 최소한의 플레이어다.
-      .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false))
-      .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost)[0],
+  "가장 비싼 것(현재)": (afford) =>
+    [...afford].sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost)[0],
   "강화만": (afford) => afford.filter((o) => o.kind === "upgrade")[0] ?? null,
   "영입만": (afford) => afford.filter((o) => o.kind === "recruit")[0] ?? null,
 };
@@ -37,13 +35,14 @@ function seeded() {
 
 function run(pick, runSeed) {
   const s = newRun(runSeed);
+  const respond = makeBossBot();
   let rerolls = 0;
   let lastWave = 0;
   for (let guard = 0; guard < 40000; guard++) {
     if (s.phase === "gameover") return s.wave;
     if (s.phase === "reward") {
-      const afford = s.offers.filter((o) => o && o.cost <= s.gold);
-      const choice = afford.length > 0 ? pick(afford, s) : null;
+      const afford = affordable(s);
+      const choice = afford.length > 0 ? pick(afford) : null;
       if (choice) {
         if (!buyOffer(s, choice)) s.offers = s.offers.map((o) => (o === choice ? null : o));
         continue;
@@ -59,6 +58,7 @@ function run(pick, runSeed) {
       if (s.phase !== "battle") return s.wave;
       continue;
     }
+    respond(s);
     stepBattle(s, 100);
   }
   return s.wave;

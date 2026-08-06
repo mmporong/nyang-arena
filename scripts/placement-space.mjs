@@ -11,7 +11,8 @@
  * 실행: npm run placement
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, moveCat, newRun, startBattle , relicActive } from "../src/game/run.ts";
+import { buyOffer, moveCat, newRun, startBattle } from "../src/game/run.ts";
+import { affordable, makeBossBot } from "./bot-policy.mjs";
 import { BOARD_COLS , livingCats } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
@@ -82,14 +83,13 @@ const ARRANGERS = {
 
 function play(arrange, seed) {
   const s = newRun(seed);
+  const respond = makeBossBot();
   for (let g = 0; g < MAX_WAVE * 400; g++) {
     if (s.phase === "gameover") return s.wave;
     if (s.phase === "reward") {
-      const afford = s.offers
-        .filter((o) => o && o.cost <= s.gold)
-        // 유물은 조건을 채우고 있을 때만. 카드를 읽는 최소한의 플레이어.
-        .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false))
-        .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);
+      const afford = affordable(s).sort(
+        (a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost,
+      );
       if (afford[0]) {
         if (!buyOffer(s, afford[0])) s.offers = s.offers.map((o) => (o === afford[0] ? null : o));
         continue;
@@ -104,6 +104,7 @@ function play(arrange, seed) {
       if (s.phase !== "battle") return s.wave;
       continue;
     }
+    respond(s);
     stepBattle(s, 100);
   }
   return s.wave;

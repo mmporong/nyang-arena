@@ -69,8 +69,8 @@ export const BALANCE = {
    * 32로 고정했더니 p25가 5로 무너졌다 — 정확히 첫 보스에서 4분의 1이 죽었고,
    * 그건 "보스는 벽이 아니라 사건"이라는 이 저장소의 오래된 결정에 어긋난다.
    */
-  bossHpMulFirst: 26,
-  bossHpMul: 60,
+  bossHpMulFirst: 62,
+  bossHpMul: 142,
   /** 배수가 First에서 Mul까지 올라가는 데 걸리는 웨이브 수 */
   /** 몇 번째 보스에서 최대 강도에 닿는가 */
   bossRampCount: 5,
@@ -80,9 +80,14 @@ export const BALANCE = {
    * 체력으로 길이를, 예고로 위험을 만들어야 둘을 따로 조절할 수 있다.
    * 평타를 세게 두면 길이와 난이도가 한 손잡이에 묶여, 전투를 늘리면 반드시
    * 어려워지고 쉽게 만들면 반드시 짧아진다.
+   *
+   * 보스전을 12초에서 25초로 늘리면서 0.8에서 0.28로 더 낮췄다. 전투가
+   * 길어지면 평타에 노출되는 시간도 그만큼 길어지기 때문이다 — 체력만 올렸을
+   * 때 통과율이 84%에서 66%로 떨어진 것이 그 탓이었고, 원인은 예고가 아니라
+   * 오래 맞는 것이었다.
    */
-  bossAtkMul: 0.8,
-  bossEscortCount: 3,
+  bossAtkMul: 0.28,
+  bossEscortCount: 2,
   /** 저격수 체력 배수. 보스보다 훨씬 얇다 — 벽이 아니라 연습이다. */
   sniperHpMul: 5,
   /** 저격 웨이브에 주는 회피 횟수. 보스(6)보다 적다 */
@@ -128,7 +133,7 @@ export const BALANCE = {
    */
   gatherMissMul: 1.6,
   telegraphDmgFirst: 0.135,
-  telegraphDmg: 1.0,
+  telegraphDmg: 1.15,
 };
 
 export type Balance = typeof BALANCE;
