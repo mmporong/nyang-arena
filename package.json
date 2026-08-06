@@ -20,7 +20,8 @@
     "intervention": "node --experimental-strip-types scripts/intervention-space.mjs",
     "dodge:test": "node --experimental-strip-types scripts/dodge-test.mjs",
     "trace": "node --experimental-strip-types scripts/run-trace.mjs",
-    "relics": "node --experimental-strip-types scripts/relic-space.mjs"
+    "relics": "node --experimental-strip-types scripts/relic-space.mjs",
+    "map": "node --experimental-strip-types scripts/map-space.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

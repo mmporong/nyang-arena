@@ -1,7 +1,18 @@
 import { clearBattleFx, stepBattle } from "./game/battle.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
-import { offerRects, render, rerollRect, type DragState } from "./game/render.ts";
-import { buyOffer, moveCat, newRun, rerollOffers, startBattle, type RunState } from "./game/run.ts";
+import { mapNodeRects, offerRects, render, rerollRect, type DragState } from "./game/render.ts";
+import {
+  buyOffer,
+  chooseNode,
+  mapStep,
+  moveCat,
+  newRun,
+  rerollOffers,
+  startBattle,
+  syncStage,
+  type RunState,
+} from "./game/run.ts";
+import { openLanes } from "./game/map.ts";
 import { loadSprites } from "./game/sprites.ts";
 
 const app = document.getElementById("app");
@@ -90,8 +101,12 @@ function onPrimaryAction(): void {
     case "battle":
       break;
     case "reward":
-      state.phase = "prepare";
-      state.notice = "근접은 앞줄, 원거리는 뒷줄";
+      // 상점 다음은 배치가 아니라 지도다. 어디로 갈지 먼저 고른다.
+      syncStage(state);
+      state.phase = "map";
+      state.notice = "";
+      break;
+    case "map":
       break;
     case "gameover":
       clearBattleFx();
@@ -135,6 +150,19 @@ canvas.addEventListener("pointerdown", (e) => {
       return;
     }
     onPrimaryAction();
+    return;
+  }
+
+  if (state.phase === "map") {
+    for (const n of mapNodeRects(layout, state)) {
+      if (n.step !== mapStep(state)) continue;
+      // 원 안쪽만 받는다. 사각 판정으로 두면 붙어 있는 칸끼리 모서리가 겹친다.
+      const cx = n.rect.x + n.rect.w / 2;
+      const cy = n.rect.y + n.rect.h / 2;
+      if (Math.hypot(x - cx, y - cy) > n.rect.w / 2 + 6) continue;
+      if (!chooseNode(state, n.idx)) state.notice = "그 길로는 갈 수 없습니다";
+      return;
+    }
     return;
   }
 
@@ -257,9 +285,20 @@ window.addEventListener("keydown", (e) => {
       return;
     case "Digit1":
     case "Digit2":
-    case "Digit3": {
+    case "Digit3":
+    case "Digit4": {
+      const slot = Number(e.code.slice(5)) - 1;
+      if (state.phase === "map") {
+        // 지도에서는 고를 수 있는 칸만 순서대로 센다. 갈 수 없는 칸을 세면
+        // 번호가 화면과 어긍난다.
+        const step = mapStep(state);
+        const idx = openLanes(state.map, step)[slot];
+        if (idx !== undefined) chooseNode(state, idx);
+        return;
+      }
       if (state.phase !== "reward") return;
-      const offer = state.offers[Number(e.code.slice(5)) - 1];
+      if (slot > 2) return;
+      const offer = state.offers[slot];
       if (!offer) return;
       if (buyOffer(state, offer)) state.notice = "";
       else if (state.gold < offer.cost) state.notice = "생선이 부족합니다";

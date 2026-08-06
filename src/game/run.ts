@@ -1,5 +1,6 @@
 import { BALANCE } from "./balance.ts";
 import { RELICS, type Relic } from "./relics.ts";
+import { isBossStep, makeStage, openLanes, STAGE_STEPS, type NodeKind, type StageMap } from "./map.ts";
 import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import { BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
@@ -31,7 +32,7 @@ import {
 // (밸런스 하네스가 이 모듈을 Node에서 직접 임포트한다)
 import generated from "../data/synergies.json" with { type: "json" };
 
-export type Phase = "prepare" | "battle" | "reward" | "gameover";
+export type Phase = "prepare" | "battle" | "reward" | "map" | "gameover";
 
 export type OfferKind = "recruit" | "upgrade" | "replace" | "relic";
 
@@ -98,6 +99,31 @@ export interface RunState {
    */
   telegraphsSeen: number;
   telegraphsEaten: number;
+
+  /**
+   * 여정 지도.
+   *
+   * 걸음 번호를 따로 두지 않는다 — `wave`에서 뽑는다. 둘을 각각 들고 있으면
+   * 언젠가 어긋나고, 어긋나면 보스가 지도에 없는 자리에서 튀어나온다.
+   * 그래서 걸음 = (wave-1) % STAGE_STEPS, 스테이지 = floor((wave-1)/6)+1이다.
+   */
+  map: StageMap;
+  /**
+   * 지도에서 몇 번째 걸음인가(0..STAGE_STEPS-1).
+   *
+   * `wave`에서 뽑던 것을 갈라냈다. **wave는 싸운 횟수**(난이도 시계이자 점수)고
+   * **step은 지도 위의 위치**다. 상점 칸은 걸음만 먹고 웨이브는 안 먹는다 —
+   * 붙여 두면 상점이 위험 없이 점수를 올려서 언제나 최선이 된다(측정에서
+   * 상점 몰빵이 전투만보다 1.3웨이브 앞섰다. 그건 선택이 아니라 정답이다).
+   */
+  step: number;
+  /** 이번 걸음에 고른 칸의 성격. 적 편성과 회피 횟수가 이걸 본다. */
+  nodeKind: NodeKind | null;
+  nodeWave: WaveKind | null;
+  /** 상점 노드가 주는 무료 재추첨. 생선을 안 쓰고 카드를 더 본다. */
+  freeRerolls: number;
+  /** 다음 카드 묶음에 유물을 반드시 한 장 섞는다. 정예 보상. */
+  forceRelic: boolean;
   /** 마지막에 나를 막은 것. 보스면 이름과 남은 체력이 함께 뜬다. */
   killer: { name: string; hpFrac: number; boss: boolean } | null;
 }
@@ -138,10 +164,13 @@ export function upgradeCost(level: number): number {
   return Math.round(BALANCE.upgradeCostBase * Math.pow(BALANCE.upgradeCostGrowth, level - 1));
 }
 
-export function goldForWave(wave: number): number {
+export function goldForWave(wave: number, kind: WaveKind | null = null): number {
   const base = BALANCE.goldBase + wave * BALANCE.goldPerWave;
   // 보스는 벽이 아니라 사건이어야 한다. 넘으면 그만한 보상이 있어야 다음 판을 계속한다.
-  return Math.round(waveKind(wave) === "boss" ? base * 1.5 : base);
+  if (kind === "boss") return Math.round(base * 1.5);
+  // 정예(저격대)는 통과율이 낮다. 위험을 산 값을 해야 고르는 이유가 생긴다.
+  if (kind === "snipe") return Math.round(base * BALANCE.eliteGoldMul);
+  return Math.round(base);
 }
 
 /**
@@ -204,6 +233,78 @@ const WAVE_CYCLE: readonly WaveKind[] = ["mixed", "rush", "boss", "mixed", "snip
 
 export function waveKind(wave: number): WaveKind {
   return WAVE_CYCLE[(wave - 1) % WAVE_CYCLE.length] ?? "mixed";
+}
+
+/**
+ * 지금 걸음과 스테이지. `wave` 하나에서 뽑는다.
+ *
+ * 걸음 번호를 따로 들고 있으면 언젠가 어긋나고, 어긋나면 보스가 지도에 없는
+ * 자리에서 튀어나온다. 파생값으로 두면 그 버그가 애초에 존재할 수 없다.
+ */
+export function mapStep(state: RunState): number {
+  return state.step;
+}
+
+/**
+ * 이번 전투의 성격.
+ *
+ * 보스 자리는 지도가 아니라 웨이브 번호가 정한다(세 걸음마다). 나머지 걸음의
+ * 성격만 고른 칸에서 온다 — 난이도 곡선을 보스 순번으로 잡아 두었기 때문이다.
+ */
+export function currentKind(state: RunState): WaveKind {
+  // 보스는 **걸음**이 정한다. 웨이브 번호가 아니다 — 상점을 밟으면 둘이 어긋난다.
+  if (isBossStep(state.step)) return "boss";
+  return state.nodeWave ?? "mixed";
+}
+
+/** 이 런에서 지금까지 만난 보스 수. 난이도 램프가 이걸 본다. */
+export function bossesSeen(state: RunState): number {
+  const perStage = 2;
+  const done = state.step >= 5 ? 2 : state.step >= 2 ? 1 : 0;
+  return (state.map.stage - 1) * perStage + done;
+}
+
+/**
+ * 지도에서 한 칸을 고른다.
+ *
+ * 상점 칸은 싸우지 않으므로 그 자리에서 보상을 주고 곧장 상점 화면으로 간다.
+ * 그래도 **웨이브는 하나 지나간다** — 그게 상점의 대가다. 적은 웨이브마다
+ * 복리로 세지므로, 힘을 사는 동안 상대도 세진다.
+ */
+export function chooseNode(state: RunState, idx: number): boolean {
+  const step = mapStep(state);
+  if (!openLanes(state.map, step).includes(idx)) return false;
+  const node = state.map.steps[step]?.[idx];
+  if (!node) return false;
+
+  state.map.taken[step] = idx;
+  state.nodeKind = node.kind;
+  state.nodeWave = node.wave;
+
+  if (node.kind === "shop") {
+    // 싸우지 않고 힘만 사는 자리. 생선과 무료 재추첨을 주고 웨이브를 넘긴다.
+    state.gold += BALANCE.shopNodeGold;
+    state.freeRerolls += 2;
+    // 걸음만 먹고 웨이브는 그대로다. 보스는 같은 걸음에 오므로 **덜 싸운 팀으로**
+    // 보스를 만나게 된다 — 그게 안 싸우고 얻는 것의 대가다.
+    state.step += 1;
+    syncStage(state);
+    rollOffers(state);
+    state.phase = "reward";
+    state.notice = "쉬어 가는 길 — 생선과 다시 뽑기";
+    return true;
+  }
+
+  state.phase = "prepare";
+  state.notice = node.kind === "elite" ? "정예다. 이기면 유물이 나온다" : "근접은 앞줄, 원거리는 뒷줄";
+  return true;
+}
+
+/** 스테이지 경계를 넘었으면 새 지도를 만든다. */
+export function syncStage(state: RunState): void {
+  if (state.step < STAGE_STEPS) return;
+  state.step = 0;
+  state.map = makeStage(state.map.stage + 1);
 }
 
 export function waveKindInfo(k: WaveKind): { name: string; hint: string } {
@@ -362,6 +463,12 @@ export function newRun(seed?: number): RunState {
     lossReason: null,
     telegraphsSeen: 0,
     telegraphsEaten: 0,
+    map: makeStage(1),
+    step: 0,
+    nodeKind: null,
+    nodeWave: null,
+    freeRerolls: 0,
+    forceRelic: false,
     killer: null,
     seed: runSeed,
     pending: [],
@@ -485,6 +592,16 @@ export function bossRamp(wave: number): number {
   return Math.min(1, bossIndexForWave(wave) / BALANCE.bossRampCount);
 }
 
+/**
+ * 지금까지 만난 보스 수로 램프를 잡는다.
+ *
+ * 웨이브 번호로 세던 것을 바꿨다. 상점 칸이 걸음만 먹고 웨이브는 안 먹으므로
+ * 둘이 어긋나고, 어긋나면 두 번째 보스가 첫 보스의 세기로 나온다.
+ */
+export function bossRampFor(state: RunState): number {
+  return Math.min(1, bossesSeen(state) / BALANCE.bossRampCount);
+}
+
 function buildBossWave(state: RunState, wave: number, scale: number): void {
   state.enemy = emptyBoard();
 
@@ -517,7 +634,8 @@ function buildBossWave(state: RunState, wave: number, scale: number): void {
 
 export function buildEnemyWave(state: RunState): void {
   const w = state.wave;
-  const kind = waveKind(w);
+  // 지도에서 고른 칸이 성격을 정한다. 보스 자리만 웨이브 번호가 정한다.
+  const kind = currentKind(state);
   const scale = Math.pow(BALANCE.enemyScale, w - 1);
 
   if (kind === "boss") {
@@ -720,7 +838,9 @@ export function rollOffers(state: RunState): void {
   // 웨이브 3부터, 그리고 **세 웨이브에 한 번만** 나온다. 매 웨이브 내면 슬롯
   // 하나를 상시로 먹어 정상 구매를 밀어낸다 — 측정에서 유물을 안 사는 봇의
   // 평균이 12.9에서 8.6으로 떨어졌다. 유물은 가끔 오는 큰 결정이어야 한다.
-  if (state.wave >= 3 && state.wave % 3 === 0) {
+  // 정예를 넘었으면 주기와 무관하게 한 장 낸다. 그게 정예를 고르는 이유다.
+  if (state.forceRelic || (state.wave >= 3 && state.wave % 3 === 0)) {
+    state.forceRelic = false;
     const owned = new Set(state.relics.map((r) => r.id));
     const pick = shuffle(RELICS.filter((r) => !owned.has(r.id)))[0];
     if (pick) {
@@ -794,6 +914,14 @@ export function resetPositions(state: RunState): void {
 
 /** 카드를 다시 뽑는다. 생선이 모자라면 아무 일도 없다. */
 export function rerollOffers(state: RunState): boolean {
+  // 상점 칸이 준 무료 횟수를 먼저 쓴다. 생선을 아끼는 게 아니라 카드를 더
+  // 보라고 준 것이므로, 있을 때 안 쓰면 그 보상이 사라진 것과 같다.
+  if (state.freeRerolls > 0) {
+    state.freeRerolls -= 1;
+    rollOffers(state);
+    state.notice = "";
+    return true;
+  }
   if (state.gold < REROLL_COST) {
     state.notice = "생선이 부족합니다";
     return false;
@@ -833,7 +961,7 @@ export function startBattle(state: RunState): void {
   }
   // 개입 상태는 전투마다 초기화한다. 남아 있으면 다음 전투 첫 틱에 한꺼번에 터진다.
   state.pending.length = 0;
-  const wk = waveKind(state.wave);
+  const wk = currentKind(state);
   state.dodgeCharges =
     wk === "boss" ? BALANCE.dodgeCharges : wk === "snipe" ? BALANCE.sniperDodgeCharges : 0;
   state.battleElapsed = 0;
@@ -862,8 +990,16 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
     return;
   }
 
-  state.gold += goldForWave(state.wave);
+  const kind = state.nodeKind;
+  state.gold += goldForWave(state.wave, currentKind(state));
+  // 정예를 넘으면 다음 카드 묶음에 유물이 반드시 낀다.
+  if (kind === "elite") state.forceRelic = true;
   state.wave += 1;
+  state.step += 1;
+  // 걸음이 한 바퀴 돌았으면 새 지도를 만든다.
+  syncStage(state);
+  state.nodeKind = null;
+  state.nodeWave = null;
   // 죽은 고양이도 포함해 전원 완전 회복시킨다.
   // 사망에 영구 손실을 붙이면 한 번 밀린 판이 회복 불가능해져 재도전 동기가 죽는다.
   // 난이도는 적 성장 곡선으로만 조절한다. 이 전제로 밸런스를 측정했으므로
@@ -897,7 +1033,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   state.phase = "reward";
   state.notice = refreshed
     ? "새 목표가 걸렸습니다"
-    : `웨이브 클리어! +${goldForWave(state.wave - 1)}생선`;
+    : `웨이브 클리어! +${goldForWave(state.wave - 1, kind === "elite" ? "snipe" : kind === "boss" ? "boss" : null)}생선`;
 }
 
 export function moveCat(state: RunState, from: number, to: number): void {

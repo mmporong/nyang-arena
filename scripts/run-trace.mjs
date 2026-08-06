@@ -9,8 +9,9 @@
  *
  * 실행: npm run trace [시드] [--dodge]
  */
+import { walkMap } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, startBattle, unitCap, waveKind , relicActive } from "../src/game/run.ts";
+import { buyOffer, newRun, startBattle, unitCap, waveKind , relicActive, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
 
 const SEED = Number(process.argv[2] ?? 7);
@@ -48,7 +49,7 @@ const opening = buyPhase();
 console.log(`시작 상점  생선 ${s.gold + opening.reduce((a, b) => a + Number(b.match(/\((\d+)\)/)?.[1] ?? 0), 0)} → ${s.gold}`);
 console.log(`           구매: ${opening.join(", ") || "없음"}`);
 console.log(`           팀: ${team()}  (한도 ${unitCap(s.wave)})\n`);
-s.phase = "prepare";
+walkMap(s);
 
 // ── 웨이브 루프 ────────────────────────────────────────────────
 console.log("웨이브  성격   적  전투    예고/회피   결과   팀           생선");
@@ -59,12 +60,12 @@ for (let guard = 0; guard < 200; guard++) {
   if (s.phase === "reward") {
     const got = buyPhase();
     if (got.length > 0) console.log(`        └ 구매: ${got.join(", ")}`);
-    s.phase = "prepare";
+    walkMap(s);
     continue;
   }
 
   const wave = s.wave;
-  const kind = waveKind(wave);
+  const kind = currentKind(s);
   const enemies = livingCats(s.enemy).length;
   startBattle(s);
   if (s.phase !== "battle") break;

@@ -9,11 +9,14 @@
  *
  * 실행: npm run sim
  */
+import { walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, relicActive, rerollOffers, startBattle, waveKind } from "../src/game/run.ts";
+import { buyOffer, newRun, relicActive, rerollOffers, startBattle, waveKind, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
+// 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
+const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
 const DT = 100;
 
@@ -77,13 +80,13 @@ function playOne(seed) {
         rerolls += 1;
         continue;
       }
-      s.phase = "prepare";
+      walkMap(s, mapPick);
       continue;
     }
 
     if (s.phase === "prepare") {
       if (s.wave > MAX_WAVE) return s.wave;
-      kindAtStart = waveKind(s.wave);
+      kindAtStart = currentKind(s);
       tried.set(kindAtStart, (tried.get(kindAtStart) ?? 0) + 1);
       if (kindAtStart === "boss") {
         waveAtStart = s.wave;

@@ -8,6 +8,7 @@
  * 실행: npm run sweep
  */
 import { BALANCE } from "../src/game/balance.ts";
+import { walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
 
@@ -42,7 +43,7 @@ function playOne() {
         rerolls += 1;
         continue;
       }
-      s.phase = "prepare";
+      walkMap(s, mapPick);
       continue;
     }
     if (s.phase === "prepare") {

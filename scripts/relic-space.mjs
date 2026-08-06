@@ -12,9 +12,11 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
-import { affordable, makeBossBot } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 300);
+// 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
+const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
 
 /** 한 직업에 몰빵한다. 그 직업 유물이 나오면 최우선으로 산다. */
@@ -62,7 +64,7 @@ function play(pick, seed) {
         }
         break;
       }
-      s.phase = "prepare";
+      walkMap(s, mapPick);
       continue;
     }
     if (s.phase === "prepare") {

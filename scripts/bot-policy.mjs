@@ -9,7 +9,9 @@
  * 그래서 **모든 측정 봇이 같은 기준선 위에서** 보스를 넘고, 그 위에서 재려는
  * 축만 바꾼다.
  */
-import { relicActive } from "../src/game/run.ts";
+import { chooseNode, mapStep, relicActive, syncStage } from "../src/game/run.ts";
+import { openLanes } from "../src/game/map.ts";
+import { rng } from "../src/game/rng.ts";
 import { livingCats } from "../src/game/types.ts";
 
 /**
@@ -52,3 +54,41 @@ export function affordable(s) {
     .filter((o) => o && o.cost <= s.gold)
     .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false));
 }
+
+/**
+ * 지도에서 한 칸을 고른다.
+ *
+ * 브라우저와 **같은 경로**로 간다 — `chooseNode`가 판정을 전부 갖고 있고,
+ * 스크립트는 어느 칸을 고를지만 정한다. 이 파리티가 깨지면 여기서 잰 수치는
+ * 사람이 겪는 값이 아니게 된다. 예전에 상점 → 배치로 바로 넘어가던 자리를
+ * 지도로 바꾸지 않았더니, 심은 옛 게임을 재고 있었다.
+ *
+ * `pick`은 고를 수 있는 칸들 중 하나를 고르는 함수다. 기본은 첫 칸(무작위에
+ * 가깝지 않음)이 아니라 시드 난수 — 정책을 안 주면 아무 길이나 간다.
+ */
+export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
+  syncStage(s);
+  const step = mapStep(s);
+  const row = s.map.steps[step] ?? [];
+  const open = openLanes(s.map, step);
+  if (open.length === 0) {
+    // 지도가 망가진 경우의 안전장치. 계약 테스트가 막고 있지만 여기서 멈추면
+    // 원인을 못 찾는다.
+    s.phase = "prepare";
+    return;
+  }
+  const idx = pick(open, row) ?? open[0];
+  if (!chooseNode(s, idx)) chooseNode(s, open[0]);
+}
+
+/** 길 고르기 정책들. `npm run map`이 이걸 비교한다. */
+export const MAP_POLICIES = {
+  // 언제나 안전한 쪽. 정예도 상점도 안 간다.
+  "전투만": (open, row) => open.find((i) => row[i]?.kind === "battle") ?? open[0],
+  // 위험을 산다. 정예가 있으면 무조건 간다.
+  "정예 몰빵": (open, row) => open.find((i) => row[i]?.kind === "elite") ?? open[0],
+  // 힘을 산다. 상점이 있으면 무조건 간다.
+  "상점 몰빵": (open, row) => open.find((i) => row[i]?.kind === "shop") ?? open[0],
+  // 아무 길이나. 지도가 결정인지 아닌지의 기준선이다.
+  "무작위": (open) => open[Math.floor(rng() * open.length)] ?? open[0],
+};

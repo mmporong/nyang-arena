@@ -12,7 +12,9 @@
  * 실행: npm run dodge:test
  */
 import { inTelegraph, stepBattle } from "../src/game/battle.ts";
-import { buildEnemyWave, makeCat, newRun, startBattle, waveKind } from "../src/game/run.ts";
+import { walkMap } from "./bot-policy.mjs";
+import { isBossStep, STAGE_STEPS } from "../src/game/map.ts";
+import { buildEnemyWave, makeCat, newRun, startBattle, currentKind } from "../src/game/run.ts";
 import { breedById } from "../src/game/breeds.ts";
 import { emptyBoard } from "../src/game/types.ts";
 
@@ -29,15 +31,20 @@ function bossFightWithTelegraph(arrange) {
   // 보스 웨이브를 **찾는다**. 번호를 박아 두면 주기를 바꿀 때 조용히 깨진다 —
   // 실제로 보스를 5웨이브마다에서 3웨이브마다로 옮겼을 때 이 테스트가 저격
   // 웨이브를 보스로 알고 400틱 동안 예고를 기다렸다.
-  let bossWave = 3;
-  for (let w = 1; w <= 30; w++) {
-    if (waveKind(w) === "boss") {
-      bossWave = w;
+  // 보스 **걸음**을 찾는다. 웨이브 번호가 아니라 걸음이 보스를 정하므로
+  // (상점 칸이 걸음만 먹어서 둘이 어긋난다) 걸음을 직접 맞춘다.
+  let bossStep = 2;
+  for (let i = 0; i < STAGE_STEPS; i++) {
+    s.step = i;
+    if (isBossStep(i)) {
+      bossStep = i;
       break;
     }
   }
-  s.wave = bossWave;
-  s.phase = "prepare";
+  s.step = bossStep;
+  s.wave = bossStep + 1;
+  walkMap(s);
+  if (currentKind(s) !== "boss") throw new Error("보스 걸음을 못 찾았다");
   s.ally = emptyBoard();
   arrange(s);
   // 웨이브 번호만 바꾸면 적은 여전히 1웨이브 것이다. 다시 만들어야 보스가 나온다.

@@ -14,11 +14,14 @@
  *
  * 실행: npm run intervention
  */
+import { walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
 import { livingCats } from "../src/game/types.ts";
-import { buyOffer, newRun, startBattle, waveKind , relicActive } from "../src/game/run.ts";
+import { buyOffer, newRun, startBattle, waveKind , relicActive, currentKind } from "../src/game/run.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
+// 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
+const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
 const DT = 100;
 
@@ -81,12 +84,12 @@ function play(policy, seed) {
         if (!buyOffer(s, afford[0])) s.offers = s.offers.map((o) => (o === afford[0] ? null : o));
         continue;
       }
-      s.phase = "prepare";
+      walkMap(s, mapPick);
       continue;
     }
     if (s.phase === "prepare") {
       if (s.wave > MAX_WAVE) return { final: MAX_WAVE, boss };
-      kind = waveKind(s.wave);
+      kind = currentKind(s);
       wave = s.wave;
       if (kind === "boss") boss.tried.set(wave, (boss.tried.get(wave) ?? 0) + 1);
       upFor = 0;

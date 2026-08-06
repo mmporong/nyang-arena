@@ -6,7 +6,7 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
-import { affordable, makeBossBot } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = 300;
 
@@ -49,7 +49,7 @@ function run(pick, runSeed) {
       }
       if (s.wave !== lastWave) { lastWave = s.wave; rerolls = 0; }
       if (rerolls < 4 && s.gold >= 12 && rerollOffers(s)) { rerolls += 1; continue; }
-      s.phase = "prepare";
+      walkMap(s, mapPick);
       continue;
     }
     if (s.phase === "prepare") {

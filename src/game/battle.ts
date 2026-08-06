@@ -26,7 +26,7 @@ import {
   SKILLS,
   type SkillResult,
 } from "./skills.ts";
-import { bossRamp, finishWave, waveKind, type RunState } from "./run.ts";
+import { bossRampFor, currentKind, finishWave, type RunState } from "./run.ts";
 
 /** 고정 시뮬레이션 스텝. */
 export const SIM_STEP_MS = 100;
@@ -48,8 +48,9 @@ const BATTLE_TIMEOUT_MS = 16_000;
  */
 const BOSS_TIMEOUT_MS = 150_000;
 
-function battleTimeout(wave: number): number {
-  return waveKind(wave) === "boss" ? BOSS_TIMEOUT_MS : BATTLE_TIMEOUT_MS;
+function battleTimeout(state: RunState): number {
+  // 성격은 지도가 정한다. 웨이브 번호로 판단하면 상점을 밟은 뒤 어긋난다.
+  return currentKind(state) === "boss" ? BOSS_TIMEOUT_MS : BATTLE_TIMEOUT_MS;
 }
 
 const POSE_WINK_MS = 500;
@@ -814,11 +815,11 @@ export function inTelegraph(t: Telegraph, fx: number, fy: number): boolean {
  * 봤고 그중 몇 번을 맞았는가 — 이 게임에서 가장 큰 결정 축이 개입이므로,
  * 부검에서 가장 먼저 나와야 할 숫자다.
  */
-function fireTelegraph(boss: Cat, foes: Cat[], wave: number, tally: RunState): void {
+function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
   const t = boss.telegraph;
   if (!t) return;
   tally.telegraphsSeen += 1;
-  const ramp = bossRamp(wave);
+  const ramp = bossRampFor(tally);
   const frac =
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
     bossKit(boss.breed.id).power;
@@ -896,7 +897,7 @@ function teleportBoss(boss: Cat, idx: number): void {
 }
 
 /** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
-function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number, tally: RunState): void {
+function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   if (!boss.alive) return;
   const kit = bossKit(boss.breed.id);
 
@@ -910,7 +911,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number, tally: RunSt
   if (boss.telegraph) {
     boss.telegraph.fuse -= dt;
     if (boss.telegraph.fuse <= 0) {
-      fireTelegraph(boss, foes, wave, tally);
+      fireTelegraph(boss, foes, tally);
       boss.telegraph = null;
     }
     return; // 예고 중에는 다음 문턱을 밟아도 겹쳐 걸지 않는다
@@ -998,7 +999,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
     }
 
     const allies = livingCats(state.ally);
-    for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state.wave, state);
+    for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state);
     const foes = livingCats(state.enemy);
 
     if (allies.length === 0 || foes.length === 0) {
@@ -1050,7 +1051,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
     separate(allies);
     separate(foes);
 
-    if (state.battleElapsed >= battleTimeout(state.wave)) {
+    if (state.battleElapsed >= battleTimeout(state)) {
       finishWave(state, false, "timeout");
       return;
     }

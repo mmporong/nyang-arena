@@ -12,10 +12,12 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, moveCat, newRun, startBattle } from "../src/game/run.ts";
-import { affordable, makeBossBot } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 import { BOARD_COLS , livingCats } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
+// 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
+const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
 
 /** 살아 있는 아군을 보드 순서대로. */
@@ -94,7 +96,7 @@ function play(arrange, seed) {
         if (!buyOffer(s, afford[0])) s.offers = s.offers.map((o) => (o === afford[0] ? null : o));
         continue;
       }
-      s.phase = "prepare";
+      walkMap(s, mapPick);
       continue;
     }
     if (s.phase === "prepare") {

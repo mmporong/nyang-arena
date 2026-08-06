@@ -9,6 +9,7 @@ import {
 } from "./battle.ts";
 import { bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
+import { nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -18,6 +19,7 @@ import {
   unitCap,
   waveKind,
   waveKindInfo,
+  mapStep,
   type Offer,
   type RunState,
 } from "./run.ts";
@@ -1961,6 +1963,134 @@ function drawSynergies(
   });
 }
 
+/**
+ * 여정 지도 화면.
+ *
+ * 길은 **왼쪽에서 오른쪽으로** 흐른다. 이 게임은 이제 가로가 기본이고, 가로
+ * 화면에서 세로로 흐르는 길은 남는 폭을 또 버린다.
+ *
+ * 지나온 길은 흐릿하게 남긴다. 어디서 왔는지가 보여야 지금 고르는 것이 어디로
+ * 이어지는지도 읽힌다. 갈 수 없는 칸은 선 없이 어둡게 둔다 — 지우면 길이
+ * 좁아 보이고, 똑같이 그리면 고를 수 있는 줄 알고 누른다.
+ */
+const NODE_MARK: Record<NodeKind, string> = {
+  battle: "전투",
+  elite: "정예",
+  shop: "상점",
+  boss: "보스",
+};
+
+export function mapNodeRects(L: Layout, s: RunState): { rect: Rect; step: number; idx: number }[] {
+  const out: { rect: Rect; step: number; idx: number }[] = [];
+  const box = mapBox(L);
+  const cols = STAGE_STEPS;
+  const cw = box.w / cols;
+  const r = Math.min(cw * 0.3, box.h * 0.11);
+  for (let step = 0; step < cols; step++) {
+    const row = s.map.steps[step] ?? [];
+    for (let i = 0; i < row.length; i++) {
+      const node = row[i]!;
+      const cx = box.x + cw * (step + 0.5);
+      // lane은 격자 줄 번호다. 버려진 칸이 있어도 자리가 유지돼 길이 흔들리지 않는다.
+      const cy = box.y + box.h * ((node.lane + 0.5) / 4);
+      out.push({ rect: { x: cx - r, y: cy - r, w: r * 2, h: r * 2 }, step, idx: i });
+    }
+  }
+  return out;
+}
+
+function mapBox(L: Layout): Rect {
+  const top = L.notice.y + L.notice.h + L.scale * 8;
+  const bottom = L.synergyBar.y - L.scale * 10;
+  return { x: L.w * 0.06, y: top, w: L.w * 0.88, h: Math.max(L.scale * 120, bottom - top) };
+}
+
+function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  if (s.phase !== "map") return;
+  const step = mapStep(s);
+  const open = new Set(openLanes(s.map, step));
+  const rects = mapNodeRects(L, s);
+  const at = (st: number, i: number): Rect | undefined =>
+    rects.find((x) => x.step === st && x.idx === i)?.rect;
+
+  // 선 먼저. 칸 아래에 깔려야 칸이 선을 끊는 것처럼 보인다.
+  for (let st = 0; st < STAGE_STEPS - 1; st++) {
+    const row = s.map.steps[st] ?? [];
+    for (let i = 0; i < row.length; i++) {
+      const a = at(st, i);
+      if (!a) continue;
+      for (const t of row[i]!.next) {
+        const b = at(st + 1, t);
+        if (!b) continue;
+        const past = s.map.taken[st] === i;
+        const live = st === step - 1 ? past : st < step;
+        ctx.strokeStyle = live ? "rgba(244,227,193,0.5)" : "rgba(239,224,198,0.14)";
+        ctx.lineWidth = live ? Math.max(2, L.scale * 2.4) : Math.max(1, L.scale * 1.4);
+        ctx.beginPath();
+        ctx.moveTo(a.x + a.w, a.y + a.h / 2);
+        ctx.lineTo(b.x, b.y + b.h / 2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  for (const { rect, step: st, idx } of rects) {
+    const node = s.map.steps[st]?.[idx];
+    if (!node) continue;
+    const taken = s.map.taken[st] === idx;
+    const here = st === step;
+    const pickable = here && open.has(idx);
+    const done = st < step;
+
+    const hue =
+      node.kind === "boss" ? T.enemy
+      : node.kind === "elite" ? T.vuln
+      : node.kind === "shop" ? T.fish
+      : T.ally;
+    // 고를 수 있는 칸만 살아 있다. 나머지는 지도의 배경이다.
+    const alpha = pickable ? 1 : taken ? 0.55 : done ? 0.2 : 0.3;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(14,10,8,0.92)";
+    ctx.fill();
+    ctx.strokeStyle = hue;
+    ctx.lineWidth = pickable ? Math.max(2, L.scale * 2.6) : Math.max(1, L.scale * 1.4);
+    ctx.stroke();
+    uiText(ctx, NODE_MARK[node.kind], rect.x + rect.w / 2, rect.y + rect.h / 2, Math.max(10, rect.w * 0.34), hue, {
+      align: "center",
+      weight: pickable ? 800 : 400,
+    });
+    ctx.restore();
+
+    // 고를 수 있는 칸은 맥동한다. 여섯 칸 중 어디를 눌러야 하는지가 한눈에 보인다.
+    if (pickable) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2 + L.scale * 4, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${0.12 + pulse * 0.28})`;
+      ctx.lineWidth = Math.max(1.5, L.scale * 1.8);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  const cur = s.map.steps[step] ?? [];
+  const kinds = [...new Set(cur.filter((_, i) => open.has(i)).map((n) => n.kind))];
+  uiText(
+    ctx,
+    `${s.map.stage}번째 여정 · ${step + 1}/${STAGE_STEPS}걸음 — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
+    L.w / 2,
+    mapBox(L).y - L.scale * 6,
+    L.scale * 13,
+    T.paperDim,
+    { align: "center", weight: 400 },
+  );
+}
+
 export function buttonText(s: RunState): string {
   switch (s.phase) {
     case "prepare":
@@ -1983,8 +2113,10 @@ export function buttonText(s: RunState): string {
         : `탭 흩어짐 · 꾹 모임   ${s.dodgeCharges}`;
     }
     case "reward":
-      // 1웨이브 상점은 전투 뒤가 아니라 전투 앞이다. "다음 웨이브"라고 하면 거짓말이 된다.
-      return s.wave === 1 ? "배치하러 가기" : "다음 웨이브";
+      // 상점 다음은 배치가 아니라 지도다. 어디로 갈지 먼저 고른다.
+      return "길 고르기";
+    case "map":
+      return "";
     case "gameover":
       return "다시 도전";
   }
@@ -2428,6 +2560,7 @@ export function render(
   drawPops(ctx, L);
   drawBottomZone(ctx, L, s);
   drawSynergies(ctx, L, s);
+  drawMap(ctx, L, s);
   drawNotice(ctx, L, s);
   // 부검을 먼저 깔고 버튼을 그 위에 올린다. 순서가 반대면 전면 어둠막이 버튼까지
   // 덮어서, 유일하게 누를 수 있는 물건이 비활성처럼 보였다.
