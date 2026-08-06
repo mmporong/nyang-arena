@@ -65,6 +65,7 @@ export const BOSS_KITS: Record<number, BossKit> = {
 };
 
 export function bossKit(breedId: number): BossKit {
+  if (breedId === 12) return SNIPER_KIT;
   return BOSS_KITS[breedId] ?? BOSS_KITS[9]!;
 }
 
@@ -173,6 +174,53 @@ export const BOSS_RADIUS = 1.5;
  *   바꿀 때마다 어긋난다 — 실제로 floor(wave/5)를 쓰다가 첫 보스에 두 번째
  *   보스가 나온 적이 있다.
  */
+/**
+ * 저격수 — 저격 웨이브의 미니 보스.
+ *
+ * 저격 웨이브는 통과율로는 두 번째 벽이었는데(88%) 플레이어가 할 수 있는 게
+ * 없었다. 원거리가 많아 일방적으로 맞는 구간일 뿐이었다.
+ *
+ * 저격수를 세우면 그 웨이브가 **보스전의 예고편**이 된다 — 직선 예고 하나만
+ * 쓰고, 회피 차지도 준다. 3웨이브 뒤에 올 보스에서 쓸 동작을 낮은 대가로
+ * 먼저 가르치는 자리다.
+ */
+export const SNIPER_BREED: Breed = {
+  id: 12,
+  name: "외눈이",
+  color: "orange",
+  cls: "archer",
+  kind: "ranged",
+  hp: 60,
+  atk: 10,
+  atkInterval: 1100,
+  // 보스보다 사거리가 길다. 뒤에서 쏘는 역할이 분명해야 한다.
+  range: 3.6,
+  moveSpeed: 0.3,
+  manaPerAttack: 0,
+  skill: null,
+  passive: null,
+  cost: 0,
+};
+
+/** 저격수의 반경. 보스(1.5)보다 작아 미니 보스로 읽힌다. */
+export const SNIPER_RADIUS = 0.85;
+
+/**
+ * 저격수는 직선만 쏜다. 규칙이 하나여야 예고편 노릇을 한다.
+ *
+ * power가 1.8인 이유: 1.0에서는 예고가 떠도 회피 유무로 통과율이 0.1%p밖에
+ * 안 갈렸다. 아무 일도 안 일어나면 가르치는 게 아니다. 1.8에서 저격 웨이브가
+ * 90.3%(회피 안 함) 대 92.4%(회피 함)로 갈린다 — 고양이 하나를 잃는 정도의
+ * 대가라 벽은 아니지만 버튼을 누를 이유는 된다.
+ */
+export const SNIPER_KIT: BossKit = {
+  power: 1.8,
+  patterns: ["line"],
+  teleportEvery: 0,
+  vulnerableAt: 0,
+  vulnerableMs: 0,
+};
+
 export function bossForIndex(index: number): Breed {
   return BOSS_BREEDS[index % BOSS_BREEDS.length] ?? BOSS_BREEDS[0]!;
 }

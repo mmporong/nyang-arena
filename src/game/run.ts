@@ -2,7 +2,7 @@ import { BALANCE } from "./balance.ts";
 import { RELICS, type Relic } from "./relics.ts";
 import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
-import { BOSS_RADIUS, bossForIndex, bossKit } from "./bosses.ts";
+import { BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
 import {
   type Intervention,
   BOARD_COLS,
@@ -533,6 +533,21 @@ export function buildEnemyWave(state: RunState): void {
     cat.speedMul = speedMul;
     state.enemy[cell] = cat;
   }
+
+  // 저격 웨이브에는 저격수 하나를 뒷줄 가운데 세운다.
+  //
+  // 이 웨이브는 통과율로는 두 번째 벽이었는데(88%) 플레이어가 할 수 있는 게
+  // 없었다 — 원거리가 많아 일방적으로 맞는 구간일 뿐이었다. 저격수가 서면
+  // 세 웨이브 뒤에 올 보스의 동작(예고 → 회피)을 낮은 대가로 먼저 가르친다.
+  if (kind === "snipe") {
+    const cell = 2 * BOARD_COLS + (BOARD_COLS - 1);
+    const sniper = makeCat(SNIPER_BREED, "enemy", cell);
+    sniper.radius = SNIPER_RADIUS;
+    sniper.maxHp = Math.round(sniper.maxHp * scale * BALANCE.sniperHpMul);
+    sniper.hp = sniper.maxHp;
+    sniper.atk = Math.round(sniper.atk * scale);
+    state.enemy[cell] = sniper;
+  }
 }
 
 /** 시너지 판정용 보드 스냅샷. 배치(열)까지 포함해야 앞줄/뒷줄 조건을 볼 수 있다. */
@@ -802,7 +817,9 @@ export function startBattle(state: RunState): void {
   }
   // 개입 상태는 전투마다 초기화한다. 남아 있으면 다음 전투 첫 틱에 한꺼번에 터진다.
   state.pending.length = 0;
-  state.dodgeCharges = waveKind(state.wave) === "boss" ? BALANCE.dodgeCharges : 0;
+  const wk = waveKind(state.wave);
+  state.dodgeCharges =
+    wk === "boss" ? BALANCE.dodgeCharges : wk === "snipe" ? BALANCE.sniperDodgeCharges : 0;
   state.battleElapsed = 0;
   state.phase = "battle";
   state.notice = "";

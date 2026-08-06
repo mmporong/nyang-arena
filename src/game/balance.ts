@@ -83,6 +83,10 @@ export const BALANCE = {
    */
   bossAtkMul: 0.8,
   bossEscortCount: 3,
+  /** 저격수 체력 배수. 보스보다 훨씬 얇다 — 벽이 아니라 연습이다. */
+  sniperHpMul: 5,
+  /** 저격 웨이브에 주는 회피 횟수. 보스(6)보다 적다 */
+  sniperDodgeCharges: 2,
   /**
    * 예고 광역이 적중했을 때 **최대 체력 대비** 피해 비율.
    *

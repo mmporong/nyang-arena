@@ -1,5 +1,5 @@
 import { BREEDS } from "./breeds.ts";
-import { BOSS_BREEDS } from "./bosses.ts";
+import { BOSS_BREEDS, SNIPER_BREED } from "./bosses.ts";
 import type { Pose } from "./types.ts";
 
 const POSES: Pose[] = ["idle", "sleep", "wink", "move", "back", "run"];
@@ -24,7 +24,7 @@ export function spriteFor(breedId: number, pose: Pose): HTMLImageElement | null 
 export async function loadSprites(): Promise<void> {
   const jobs: Promise<void>[] = [];
 
-  for (const breed of [...BREEDS, ...BOSS_BREEDS]) {
+  for (const breed of [...BREEDS, ...BOSS_BREEDS, SNIPER_BREED]) {
     for (const pose of POSES) {
       const k = key(breed.id, pose);
       const img = new Image();
