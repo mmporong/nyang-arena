@@ -807,9 +807,17 @@ export function inTelegraph(t: Telegraph, fx: number, fy: number): boolean {
   return Math.acos(Math.min(1, Math.max(-1, along / d))) <= t.arg;
 }
 
-function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
+/**
+ * 예고가 터진다. 동시에 **성적을 적는다**.
+ *
+ * 죽는 화면에서 "왜 졌는지"를 말하려면 이 순간의 기록이 필요하다. 예고를 몇 번
+ * 봤고 그중 몇 번을 맞았는가 — 이 게임에서 가장 큰 결정 축이 개입이므로,
+ * 부검에서 가장 먼저 나와야 할 숫자다.
+ */
+function fireTelegraph(boss: Cat, foes: Cat[], wave: number, tally: RunState): void {
   const t = boss.telegraph;
   if (!t) return;
+  tally.telegraphsSeen += 1;
   const ramp = bossRamp(wave);
   const frac =
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
@@ -821,6 +829,7 @@ function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
     const inside = foes.filter((f) => inTelegraph(t, f.fx, f.fy));
     const need = Math.max(2, Math.ceil(foes.length / 2));
     if (inside.length < need) {
+      tally.telegraphsEaten += 1;
       const miss = frac * BALANCE.gatherMissMul;
       for (const f of foes) damage(f, Math.max(1, Math.round(f.maxHp * miss)), false);
     } else {
@@ -831,11 +840,16 @@ function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
     // 무게중심을 노려 통째로 맞고, 그러면 모인 것이 벌이 된다.
     for (const f of foes) f.moveLock = 0;
   } else {
+    let caught = 0;
     for (const f of foes) {
       if (!inTelegraph(t, f.fx, f.fy)) continue;
+      caught += 1;
       // 최대 체력 대비 비율이라 웨이브·팀 구성과 무관하게 "뭉치면 아프다"가 성립한다.
       damage(f, Math.max(1, Math.round(f.maxHp * frac)), false);
     }
+    // 한 마리라도 걸리면 실패로 친다. "몇 마리 맞았나"는 팀 크기에 따라 달라져
+    // 판끼리 비교가 안 되지만, "피했나 못 피했나"는 언제나 같은 뜻이다.
+    if (caught > 0) tally.telegraphsEaten += 1;
   }
   pushFx({
     kind: "ring",
@@ -882,7 +896,7 @@ function teleportBoss(boss: Cat, idx: number): void {
 }
 
 /** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
-function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number): void {
+function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number, tally: RunState): void {
   if (!boss.alive) return;
   const kit = bossKit(boss.breed.id);
 
@@ -896,7 +910,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, wave: number): void {
   if (boss.telegraph) {
     boss.telegraph.fuse -= dt;
     if (boss.telegraph.fuse <= 0) {
-      fireTelegraph(boss, foes, wave);
+      fireTelegraph(boss, foes, wave, tally);
       boss.telegraph = null;
     }
     return; // 예고 중에는 다음 문턱을 밟아도 겹쳐 걸지 않는다
@@ -984,7 +998,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
     }
 
     const allies = livingCats(state.ally);
-    for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state.wave);
+    for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state.wave, state);
     const foes = livingCats(state.enemy);
 
     if (allies.length === 0 || foes.length === 0) {

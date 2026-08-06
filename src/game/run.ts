@@ -87,6 +87,19 @@ export interface RunState {
   dodgeCharges: number;
   /** 이번 런에서 모은 유물. 조건을 채운 것만 보너스가 붙고 대가는 항상 붙는다. */
   relics: Relic[];
+
+  /**
+   * 부검용 기록.
+   *
+   * 죽는 화면이 숫자 하나로 끝나면 12분을 쓰고도 "다음엔 뭘 다르게 하지"에
+   * 답이 안 나온다. 이 게임에서 가장 큰 결정 축이 개입(+27%p)이므로 예고
+   * 성적이 첫 줄이고, 판이 끝나는 이유의 41%가 보스이므로 누구에게 막혔는지가
+   * 둘째 줄이다.
+   */
+  telegraphsSeen: number;
+  telegraphsEaten: number;
+  /** 마지막에 나를 막은 것. 보스면 이름과 남은 체력이 함께 뜬다. */
+  killer: { name: string; hpFrac: number; boss: boolean } | null;
 }
 
 const BEST_KEY = "nyang-arena.best";
@@ -347,6 +360,9 @@ export function newRun(seed?: number): RunState {
     battleElapsed: 0,
     recordBroken: false,
     lossReason: null,
+    telegraphsSeen: 0,
+    telegraphsEaten: 0,
+    killer: null,
     seed: runSeed,
     pending: [],
     dodgeCharges: 0,
@@ -829,6 +845,14 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   if (!won) {
     state.lossReason = reason;
     state.phase = "gameover";
+    // 살아남은 적 중 가장 위협적인 것 — 보스가 있으면 보스, 없으면 체력이
+    // 가장 많이 남은 쪽. 이 판을 끝낸 것이 무엇인지가 부검의 첫 문장이다.
+    const alive = livingCats(state.enemy);
+    const boss = alive.find((c) => c.radius > 0);
+    const worst = boss ?? [...alive].sort((a, b) => b.hp / b.maxHp - a.hp / a.maxHp)[0];
+    state.killer = worst
+      ? { name: worst.breed.name, hpFrac: worst.hp / worst.maxHp, boss: worst.radius > 0 }
+      : null;
     if (state.wave > state.best) {
       state.best = state.wave;
       state.recordBroken = true;

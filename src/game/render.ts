@@ -50,6 +50,15 @@ import {
  * 작을수록 전장이 넓어 보이고 유닛이 겹칠 일이 줄어든다.
  * 체력바·뱃지는 셀이 아니라 이 크기에 비례시켜야 축소해도 비율이 안 깨진다.
  */
+/**
+ * 키보드를 쓸 수 있는 자리인가.
+ *
+ * 조작 안내를 기기에 맞춘다. 폰에서 "Space"라고 적으면 거짓말이고, 데스크톱에서
+ * "탭·꾹"이라고 적으면 있는 조작을 숨기는 셈이다.
+ */
+const HAS_KEYS =
+  typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
+
 const CAT_SCALE = 0.66;
 
 /** 시너지 트리거마다 고유색. TFT가 특성별로 색을 나누는 것과 같은 이유 — 한눈에 구분되게. */
@@ -1907,7 +1916,12 @@ export function buttonText(s: RunState): string {
       if (open) return open.strikeCombo > 0 ? `약점 공격!  x${open.strikeCombo}` : "약점 공격!";
       // 무엇을 해야 하는지는 장판 색이 말한다. 버튼은 조작 방식만 알려준다 —
       // 버튼까지 정답을 알려주면 읽을 이유가 사라진다.
-      return s.dodgeCharges > 0 ? `탭 흩어짐 · 꾹 모임   ${s.dodgeCharges}` : "전투 중";
+      if (s.dodgeCharges <= 0) return "전투 중";
+      // 키보드가 있으면 두 키를 알려준다. 탭/꾹은 손가락 하나뿐인 화면의 제약이라
+      // 마우스와 키보드가 있는 자리에서까지 그 제약을 물려줄 이유가 없다.
+      return HAS_KEYS
+        ? `Space 흩어짐 · Shift 모임   ${s.dodgeCharges}`
+        : `탭 흩어짐 · 꾹 모임   ${s.dodgeCharges}`;
     }
     case "reward":
       // 1웨이브 상점은 전투 뒤가 아니라 전투 앞이다. "다음 웨이브"라고 하면 거짓말이 된다.
@@ -2173,45 +2187,123 @@ function drawGameOver(
   s: RunState,
 ): void {
   if (s.phase !== "gameover") return;
-  ctx.fillStyle = "rgba(14,10,8,0.84)";
+  ctx.fillStyle = "rgba(14,10,8,0.86)";
   ctx.fillRect(0, 0, L.w, L.h);
 
-  const cy = L.h / 2;
+  /**
+   * 부검을 판 하나에 담는다.
+   *
+   * 처음엔 화면 한가운데 글자만 얹었더니 아래 시너지 바와 직업 카운터가 어둠막
+   * 너머로 비쳐 글자와 겹쳤다. 읽어야 할 것과 이미 끝난 것이 같은 자리에서
+   * 싸우면 둘 다 안 읽힌다. 판을 깔아 안팎을 가른다.
+   */
+  const lines =
+    (s.lossReason === "timeout" || s.killer ? 1 : 0) + (s.telegraphsSeen > 0 ? 1 : 0) + 1;
+  const panelW = Math.min(L.w * 0.86, L.scale * 560);
+  const panelH = L.scale * 174 + lines * L.scale * 20;
+  // 버튼 위로만 쓴다. 아래로 내려가면 유일한 행동이 판에 깔린다.
+  const top = Math.max(L.scale * 10, (L.button.y - panelH) / 2);
+  const panel = { x: L.w / 2 - panelW / 2, y: top, w: panelW, h: panelH };
+  bevelPanel(ctx, panel, L.scale * 12, "rgba(20,14,11,0.94)", "rgba(0,0,0,0.6)", 2);
+
+  const cy = panel.y + L.scale * 76;
   const px = Math.max(3, Math.round(L.scale * 9));
   const num = String(s.wave);
+  // 라벨 자리를 숫자의 **실제 높이**에서 뽑는다. 상수로 두면 화면 배율이 바뀔 때
+  // "도달"과 "웨이브"가 숫자 위로 올라탄다(1280x800에서 실제로 그랬다).
+  const numH = 7 * px;
+  const gap = L.scale * 12;
 
-  uiText(ctx, "도달", L.w / 2, cy - L.scale * 62, L.scale * 15, T.muted, {
+  uiText(ctx, "도달", L.w / 2, cy - numH / 2 - gap, L.scale * 15, T.muted, {
     align: "center",
-    weight: 700,
+    weight: 800,
   });
-  pixelText(ctx, num, L.w / 2, cy - L.scale * 22, px, T.paper, "center", false);
-  uiText(ctx, "웨이브", L.w / 2, cy + L.scale * 16, L.scale * 16, T.muted, {
+  pixelText(ctx, num, L.w / 2, cy, px, T.paper, "center", false);
+  uiText(ctx, "웨이브", L.w / 2, cy + numH / 2 + gap, L.scale * 16, T.muted, {
     align: "center",
-    weight: 700,
+    weight: 800,
   });
+
+  /**
+   * 부검.
+   *
+   * 숫자 하나로 끝나면 12분을 쓰고도 "다음엔 뭘 다르게 하지"에 답이 없다.
+   * 세 줄만 준다 — **무엇에 막혔는가 · 예고를 얼마나 읽었는가 · 어떤 팀이었는가.**
+   * 측정상 가장 큰 결정 축이 개입이고 판이 끝나는 이유의 41%가 보스라서,
+   * 그 둘이 첫 두 줄이다. 더 얹으면 읽히지 않는다.
+   */
+  let ly = cy + numH / 2 + gap * 2.6;
+  const line = (text: string, color: string, weight = 400): void => {
+    uiText(ctx, text, L.w / 2, ly, L.scale * 13, color, { align: "center", weight });
+    ly += L.scale * 20;
+  };
 
   if (s.lossReason === "timeout") {
-    uiText(
-      ctx,
-      "시간 안에 정리하지 못했습니다",
-      L.w / 2,
-      cy + L.scale * 42,
-      L.scale * 13,
+    line("시간 안에 정리하지 못했습니다 · 화력이 모자랐다", T.enemy, 800);
+  } else if (s.killer) {
+    const hp = Math.round(s.killer.hpFrac * 100);
+    line(
+      s.killer.boss
+        ? `${s.killer.name}에게 막혔다 · 체력 ${hp}% 남기고`
+        : `${s.killer.name} 무리에게 전멸`,
       T.enemy,
-      {
-        align: "center",
-        weight: 600,
-      },
+      800,
     );
   }
+
+  // 예고 성적. 보스를 한 번도 안 만난 판에는 뜨지 않는다 — 없는 얘기를 하면
+  // 화면만 길어진다.
+  if (s.telegraphsSeen > 0) {
+    const eaten = s.telegraphsEaten;
+    const read = s.telegraphsSeen - eaten;
+    const rate = Math.round((read / s.telegraphsSeen) * 100);
+    line(
+      `예고 ${s.telegraphsSeen}번 중 ${read}번 피함 (${rate}%)`,
+      rate >= 70 ? T.gather : rate >= 40 ? T.paperDim : T.danger,
+      800,
+    );
+  }
+
+  // 살아남은 고양이가 아니라 **데리고 있던** 고양이를 센다. 전멸한 판에서
+  // livingCats를 쓰면 전부 0이 떠서 어떤 팀이었는지가 사라진다.
+  const cats = s.ally.filter((c): c is Cat => c !== null);
+  const by = { warrior: 0, rogue: 0, archer: 0, mage: 0 };
+  for (const c of cats) by[c.breed.cls] += 1;
+  const team = `전${by.warrior} 도${by.rogue} 궁${by.archer} 법${by.mage}`;
+  line(s.relics.length > 0 ? `${team} · ${s.relics.map((r) => r.name).join(" · ")}` : team, T.muted);
+
+  /**
+   * 최고 기록 대비 막대.
+   *
+   * "12웨이브"는 잘한 건지 못한 건지 알 수 없는 숫자다. 자기 최고 기록 옆에
+   * 놓으면 그때서야 뜻이 생긴다 — 거의 다 왔는지, 한참 못 미쳤는지.
+   */
+  const goal = Math.max(s.best, s.wave, 1);
+  const bw = Math.min(L.w * 0.5, L.scale * 320);
+  const bh = Math.max(6, L.scale * 9);
+  const bx = L.w / 2 - bw / 2;
+  const byy = ly + L.scale * 6;
+  roundRect(ctx, { x: bx, y: byy, w: bw, h: bh }, bh / 2);
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  ctx.fill();
+  roundRect(ctx, { x: bx, y: byy, w: Math.max(bh, (bw * s.wave) / goal), h: bh }, bh / 2);
+  ctx.fillStyle = s.recordBroken ? T.gold : T.ally;
+  ctx.fill();
+  // 최고 기록 눈금. 갱신한 판에는 내가 그 눈금이므로 그리지 않는다.
+  if (!s.recordBroken && s.best > 0) {
+    const tx = bx + (bw * s.best) / goal;
+    ctx.fillStyle = T.gold;
+    ctx.fillRect(tx - 1, byy - bh * 0.35, 2, bh * 1.7);
+  }
+
   uiText(
     ctx,
     s.recordBroken ? "최고 기록 갱신" : `최고 기록 ${s.best}웨이브`,
     L.w / 2,
-    cy + L.scale * (s.lossReason === "timeout" ? 64 : 44),
+    byy + bh + L.scale * 14,
     L.scale * 14,
     s.recordBroken ? T.gold : T.muted,
-    { align: "center", weight: 700 },
+    { align: "center", weight: 800 },
   );
 }
 
@@ -2277,7 +2369,9 @@ export function render(
   drawPops(ctx, L);
   drawBottomZone(ctx, L, s);
   drawSynergies(ctx, L, s);
-  drawButton(ctx, L, s);
   drawNotice(ctx, L, s);
+  // 부검을 먼저 깔고 버튼을 그 위에 올린다. 순서가 반대면 전면 어둠막이 버튼까지
+  // 덮어서, 유일하게 누를 수 있는 물건이 비활성처럼 보였다.
   drawGameOver(ctx, L, s);
+  drawButton(ctx, L, s);
 }
