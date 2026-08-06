@@ -350,7 +350,6 @@ function hudChip(
   uiText(ctx, caption, x, box.y + box.h * 0.26, cap, T.muted, {
     align,
     weight: 700,
-    tracking: cap * 0.12,
   });
   pixelText(ctx, value, x, box.y + box.h * 0.72, px, color, align, false);
 }
@@ -1102,7 +1101,6 @@ function drawSideLabels(ctx: CanvasRenderingContext2D, L: Layout): void {
     uiText(ctx, text, x, y, fs, color, {
       align,
       weight: 800,
-      tracking: fs * 0.1,
       outline: true,
     });
   };
@@ -1410,7 +1408,6 @@ function drawRelicCard(
   uiText(ctx, "유물", cx, ty - fsName * 0.95, fsBody * 0.95, afford ? T.fish : T.muted, {
     align: "center",
     weight: 700,
-    tracking: 2,
   });
   uiText(ctx, relic.name, cx, ty, fsName, afford ? T.text : T.muted, {
     align: "center",
@@ -1968,7 +1965,6 @@ function drawButton(
     {
       align: "center",
       weight: 800,
-      tracking: r.h * 0.02,
     },
   );
 }
@@ -2161,7 +2157,6 @@ function drawGameOver(
   uiText(ctx, "도달", L.w / 2, cy - L.scale * 62, L.scale * 15, T.muted, {
     align: "center",
     weight: 700,
-    tracking: L.scale * 3,
   });
   pixelText(ctx, num, L.w / 2, cy - L.scale * 22, px, T.paper, "center", false);
   uiText(ctx, "웨이브", L.w / 2, cy + L.scale * 16, L.scale * 16, T.muted, {

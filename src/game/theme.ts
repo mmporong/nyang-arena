@@ -181,10 +181,29 @@ export interface UiTextOpts {
   maxWidth?: number;
   /** 전장 위에 그릴 때 켠다. 배경이 복잡해도 글자가 살아남는다. */
   outline?: boolean;
-  tracking?: number;
 }
 
 const STACK = `"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif`;
+
+/**
+ * 타이포 규칙을 한 곳에서 강제한다.
+ *
+ * **무게는 400과 800 둘뿐이다. 그 사이는 크기로 가른다.** 600과 700이 섞여
+ * 있으면 이름과 부제가 같은 소리를 내고, 위계가 무게가 아니라 우연이 된다.
+ * 호출부를 서른 곳 고치는 대신 여기서 두 단으로 눌러 버린다.
+ *
+ * 크기는 4의 배수로 떨어뜨린다. 스프라이트가 4px 격자에 찍혀 있는데 글자만
+ * 13.5px이면 둘이 같은 물건으로 안 보인다 — 안티에일리어싱된 회색 획이 뜬다.
+ *
+ * `uiText`와 `wrapLines`가 **같은 함수**를 쓰는 것이 중요하다. 한쪽만 스냅하면
+ * 재는 폭과 그리는 폭이 갈려서 글자가 상자를 넘는다.
+ */
+function fontOf(size: number, weight: number): string {
+  const w = weight >= 700 ? 800 : 400;
+  // 12px 미만은 격자에 맞출 여유가 없다. 거기서 반올림하면 읽을 수 없게 커지거나 작아진다.
+  const s = size >= 12 ? Math.max(12, Math.round(size / 4) * 4) : Math.round(size);
+  return `${w} ${s}px ${STACK}`;
+}
 
 export function uiText(
   ctx: CanvasRenderingContext2D,
@@ -195,11 +214,10 @@ export function uiText(
   color: string,
   opts: UiTextOpts = {},
 ): void {
-  const { align = "left", weight = 600, maxWidth, outline = false, tracking } = opts;
-  ctx.font = `${weight} ${Math.round(size)}px ${STACK}`;
+  const { align = "left", weight = 400, maxWidth, outline = false } = opts;
+  ctx.font = fontOf(size, weight);
   ctx.textAlign = align;
   ctx.textBaseline = "middle";
-  if (tracking !== undefined) ctx.letterSpacing = `${tracking}px`;
 
   if (outline) {
     ctx.lineJoin = "round";
@@ -213,7 +231,6 @@ export function uiText(
   if (maxWidth !== undefined) ctx.fillText(text, x, y, maxWidth);
   else ctx.fillText(text, x, y);
 
-  if (tracking !== undefined) ctx.letterSpacing = "0px";
 }
 
 /**
@@ -230,7 +247,7 @@ export function wrapLines(
   maxWidth: number,
   maxLines: number,
 ): string[] {
-  ctx.font = `${weight} ${Math.round(size)}px ${STACK}`;
+  ctx.font = fontOf(size, weight);
   const fits = (s: string) => ctx.measureText(s).width <= maxWidth;
 
   /** 폭을 넘는 줄을 말줄임으로 줄인다. 마지막 줄만이 아니라 어느 줄이든 넘칠 수 있다. */
