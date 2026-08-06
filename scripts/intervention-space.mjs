@@ -111,7 +111,7 @@ function play(policy, seed) {
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 
 console.log(`런 ${RUNS}회 · 구매·배치 정책 고정 · 개입만 변경 · 시드 1~${RUNS}\n`);
-console.log("정책          보스통과율   W5      W10     전체중앙값   평균");
+console.log("정책          보스통과율   W3      W6      전체중앙값   평균");
 
 const base = {};
 for (const [name, policy] of Object.entries(POLICIES)) {
@@ -139,7 +139,7 @@ for (const [name, policy] of Object.entries(POLICIES)) {
     base.avg = avg;
   }
   console.log(
-    `${name.padEnd(12)} ${pass.toFixed(1).padStart(8)}% ${rate(5).padStart(8)} ${rate(10).padStart(8)} ` +
+    `${name.padEnd(12)} ${pass.toFixed(1).padStart(8)}% ${rate(3).padStart(8)} ${rate(6).padStart(8)} ` +
       `${String(pct(finals, 0.5)).padStart(10)} ${avg.toFixed(1).padStart(7)}`,
   );
 }

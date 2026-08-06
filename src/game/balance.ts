@@ -69,10 +69,11 @@ export const BALANCE = {
    * 32로 고정했더니 p25가 5로 무너졌다 — 정확히 첫 보스에서 4분의 1이 죽었고,
    * 그건 "보스는 벽이 아니라 사건"이라는 이 저장소의 오래된 결정에 어긋난다.
    */
-  bossHpMulFirst: 50,
+  bossHpMulFirst: 26,
   bossHpMul: 60,
   /** 배수가 First에서 Mul까지 올라가는 데 걸리는 웨이브 수 */
-  bossHpRampWaves: 14,
+  /** 몇 번째 보스에서 최대 강도에 닿는가 */
+  bossRampCount: 5,
   /**
    * 보스 평타는 **약하다**. 위험은 예고 광역에서 온다.
    *
@@ -115,7 +116,7 @@ export const BALANCE = {
   strikeComboStep: 0.12,
   strikeComboMax: 12,
   telegraphDmgFirst: 0.135,
-  telegraphDmg: 0.45,
+  telegraphDmg: 0.70,
 };
 
 export type Balance = typeof BALANCE;

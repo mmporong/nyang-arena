@@ -29,6 +29,18 @@ import type { Breed, TelegraphShape } from "./types.ts";
  * 축이 더 늘면 플레이어가 무엇이 다른지 못 읽는다.
  */
 export interface BossKit {
+  /**
+   * 이 보스의 강도 배수. 체력과 광역 피해에 함께 곱한다.
+   *
+   * 기믹이 다르면 같은 수치라도 체감이 다르다. 실측에서 무쇠발톱은 통과율
+   * 100%, 살금이는 45%가 나왔다 — 순간이동이 근접의 시간을 갉아먹기 때문이다.
+   * 기믹을 손대는 대신 여기서 저울을 맞춘다. 다만 **평탄하게 맞추려 하지는
+   * 않는다** — 살금이는 램프에 가파르게 반응하고(6웨이브 95% → 15웨이브 45%)
+   * 무쇠발톱은 완만하다(3웨이브 85% → 12웨이브 100%). 순간이동이 근접의
+   * 시간을 갉아먹는 정도가 팀 크기에 따라 달라지기 때문이고, 그건 기믹의
+   * 성격이지 결함이 아니다. 집계 통과율만 목표에 두고 편차는 남긴다.
+   */
+  readonly power: number;
   /** 문턱마다 순환할 예고 패턴 */
   readonly patterns: readonly TelegraphShape[];
   /** 문턱 몇 개마다 순간이동하는가. 0이면 안 한다 */
@@ -41,15 +53,15 @@ export interface BossKit {
 
 export const BOSS_KITS: Record<number, BossKit> = {
   // 무쇠발톱 — 교과서. 세 패턴을 다 보여주고 절반에서 한 번 크게 연다.
-  9: { patterns: ["circle", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
+  9: { power: 1.0, patterns: ["circle", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
   // 살금이 — 계속 자리를 옮긴다. 근접이 붙기 어렵고 예고 기준점이 매번 바뀐다.
   //   대신 창이 일찍 열리고 짧다. 준비된 팀이 짧은 창을 잡는 보스.
   // teleportEvery를 1로 뒀더니 근접이 영영 못 붙어 W10 통과율이 1.1%였다.
   // 순간이동은 "붙었다 놓쳤다"의 리듬이어야지 추격전이 되면 안 된다.
-  10: { patterns: ["cone", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
+  10: { power: 0.85, patterns: ["cone", "line", "cone"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
   // 서리귀 — 제자리에서 원형만 던진다. 흩어지기가 유일한 답이고,
   //   대신 창이 늦게 열리지만 길다. 오래 버티고 한 번에 몰아치는 보스.
-  11: { patterns: ["circle", "circle", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
+  11: { power: 1.0, patterns: ["circle", "circle", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
 };
 
 export function bossKit(breedId: number): BossKit {
@@ -156,7 +168,11 @@ export const BOSS_RADIUS = 1.5;
  * 41%로 떨어졌다. 첫 보스는 기믹을 **가르치는** 자리다 — 세 패턴을 다 보여주고
  * 창을 한 번 크게 여는 교과서가 먼저 와야 한다.
  */
-export function bossForWave(wave: number): Breed {
-  const i = (Math.max(1, Math.floor(wave / 5)) - 1) % BOSS_BREEDS.length;
-  return BOSS_BREEDS[i] ?? BOSS_BREEDS[0]!;
+/**
+ * @param index 이번이 몇 번째 보스인가 (0부터). 웨이브 번호로 계산하면 주기를
+ *   바꿀 때마다 어긋난다 — 실제로 floor(wave/5)를 쓰다가 첫 보스에 두 번째
+ *   보스가 나온 적이 있다.
+ */
+export function bossForIndex(index: number): Breed {
+  return BOSS_BREEDS[index % BOSS_BREEDS.length] ?? BOSS_BREEDS[0]!;
 }

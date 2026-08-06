@@ -2,7 +2,7 @@ import { BALANCE } from "./balance.ts";
 import { RELICS, type Relic } from "./relics.ts";
 import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
-import { BOSS_RADIUS, bossForWave } from "./bosses.ts";
+import { BOSS_RADIUS, bossForIndex, bossKit } from "./bosses.ts";
 import {
   type Intervention,
   BOARD_COLS,
@@ -176,7 +176,18 @@ export function veterancyScale(wave: number): number {
  */
 export type WaveKind = "mixed" | "rush" | "snipe" | "boss";
 
-const WAVE_CYCLE: readonly WaveKind[] = ["mixed", "rush", "mixed", "snipe", "boss"];
+/**
+ * 웨이브 성격 순환.
+ *
+ * 보스가 **세 웨이브마다** 온다. 예전에는 다섯이었는데, 측정해 보니 보스가
+ * 웨이브 수의 17%인데 전투 시간의 50%를 차지하고 런의 41%가 거기서 끝났다.
+ * 즉 이 게임의 심장은 이미 보스전이고 나머지는 통과 의례였다 — 일반 웨이브는
+ * 96~99%가 그냥 지나간다.
+ *
+ * 여섯 길이로 둔 이유: 세 길이로 줄이면 돌격이나 저격 하나를 버려야 한다.
+ * 여섯이면 둘 다 유지하면서 보스 밀도는 두 배가 된다.
+ */
+const WAVE_CYCLE: readonly WaveKind[] = ["mixed", "rush", "boss", "mixed", "snipe", "boss"];
 
 export function waveKind(wave: number): WaveKind {
   return WAVE_CYCLE[(wave - 1) % WAVE_CYCLE.length] ?? "mixed";
@@ -437,27 +448,38 @@ function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
  * 호위를 붙이는 이유는 보스만 있으면 우리 원거리가 사거리 밖에서 할 일이 없기
  * 때문이다. 앞줄에 세워 근접이 먼저 부딪히게 한다.
  */
+/** 이번 웨이브가 몇 번째 보스인가 (0부터). 보스가 아니면 지금까지의 개수. */
+export function bossIndexForWave(wave: number): number {
+  let n = 0;
+  for (let w = 1; w < wave; w++) if (waveKind(w) === "boss") n += 1;
+  return n;
+}
+
 /**
  * 보스 강도가 첫 보스에서 후반까지 올라가는 정도(0~1).
+ *
+ * **웨이브 번호가 아니라 보스 순번으로 잰다.** 웨이브로 재면 주기를 바꿀 때마다
+ * 어긋난다 — 보스를 5웨이브마다에서 3웨이브마다로 옮겼더니 첫 보스가 3웨이브에
+ * 서면서 후반용 배수를 그대로 맞아 통과율이 40%로 떨어졌다.
  *
  * 체력과 광역 피해에 **같은** 램프를 쓴다. 하나만 램프를 걸면 첫 보스가
  * "두껍지만 안 아프다" 또는 "얇지만 즉사"가 되어 둘 다 학습에 나쁘다.
  */
 export function bossRamp(wave: number): number {
-  return Math.min(1, Math.max(0, (wave - 5) / BALANCE.bossHpRampWaves));
+  return Math.min(1, bossIndexForWave(wave) / BALANCE.bossRampCount);
 }
 
 function buildBossWave(state: RunState, wave: number, scale: number): void {
   state.enemy = emptyBoard();
 
-  const breed = bossForWave(wave);
+  const breed = bossForIndex(bossIndexForWave(wave));
   // 보드 한가운데(행 2, 열 2). 반경 1.5라 행 1~3 × 열 1~3을 덮는다.
   const bossCell = 2 * BOARD_COLS + 2;
   const boss = makeCat(breed, "enemy", bossCell);
   boss.radius = BOSS_RADIUS;
   // 첫 보스는 얇게, 후반으로 갈수록 두껍게. 고정 배수는 5웨이브를 벽으로 만든다.
   const ramp = bossRamp(wave);
-  const hpMul = BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp;
+  const hpMul = (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp) * bossKit(breed.id).power;
   boss.maxHp = Math.round(boss.maxHp * scale * hpMul);
   boss.hp = boss.maxHp;
   boss.atk = Math.round(boss.atk * scale * BALANCE.bossAtkMul);

@@ -742,7 +742,9 @@ function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
   const t = boss.telegraph;
   if (!t) return;
   const ramp = bossRamp(wave);
-  const frac = BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp;
+  const frac =
+    (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
+    bossKit(boss.breed.id).power;
   for (const f of foes) {
     if (!inTelegraph(t, f.fx, f.fy)) continue;
     // 최대 체력 대비 비율이라 웨이브·팀 구성과 무관하게 "뭉치면 아프다"가 성립한다.

@@ -12,7 +12,7 @@
  * 실행: npm run dodge:test
  */
 import { inTelegraph, stepBattle } from "../src/game/battle.ts";
-import { buildEnemyWave, makeCat, newRun, startBattle } from "../src/game/run.ts";
+import { buildEnemyWave, makeCat, newRun, startBattle, waveKind } from "../src/game/run.ts";
 import { breedById } from "../src/game/breeds.ts";
 import { emptyBoard } from "../src/game/types.ts";
 
@@ -26,7 +26,17 @@ function check(name, ok, detail = "") {
 /** 보스 웨이브를 만들고 예고가 뜰 때까지 돌린다. */
 function bossFightWithTelegraph(arrange) {
   const s = newRun(1);
-  s.wave = 5; // 보스 웨이브
+  // 보스 웨이브를 **찾는다**. 번호를 박아 두면 주기를 바꿀 때 조용히 깨진다 —
+  // 실제로 보스를 5웨이브마다에서 3웨이브마다로 옮겼을 때 이 테스트가 저격
+  // 웨이브를 보스로 알고 400틱 동안 예고를 기다렸다.
+  let bossWave = 3;
+  for (let w = 1; w <= 30; w++) {
+    if (waveKind(w) === "boss") {
+      bossWave = w;
+      break;
+    }
+  }
+  s.wave = bossWave;
   s.phase = "prepare";
   s.ally = emptyBoard();
   arrange(s);
@@ -34,11 +44,15 @@ function bossFightWithTelegraph(arrange) {
   buildEnemyWave(s);
   startBattle(s);
 
-  for (let i = 0; i < 400; i++) {
+  // 예고가 뜬 것만으로는 부족하다. **위험 구간 안에 아군이 실제로 들어간**
+  // 순간을 잡아야 회피가 할 일이 있다.
+  for (let i = 0; i < 600; i++) {
     stepBattle(s, 100);
     if (s.phase !== "battle") return null;
     const boss = s.enemy.find((c) => c?.telegraph);
-    if (boss?.telegraph) return { s, boss };
+    if (!boss?.telegraph) continue;
+    const inside = s.ally.filter((c) => c?.alive && inTelegraph(boss.telegraph, c.fx, c.fy));
+    if (inside.length > 0) return { s, boss };
   }
   return null;
 }
@@ -61,22 +75,25 @@ console.log("회피 동작 검사\n");
     const { s, boss } = r;
     const tg = boss.telegraph;
     const inside = s.ally.filter((c) => c?.alive && inTelegraph(tg, c.fx, c.fy));
-    const outsideBefore = s.ally.filter((c) => c?.alive && !inTelegraph(tg, c.fx, c.fy));
-    const outsidePos = outsideBefore.map((c) => ({ c, fx: c.fx, fy: c.fy }));
+    const outside = s.ally.filter((c) => c?.alive && !inTelegraph(tg, c.fx, c.fy));
+    const charges = s.dodgeCharges;
 
-    check("예고가 뜬다", true, `${tg.shape}, 안에 ${inside.length}마리`);
+    check("위험 구간 안에 아군이 있는 순간을 잡는다", inside.length > 0, `${tg.shape}, 안에 ${inside.length}마리`);
 
     s.pending.push({ kind: "dodge" });
     stepBattle(s, 100);
 
     const stillInside = inside.filter((c) => c.alive && inTelegraph(tg, c.fx, c.fy));
-    check("구간 안의 고양이가 빠져나온다", inside.length === 0 || stillInside.length < inside.length,
+    check("구간 안의 고양이가 빠져나온다", stillInside.length < inside.length,
       `${inside.length} → ${stillInside.length}`);
 
-    const moved = outsidePos.filter((p) => p.c.fx !== p.fx || p.c.fy !== p.fy);
-    check("구간 밖 고양이는 회피로 움직이지 않는다", moved.length === 0, `${moved.length}마리 움직임`);
+    // 위치로 비교하면 안 된다. 같은 스텝에 평범한 걸음도 일어나므로 회피가
+    // 옮긴 것과 걸어간 것을 구분할 수 없다. moveLock은 회피만 남기는 흔적이다.
+    const wronglyDodged = outside.filter((c) => c.moveLock > 0);
+    check("구간 밖 고양이는 회피 대상이 아니다", wronglyDodged.length === 0,
+      `${wronglyDodged.length}마리가 회피 처리됨`);
 
-    check("회피 횟수가 하나 줄었다", s.dodgeCharges === 5, `남은 ${s.dodgeCharges}`);
+    check("회피 횟수가 하나 줄었다", s.dodgeCharges === charges - 1, `${charges} → ${s.dodgeCharges}`);
   }
 }
 
