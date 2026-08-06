@@ -17,7 +17,7 @@ export const BALANCE = {
    * 전투 보상(goldBase + wave*goldPerWave)보다 조금 적어야 한다. 더 주면
    * 싸우지 않는 쪽이 언제나 이득이라 지도가 "상점만 밟는 길 찾기"가 된다.
    */
-  shopNodeGold: 12,
+  shopNodeGold: 9,
   /** 정예를 넘었을 때의 생선 배수. 저격대는 통과율이 낮으므로 값을 해야 한다. */
   eliteGoldMul: 1.6,
 
@@ -83,7 +83,7 @@ export const BALANCE = {
   bossHpMul: 142,
   /** 배수가 First에서 Mul까지 올라가는 데 걸리는 웨이브 수 */
   /** 몇 번째 보스에서 최대 강도에 닿는가 */
-  bossRampCount: 5,
+  bossRampCount: 8,
   /**
    * 보스 평타는 **약하다**. 위험은 예고 광역에서 온다.
    *

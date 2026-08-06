@@ -164,6 +164,24 @@ function assignKinds(steps: number[][], stage: number): NodeKind[][] {
     }
     // 전투가 하나도 없으면 한 칸을 전투로 되돌린다.
     if (!kinds.includes("battle")) kinds[0] = "battle";
+    /**
+     * 그리고 **전투만 있는 걸음도 없어야 한다.**
+     *
+     * 측정이 이걸 잡았다. 성격을 확률로만 뿌렸더니 갈림길 대부분이 전투 대
+     * 전투였고, 그래서 "정예 몰빵" 정책이 판당 정예를 2.0번밖에 못 만났다
+     * (아무 길이나 가는 기준선이 1.4번). **고를 것이 없으니 정책이 달라도
+     * 겪는 것이 같았고**, 도달 웨이브 격차가 1.0에 머물렀다.
+     *
+     * 갈림길은 성격이 갈려야 갈림길이다. 전투 대 전투는 선택이 아니라 두 번
+     * 그린 같은 칸이다.
+     */
+    const nonBattle = kinds.filter((k) => k !== "battle").length;
+    if (!first && lanes.length >= 2 && nonBattle === 0) {
+      const idx = Math.floor(rng() * lanes.length);
+      kinds[idx] = rng() < 0.55 ? ("elite" as NodeKind) : ("shop" as NodeKind);
+      // 되돌린 칸이 유일한 전투였을 수 있다. 그러면 다른 칸을 전투로 준다.
+      if (!kinds.includes("battle")) kinds[(idx + 1) % kinds.length] = "battle";
+    }
     out.push(kinds);
   }
   return out;
@@ -277,6 +295,10 @@ export function checkStage(map: StageMap): string[] {
     if (!row.some((n) => n.kind === "battle")) problems.push(`${i}걸음에 전투가 없다`);
     if (row.filter((n) => n.kind === "shop").length > 1) problems.push(`${i}걸음에 상점이 둘`);
     if (i === 0 && row.some((n) => n.kind !== "battle")) problems.push("첫 걸음이 전투가 아니다");
+    // 갈림길은 성격이 갈려야 한다. 전투 대 전투는 두 번 그린 같은 칸이다.
+    if (i > 0 && row.length >= 2 && row.every((n) => n.kind === "battle")) {
+      problems.push(`${i}걸음이 전부 전투다 — 고를 것이 없다`);
+    }
     for (const n of row) {
       if (n.next.length === 0) problems.push(`${i}걸음 ${n.lane}줄에서 갈 곳이 없다`);
       for (const t of n.next) {

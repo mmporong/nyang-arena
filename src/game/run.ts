@@ -992,8 +992,28 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
 
   const kind = state.nodeKind;
   state.gold += goldForWave(state.wave, currentKind(state));
-  // 정예를 넘으면 다음 카드 묶음에 유물이 반드시 낀다.
-  if (kind === "elite") state.forceRelic = true;
+  /**
+   * 정예를 넘으면 **유물을 그 자리에서 준다.**
+   *
+   * 처음엔 다음 카드 묶음에 유물을 한 장 끼우게 했는데, 측정에서 정예 몰빵이
+   * 전투만과 같은 자리(11.1 vs 11.2)에 도착했다. 이유는 카드가 유물이어도
+   * **살 수 있는 유물이 아니었기** 때문이다 — 생선이 모자라거나 조건을 못 채워
+   * 그냥 지나가는 카드가 됐다. 위험은 실제인데 보상은 확률이었다.
+   *
+   * 조건을 이미 채운 것부터 준다. 남는 게 없으면 아무거나 — 유물은 대가가
+   * 늘 붙으므로 공짜라고 순수 이득이 아니다.
+   */
+  if (kind === "elite") {
+    const owned = new Set(state.relics.map((r) => r.id));
+    const pool = RELICS.filter((r) => !owned.has(r.id));
+    const cats = livingCats(state.ally);
+    const fit = pool.filter((r) => relicActive(r, cats));
+    const pick = shuffle(fit.length > 0 ? fit : pool)[0];
+    if (pick) {
+      state.relics.push(pick);
+      state.notice = `정예 격파 — ${pick.name}`;
+    }
+  }
   state.wave += 1;
   state.step += 1;
   // 걸음이 한 바퀴 돌았으면 새 지도를 만든다.
