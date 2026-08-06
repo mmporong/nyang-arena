@@ -71,8 +71,14 @@ const SEPARATION = 1.0;
  */
 const CROWD_PENALTY = 0.7;
 
-/** 예고 광역의 연출 색. 전투 모듈이 테마를 임포트하지 않도록 리터럴로 둔다. */
-const T_ENEMY = "#C24B3A";
+/**
+ * 예고가 터질 때의 연출 색. 전투 모듈이 테마를 임포트하지 않도록 리터럴로 둔다.
+ *
+ * 예고 색과 반드시 같아야 한다 — 붉은 장판이 뜨고 초록이 터지면 방금 무엇을
+ * 맞았는지가 안 이어진다. theme.ts의 danger/gather와 같은 값이다.
+ */
+const FX_DANGER = "#FF3F6E";
+const FX_GATHER = "#2BE3B4";
 
 /** 전사가 피격 한 번에 얻는 마나 */
 const MANA_ON_HIT_WARRIOR = 11;
@@ -344,13 +350,13 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
           fy: target.fy + (Math.random() - 0.5) * 0.5,
           radius: 0.12 + Math.random() * 0.1,
           life: 620 + Math.random() * 320,
-          color: "#FF8A3D",
+          color: "#D08A4A",
         });
       }
       break;
     }
     case "frost_nova": {
-      pushFx({ ...base, kind: "ring", fx: target.fx, fy: target.fy, radius: 1.5, life: 460, color: "#9BDCFF" });
+      pushFx({ ...base, kind: "ring", fx: target.fx, fy: target.fy, radius: 1.5, life: 460, color: "#8FB6D0" });
       for (const h of res.hits) {
         pushFx({
           kind: "frost",
@@ -361,7 +367,7 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
           radius: 0.42,
           angle: Math.random() * Math.PI,
           life: 900,
-          color: "#BFEBFF",
+          color: "#A9CBDE",
         });
       }
       break;
@@ -523,7 +529,7 @@ function doGather(state: RunState): boolean {
     c.fy += (dy / d) * pull;
     c.moveLock = DODGE_LOCK_MS;
     moved = true;
-    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color: "#6FB6DC" });
+    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color: "#6E97C4" });
   }
   return moved;
 }
@@ -833,7 +839,7 @@ function fireTelegraph(boss: Cat, foes: Cat[], wave: number): void {
     radius: t.shape === "circle" ? t.arg : 1.4,
     angle: 0,
     life: 420,
-    color: t.mode === "gather" ? "#6FB6DC" : T_ENEMY,
+    color: t.mode === "gather" ? FX_GATHER : FX_DANGER,
   });
 }
 
@@ -861,7 +867,7 @@ function teleportBoss(boss: Cat, idx: number): void {
       radius: boss.radius,
       angle: 0,
       life: 420,
-      color: T_ENEMY,
+      color: FX_DANGER,
     });
   }
   boss.fx = to.fx;

@@ -6,7 +6,7 @@ import {
   SHOT_LIFE_MS,
   skillName,
 } from "./battle.ts";
-import { bossKit } from "./bosses.ts";
+import { bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -1733,12 +1733,141 @@ function drawButton(
  * 안내 띠. 준비 단계에서는 이번 상대의 성격을 알려준다.
  * 무엇이 오는지 모르면 배치를 바꿀 이유가 없다.
  */
+/**
+ * 방금 깎인 체력이 따라오는 양(chip damage).
+ *
+ * 막대가 즉시 줄면 "얼마나 들어갔는지"가 안 보인다. 흰 꼬리가 0.4초쯤 늦게
+ * 따라오면 한 방의 크기가 눈에 남는다. uid로 기억하되 보스는 한 번에 하나라
+ * 이 맵은 항목 두엇을 넘지 않는다.
+ */
+const chipTrail = new Map<string, number>();
+
+/**
+ * 보스 전용 체력 배너.
+ *
+ * 일반 고양이와 같은 언어(더 넓은 막대)로는 "레이드가 시작됐다"가 전달되지
+ * 않는다. 자리·두께·눈금 셋을 다르게 해서 다른 물건으로 만든다.
+ *
+ * 자리는 안내 문구 띠를 그대로 쓴다. 보스전 중에는 그 띠가 어차피 비어 있고
+ * (안내는 배치 단계에만 뜬다), 새 자리를 떼면 판이 줄어 셀이 작아진다.
+ *
+ * 눈금은 `BOSS_THRESHOLDS` 그 자체다. 광역기가 나가는 지점이 화면에 없으면
+ * 플레이어는 "왜 갑자기 터졌는지"를 배울 수 없다. 지나간 문턱은 흔적만 남기고,
+ * 다음 문턱만 레몬으로 도드라진다 — 알아야 할 것은 언제나 다음 하나뿐이다.
+ */
+function drawBossBanner(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  boss: Cat,
+): void {
+  const r = L.notice;
+  const sniper = boss.breed.id === SNIPER_BREED.id;
+  // 저격수는 미니 보스다. 위계를 크기로 표현한다 — 같은 배너, 낮은 높이, 눈금 없음.
+  const h = r.h * (sniper ? 0.72 : 1);
+  const y = r.y + (r.h - h) / 2;
+  const pad = h * 0.16;
+
+  bevelPanel(ctx, { x: r.x, y, w: r.w, h }, h * 0.22, "rgba(14,10,8,0.82)", "rgba(0,0,0,0.5)", 2);
+
+  // 왼쪽 — 이름과 격
+  const nameSize = Math.max(10, h * 0.34);
+  uiText(ctx, boss.breed.name, r.x + pad * 1.4, y + h * 0.36, nameSize, T.text, {
+    align: "left",
+    weight: 800,
+  });
+  uiText(
+    ctx,
+    sniper ? "미니 보스" : "레이드 보스",
+    r.x + pad * 1.4,
+    y + h * 0.72,
+    nameSize * 0.72,
+    T.enemy,
+    { align: "left", weight: 700 },
+  );
+
+  // 오른쪽 — 남은 페이즈. 숫자 하나로 "얼마나 남았나"가 잡힌다.
+  const left = sniper ? 0 : Math.max(0, BOSS_THRESHOLDS.length - boss.thresholdIdx);
+  const rightW = sniper ? pad : h * 1.5;
+  if (!sniper) {
+    pixelText(
+      ctx,
+      `${left}/${BOSS_THRESHOLDS.length}`,
+      r.x + r.w - pad * 1.4,
+      y + h * 0.5,
+      Math.max(1, h * 0.055),
+      left <= 1 ? T.vuln : T.paperDim,
+      "right",
+    );
+  }
+
+  // 가운데 — 막대. 일반 고양이 체력바가 5px 남짓이므로 여기서 확실히 두껍게.
+  const barX = r.x + Math.max(r.w * 0.24, h * 4.4);
+  const barW = r.x + r.w - rightW - pad - barX;
+  const barH = h * 0.42;
+  const barY = y + (h - barH) / 2;
+  if (barW <= 4) return;
+
+  const frac = Math.max(0, Math.min(1, boss.hp / boss.maxHp));
+  const prev = chipTrail.get(boss.uid) ?? frac;
+  // 위로는 즉시 따라붙고(부활·회복) 아래로만 천천히 따라온다.
+  const chip = frac > prev ? frac : prev + (frac - prev) * 0.08;
+  chipTrail.set(boss.uid, chip);
+
+  roundRect(ctx, { x: barX, y: barY, w: barW, h: barH }, barH * 0.3);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fill();
+
+  // 방금 깎인 양이 흰 꼬리로 남는다.
+  if (chip > frac + 0.002) {
+    roundRect(ctx, { x: barX, y: barY, w: barW * chip, h: barH }, barH * 0.3);
+    ctx.fillStyle = "rgba(255,255,255,0.16)";
+    ctx.fill();
+  }
+  roundRect(ctx, { x: barX, y: barY, w: Math.max(barH * 0.6, barW * frac), h: barH }, barH * 0.3);
+  ctx.fillStyle = T.bossHp;
+  ctx.fill();
+
+  if (!sniper) {
+    for (const t of BOSS_THRESHOLDS) {
+      const tx = Math.round(barX + barW * t);
+      const passed = frac <= t;
+      // 다음에 올 문턱 하나만 레몬으로 세운다. 여섯을 다 세우면 아무것도 안 보인다.
+      const next = !passed && BOSS_THRESHOLDS.filter((v) => v < frac)[0] === t;
+      ctx.fillStyle = next
+        ? T.vuln
+        : passed
+          ? "rgba(239,224,198,0.42)"
+          : "rgba(239,224,198,0.18)";
+      const tw = next ? 2 : 1;
+      const th = next ? barH : barH * 0.7;
+      ctx.fillRect(tx - tw / 2, barY + (barH - th) / 2, tw, th);
+    }
+  }
+
+  // 퍼센트는 막대 안 오른쪽 끝에. 숫자를 밖에 두면 자리를 또 뗀다.
+  pixelText(
+    ctx,
+    `${Math.round(frac * 100)}%`,
+    barX + barW - barH * 0.4,
+    barY + barH / 2,
+    Math.max(1, barH * 0.11),
+    T.paper,
+    "right",
+  );
+}
+
 function drawNotice(
   ctx: CanvasRenderingContext2D,
   L: Layout,
   s: RunState,
 ): void {
   if (s.phase === "gameover") return;
+  // 보스가 살아 있으면 이 띠는 배너에 넘긴다. 안내는 배치 단계 것이라 겹치지 않는다.
+  const boss = s.enemy.find((c) => c?.alive && c.radius > 0);
+  if (s.phase === "battle" && boss) {
+    drawBossBanner(ctx, L, boss);
+    return;
+  }
   const r = L.notice;
   const size = Math.max(11, r.h * 0.56);
   const cy = r.y + r.h / 2;

@@ -84,7 +84,10 @@ export function computeLayout(w: number, h: number): Layout {
     h: barH,
   };
 
-  const noticeH = Math.round(Math.max(tight ? 13 : 20, Math.min(w, h) * 0.045));
+  // 보스전에는 이 띠가 보스 전용 체력 배너가 된다. 배너 안에 이름·막대·남은
+  // 페이즈가 한 줄로 들어가야 해서 안내 문구만 있을 때보다 조금 두껍다.
+  // 좁은 화면(tight)에서는 그대로 두는데, 거기서는 배너도 같이 줄어든다.
+  const noticeH = Math.round(Math.max(tight ? 13 : 24, Math.min(w, h) * (tight ? 0.045 : 0.055)));
   const notice: Rect = { x: pad, y: hud.y + hud.h, w: w - pad * 2, h: noticeH };
 
   // 보드 위 진영 라벨("우리 편"/"상대")이 안내 문구와 겹치지 않도록 자리를 뗀다.
