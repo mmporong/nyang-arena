@@ -51,12 +51,18 @@ import {
 const CAT_SCALE = 0.66;
 
 /** 시너지 트리거마다 고유색. TFT가 특성별로 색을 나누는 것과 같은 이유 — 한눈에 구분되게. */
-/** 직업 색. 뱃지와 카드에서 같은 색을 쓴다. */
+/**
+ * 직업 색. 뱃지와 카드에서 같은 색을 쓴다.
+ *
+ * 전부 저채도다. 직업은 **정체성**이지 신호가 아니므로 판 위에서 예고와
+ * 경쟁하면 안 된다. 특히 궁수는 원래 액션 버튼과 같은 주황이었는데, 주황을
+ * 버튼에 양보하고 청동으로 물러났다.
+ */
 const CLASS_COLOR: Record<ClassKind, string> = {
-  warrior: "#E8654A",
-  rogue: "#C97BD4",
-  archer: "#E8913C",
-  mage: "#6FB6DC",
+  warrior: "#C4715A",
+  rogue: "#A97CC4",
+  archer: "#C9A05C",
+  mage: "#6E97C4",
 };
 
 /** 뱃지에 넣을 한 글자. 5x5에서는 셀이 작아 한 글자가 한계다. */
@@ -68,10 +74,10 @@ const CLASS_CHAR: Record<ClassKind, string> = {
 };
 
 const TRIGGER_COLOR: Record<string, string> = {
-  same_color_3: "#E8913C",
-  same_breed_2: "#C97BD4",
-  front_melee_2: "#E8654A",
-  back_ranged_2: "#6FB6DC",
+  same_color_3: "#C9A05C",
+  same_breed_2: "#A97CC4",
+  front_melee_2: "#C4715A",
+  back_ranged_2: "#6E97C4",
 };
 
 export interface DragState {
@@ -131,6 +137,56 @@ function arenaBox(L: Layout): Rect {
  * 판정은 battle.ts가 정준 좌표에서 하고 여기서는 그리기만 한다. 두 곳에서
  * 따로 계산하면 보이는 곳과 맞는 곳이 갈라진다.
  */
+/**
+ * 사선 해칭 — "여기서 나가라".
+ *
+ * 색만으로 신호를 나누면 적록색약에게는 두 예고가 같은 회색 판이 된다. 형태를
+ * 하나씩 붙이면 색을 못 봐도 무늬로 갈린다. 호출부에서 예고 모양으로 클립한 뒤
+ * 부르므로 여기서는 넉넉한 사각형만 채우면 된다.
+ */
+function hatch(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  hue: string,
+  fill: number,
+): void {
+  const gap = Math.max(6, Math.min(w, h) * 0.11);
+  ctx.save();
+  ctx.strokeStyle = `rgba(${hue},${0.16 + fill * 0.3})`;
+  ctx.lineWidth = Math.max(1, gap * 0.18);
+  ctx.beginPath();
+  // 좌상 → 우하 사선. 시작을 -h만큼 당겨야 위쪽 모서리까지 덮인다.
+  for (let i = -h; i < w + h; i += gap) {
+    ctx.moveTo(x + i, y);
+    ctx.lineTo(x + i + h, y + h);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 동심원 — "여기로 모여라". 안으로 빨려드는 방향이 무늬에 들어 있다. */
+function concentric(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  hue: string,
+  fill: number,
+): void {
+  ctx.save();
+  ctx.strokeStyle = `rgba(${hue},${0.22 + fill * 0.34})`;
+  ctx.lineWidth = Math.max(1, r * 0.045);
+  for (let k = 1; k <= 3; k++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, (r * k) / 4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   // 예고는 반경이 커서 그냥 그리면 HUD와 하단 UI까지 침범한다. 전장 안으로 자른다.
   const x0 = Math.min(L.allyBoard.x, L.enemyBoard.x);
@@ -145,8 +201,10 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
 
     // 0 → 1로 차오른다. 다 차면 터진다.
     const fill = 1 - Math.max(0, tg.fuse) / tg.fuseMax;
-    // 붉으면 나가라, 푸르면 들어와라. 색이 유일한 신호이므로 확실히 갈라야 한다.
-    const hue = tg.mode === "gather" ? "111,182,220" : "194,75,58";
+    const gather = tg.mode === "gather";
+    // 나가라는 분홍, 들어와라는 청록. 둘 다 판 위에서 채도를 독점하는 대역이라
+    // 진영색·직업색과 밝기에서부터 갈린다.
+    const hue = gather ? "43,227,180" : "255,63,110";
     const origin = fieldToScreen(L, tg.fx, tg.fy);
     const pitch = L.cell + L.gap;
 
@@ -170,6 +228,16 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
       ctx.arc(origin.x, origin.y, r * fill, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(${hue},0.22)`;
       ctx.fill();
+      if (gather) {
+        concentric(ctx, origin.x, origin.y, r, hue, fill);
+      } else {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
+        ctx.clip();
+        hatch(ctx, origin.x - r, origin.y - r, r * 2, r * 2, hue, fill);
+        ctx.restore();
+      }
     } else {
       // 직선·부채꼴은 방향이 있으므로 화면에서도 같은 방향으로 돌린다.
       const tip = fieldToScreen(L, tg.fx + tg.dirX * tg.reach, tg.fy + tg.dirY * tg.reach);
@@ -192,6 +260,11 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
       ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
       ctx.lineWidth = 2 + fill * 2;
       ctx.stroke();
+      // 방향이 있는 예고는 전부 회피다. 해칭도 같은 규칙을 따른다.
+      ctx.save();
+      ctx.clip();
+      hatch(ctx, -len, -len, len * 2, len * 2, hue, fill);
+      ctx.restore();
     }
     ctx.restore();
   }
@@ -310,7 +383,7 @@ function drawBoard(
  *
  * 붉은 예고(나가라)·푸른 예고(들어와라)와 섞이면 안 되므로 색은 금빛이다.
  */
-const VULN_HUE = "255,214,106";
+const VULN_HUE = "255,226,74";
 
 /** 콤보가 쌓일수록 빨리 뛴다. 연타의 보람이 화면에 남는다. */
 function vulnerablePulse(cat: Cat, t: number): number {
@@ -476,7 +549,7 @@ function drawCat(
         { x: bx, y: my, w: Math.max(mh, bw * mfrac), h: mh },
         mh / 2,
       );
-      ctx.fillStyle = mfrac >= 1 ? T.gold : T.fish;
+      ctx.fillStyle = mfrac >= 1 ? T.gold : T.mana;
       ctx.fill();
     }
   }
