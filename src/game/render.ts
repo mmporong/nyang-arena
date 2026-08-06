@@ -5,6 +5,7 @@ import {
   shots,
   SHOT_LIFE_MS,
   skillName,
+  type Fx,
 } from "./battle.ts";
 import { bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
@@ -695,19 +696,219 @@ function drawCat(
  * 스킬 연출. 종류마다 그리는 방식이 다르다 — 무엇이 터졌는지 색과 모양으로 읽힌다.
  * 판정과 완전히 분리돼 있어서 이 함수를 지워도 전투 결과는 같다.
  */
+/* ------------------------------------------------------------------ */
+/* 연출 — 두 겹                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 연출을 두 겹으로 나눈다.
+ *
+ * - **벡터 겹**은 범위·방향·시간을 말한다. 플레이어가 판단에 쓰는 정보라서
+ *   스킬당 하나둘이면 충분하고, 셋을 넘으면 무엇이 범위인지 모르게 된다.
+ * - **파티클 겹**은 무게·재질·잔향을 말한다. 판단에는 안 쓰이지만 타격이
+ *   타격으로 느껴지게 하는 것이 이쪽이다.
+ *
+ * 벡터가 문제였던 게 아니라 **어디에 그렸느냐**가 문제였다. 최종 해상도에
+ * `arc`를 그리면 안티에일리어싱된 회색 테두리가 생겨서 고양이만 픽셀이고
+ * 이펙트는 다른 그림이 된다. 같은 `arc`를 파티클과 같은 저해상도 버퍼에 그리고
+ * 통째로 확대하면 계단진 원이 된다 — 코드는 거의 그대로고 그리는 대상만 바뀐다.
+ *
+ * 부수 효과로 더 싸다. 화면의 1/3 해상도라 픽셀 수가 9분의 1이다.
+ *
+ * 히트스톱과 화면 흔들림은 넣지 않았다. 히트스톱은 시뮬 타이밍을 건드려
+ * 헤드리스 파리티가 깨지고, 흔들림은 판 전체를 움직이므로 예고를 읽는 데
+ * 방해가 되는지 측정하기 전에는 넣을 수 없다.
+ */
+const FX_PIXEL = 3;
+
+let fxBuf: HTMLCanvasElement | null = null;
+let fxCtx: CanvasRenderingContext2D | null = null;
+
+interface Particle {
+  /** 화면 좌표(px). 버퍼 좌표로 두면 창 크기가 바뀔 때 전부 어긋난다. */
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  g: number;
+  life: number;
+  max: number;
+  size: number;
+  ramp: readonly string[];
+}
+
+const particles: Particle[] = [];
+/** 이미 파티클을 뿌린 연출. Fx는 렌더러가 소유하지 않으므로 신원으로 기억한다. */
+const seeded = new WeakSet<object>();
+let fxLast = 0;
+
+/**
+ * 색 램프.
+ *
+ * 알파 페이드 대신 색이 식는다 — 흰빛에서 제 색으로, 다시 어둡게. 연속 투명도는
+ * 픽셀 아트에 없는 것이라 그것만으로도 다른 그림처럼 보인다. 벡터 겹의 색에서
+ * 자동으로 뽑으므로 두 겹이 어긋날 수 없다.
+ */
+const rampCache = new Map<string, readonly string[]>();
+function rampFor(color: string): readonly string[] {
+  let r = rampCache.get(color);
+  if (!r) {
+    r = ["#FFFFFF", color, mixHex(color, "#000000", 0.58)];
+    rampCache.set(color, r);
+  }
+  return r;
+}
+
+function mixHex(a: string, b: string, k: number): string {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return (
+    "#" +
+    [0, 1, 2]
+      .map((i) => Math.round(pa[i]! + (pb[i]! - pa[i]!) * k).toString(16).padStart(2, "0"))
+      .join("")
+  );
+}
+
+/** 각 연출이 뿌리는 파티클. 개수와 방향이 곧 그 스킬의 무게다. */
+function seed(f: Fx, x: number, y: number, cell: number): void {
+  const ramp = rampFor(f.color);
+  const u = cell * 0.02; // 셀 크기에 비례한 속도 단위. 화면이 커도 같게 보인다.
+  const push = (n: number, make: (i: number) => Omit<Particle, "ramp">): void => {
+    for (let i = 0; i < n; i++) particles.push({ ...make(i), ramp });
+  };
+  const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
+
+  switch (f.kind) {
+    case "ring":
+      // 넓게 퍼지는 한 방. 바깥으로 고르게 밀린다.
+      push(22, (i) => {
+        const a = (Math.PI * 2 * i) / 22 + rnd(-0.2, 0.2);
+        const sp = rnd(0.7, 1.9) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, g: u * 0.05, life: 430, max: 430, size: i % 3 ? 1 : 2 };
+      });
+      break;
+    case "frost":
+      // 육각 방향으로만 뻗는다. 원이 아니라 결정이라는 것이 방향에서 읽힌다.
+      push(24, (i) => {
+        const a = (Math.PI * 2 * (i % 6)) / 6 + (i < 12 ? 0 : Math.PI / 6);
+        const sp = (0.5 + (i / 24) * 1.3) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.7, g: u * 0.03, life: 520, max: 520, size: i % 3 ? 1 : 2 };
+      });
+      break;
+    case "streak":
+    case "beam":
+      // 방향이 있는 것은 그 방향으로 흐른다.
+      push(16, () => {
+        const a = Math.atan2(f.ty - f.fy, f.tx - f.fx) + rnd(-0.25, 0.25);
+        const sp = rnd(1.0, 2.4) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, g: 0, life: 330, max: 330, size: 1 };
+      });
+      break;
+    case "slash":
+      push(14, (i) => {
+        const a = f.angle + (i / 14) * 1.4;
+        const sp = rnd(0.8, 1.6) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.55, g: u * 0.06, life: 380, max: 380, size: i % 2 ? 1 : 2 };
+      });
+      break;
+    case "ember":
+      // 위로만. 중력이 음수라 떠오른다.
+      push(3, () => ({ x: x + rnd(-cell * 0.2, cell * 0.2), y, vx: rnd(-0.1, 0.1) * u, vy: rnd(-0.7, -0.3) * u, g: -u * 0.01, life: 620, max: 620, size: 1 }));
+      break;
+    case "spark":
+      push(8, (i) => {
+        const a = (Math.PI * 2 * i) / 8 + rnd(-0.3, 0.3);
+        const sp = rnd(0.5, 1.3) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - u * 0.3, g: u * 0.09, life: 280, max: 280, size: 1 };
+      });
+      break;
+  }
+  // 한 프레임에 스킬이 여럿 터져도 상한을 넘지 않게 한다.
+  if (particles.length > 520) particles.splice(0, particles.length - 520);
+}
+
+function stepParticles(dt: number): void {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]!;
+    p.life -= dt;
+    if (p.life <= 0) {
+      particles.splice(i, 1);
+      continue;
+    }
+    p.vy += p.g * dt * 0.06;
+    p.x += p.vx * dt * 0.06;
+    p.y += p.vy * dt * 0.06;
+  }
+}
+
 function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
-  const pitch = L.cell + L.gap;
+  const now = performance.now();
+  const dt = Math.min(48, fxLast ? now - fxLast : 16);
+  fxLast = now;
+
+  const bw = Math.max(8, Math.round(L.w / FX_PIXEL));
+  const bh = Math.max(8, Math.round(L.h / FX_PIXEL));
+  if (!fxBuf || fxBuf.width !== bw || fxBuf.height !== bh) {
+    fxBuf = document.createElement("canvas");
+    fxBuf.width = bw;
+    fxBuf.height = bh;
+    fxCtx = fxBuf.getContext("2d");
+  }
+  const b = fxCtx;
+  if (!b) return;
+  b.setTransform(1, 0, 0, 1, 0, 0);
+  b.clearRect(0, 0, bw, bh);
+  b.imageSmoothingEnabled = false;
+
+  // 새로 뜬 연출에만 파티클을 뿌린다. Fx는 매 프레임 같은 객체로 남아 있다.
+  for (const f of fxs) {
+    if (seeded.has(f)) continue;
+    seeded.add(f);
+    const p = fieldToScreen(L, f.fx, f.fy);
+    seed(f, p.x, p.y, L.cell);
+  }
+  stepParticles(dt);
+
+  drawFxVectors(b, L);
+
+  // 파티클 — 하나가 fillRect 한 번이다. 알파 대신 색 램프로 식는다.
+  for (const p of particles) {
+    const k = 1 - p.life / p.max;
+    const col = p.ramp[Math.min(p.ramp.length - 1, Math.floor(k * p.ramp.length))]!;
+    b.fillStyle = col;
+    b.fillRect(Math.round(p.x / FX_PIXEL), Math.round(p.y / FX_PIXEL), p.size, p.size);
+  }
+
+  const prev = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(fxBuf, 0, 0, L.w, L.h);
+  ctx.imageSmoothingEnabled = prev;
+}
+
+/** 벡터 겹. 좌표와 굵기를 전부 버퍼 배율로 줄여서 저해상도에 그린다. */
+/** 투명도를 네 단계로 계단진다. 연속 페이드는 픽셀 아트에 없는 것이다. */
+function qa(a: number): number {
+  return Math.max(0, Math.ceil(Math.min(1, a) * 4) / 4);
+}
+
+function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
+  const S = 1 / FX_PIXEL;
+  const pitch = (L.cell + L.gap) * S;
 
   for (const f of fxs) {
     const t = 1 - f.life / f.maxLife; // 0 → 1
-    const p = fieldToScreen(L, f.fx, f.fy);
+    const raw = fieldToScreen(L, f.fx, f.fy);
+    const p = { x: raw.x * S, y: raw.y * S };
     ctx.save();
+    ctx.lineJoin = "miter";
+    ctx.lineCap = "butt";
 
     switch (f.kind) {
       case "ring": {
-        ctx.globalAlpha = Math.max(0, 0.85 * (1 - t) ** 1.4);
+        ctx.globalAlpha = qa(0.85 * (1 - t) ** 1.4);
         ctx.strokeStyle = f.color;
-        ctx.lineWidth = Math.max(2, L.cell * 0.09 * (1 - t * 0.6));
+        ctx.lineWidth = Math.max(1, L.cell * 0.09 * (1 - t * 0.6) * S);
         ctx.beginPath();
         ctx.arc(p.x, p.y, f.radius * pitch * (0.25 + t * 0.85), 0, Math.PI * 2);
         ctx.stroke();
@@ -715,10 +916,9 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
       }
       case "slash": {
         // 짧은 호가 바깥으로 퍼지며 사라진다
-        ctx.globalAlpha = Math.max(0, 0.95 * (1 - t));
+        ctx.globalAlpha = qa(0.95 * (1 - t));
         ctx.strokeStyle = f.color;
-        ctx.lineCap = "round";
-        ctx.lineWidth = Math.max(2.5, L.cell * 0.075);
+        ctx.lineWidth = Math.max(1, L.cell * 0.075 * S);
         const rr = f.radius * pitch * (0.35 + t * 0.55);
         const a0 = f.angle + t * 1.5;
         ctx.beginPath();
@@ -727,11 +927,11 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
         break;
       }
       case "beam": {
-        const q = fieldToScreen(L, f.tx, f.ty);
-        ctx.globalAlpha = Math.max(0, 0.9 * (1 - t) ** 0.7);
+        const raw2 = fieldToScreen(L, f.tx, f.ty);
+        const q = { x: raw2.x * S, y: raw2.y * S };
+        ctx.globalAlpha = qa(0.9 * (1 - t) ** 0.7);
         ctx.strokeStyle = f.color;
-        ctx.lineCap = "round";
-        ctx.lineWidth = Math.max(2, f.radius * pitch * (1 - t * 0.5));
+        ctx.lineWidth = Math.max(1, f.radius * pitch * (1 - t * 0.5));
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(q.x, q.y);
@@ -740,15 +940,15 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
       }
       case "streak": {
         // 시작점에서 목표까지 순식간에 지나간 자국
-        const q = fieldToScreen(L, f.tx, f.ty);
+        const raw2 = fieldToScreen(L, f.tx, f.ty);
+        const q = { x: raw2.x * S, y: raw2.y * S };
         const head = {
           x: p.x + (q.x - p.x) * Math.min(1, t * 1.8),
           y: p.y + (q.y - p.y) * Math.min(1, t * 1.8),
         };
-        ctx.globalAlpha = Math.max(0, 0.9 * (1 - t));
+        ctx.globalAlpha = qa(0.9 * (1 - t));
         ctx.strokeStyle = f.color;
-        ctx.lineCap = "round";
-        ctx.lineWidth = Math.max(3, L.cell * 0.1);
+        ctx.lineWidth = Math.max(1, L.cell * 0.1 * S);
         ctx.beginPath();
         ctx.moveTo(p.x, p.y);
         ctx.lineTo(head.x, head.y);
@@ -757,10 +957,9 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
       }
       case "spark": {
         // 네 갈래로 튀는 짧은 선
-        ctx.globalAlpha = Math.max(0, 1 - t);
+        ctx.globalAlpha = qa(1 - t);
         ctx.strokeStyle = f.color;
-        ctx.lineCap = "round";
-        ctx.lineWidth = Math.max(1.5, L.cell * 0.045);
+        ctx.lineWidth = Math.max(1, L.cell * 0.045 * S);
         const len = f.radius * pitch * (0.25 + t * 0.5);
         for (let i = 0; i < 4; i++) {
           const a = f.angle + (Math.PI / 2) * i;
@@ -776,14 +975,14 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
       }
       case "ember": {
         // 위로 떠오르며 작아진다
-        ctx.globalAlpha = Math.max(0, 0.9 * (1 - t) ** 1.5);
+        ctx.globalAlpha = qa(0.9 * (1 - t) ** 1.5);
         ctx.fillStyle = f.color;
         const rise = t * pitch * 0.9;
         ctx.beginPath();
         ctx.arc(
           p.x,
           p.y - rise,
-          Math.max(1.5, f.radius * pitch * (1 - t)),
+          Math.max(1, f.radius * pitch * (1 - t)),
           0,
           Math.PI * 2,
         );
@@ -792,10 +991,9 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
       }
       case "frost": {
         // 여섯 갈래 결정. 얼어붙은 대상 위에 오래 남는다
-        ctx.globalAlpha = Math.max(0, 0.8 * (1 - t) ** 0.6);
+        ctx.globalAlpha = qa(0.8 * (1 - t) ** 0.6);
         ctx.strokeStyle = f.color;
-        ctx.lineCap = "round";
-        ctx.lineWidth = Math.max(1.5, L.cell * 0.04);
+        ctx.lineWidth = Math.max(1, L.cell * 0.04 * S);
         const rr = f.radius * pitch * (0.6 + t * 0.25);
         for (let i = 0; i < 6; i++) {
           const a = f.angle + (Math.PI / 3) * i;

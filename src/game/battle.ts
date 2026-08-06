@@ -175,9 +175,16 @@ export function skillName(cat: Cat): string {
 
 function pop(target: Cat, text: string, crit: boolean): void {
   if (damagePops.length > 16) damagePops.shift();
-  // 아직 한 틱도 안 지난 팝이 곧 "같은 프레임에 뜬 것"이다. 난수가 아니라
-  // 이 개수로 계단을 만들므로 같은 시드는 같은 화면을 낸다.
-  const step = damagePops.filter((p) => p.life === POP_LIFE_MS).length;
+  // 같은 자리에 아직 떠 있는 숫자를 센다. 같은 프레임만 세면 보스처럼 여럿에게
+  // 연달아 맞는 대상에서 전부 step 0으로 겹쳤다(실제로 그랬다 — 보스 털 위에
+  // 38이 다섯 개 쌓였다). 난수가 아니라 이 개수로 계단을 만들므로 같은 시드는
+  // 여전히 같은 화면을 낸다.
+  //
+  // 넷에서 되돌린다. 계단이 끝없이 길어지면 판 밖으로 나간다.
+  const near = damagePops.filter(
+    (p) => Math.abs(p.fx - target.fx) < 0.7 && Math.abs(p.fy - target.fy) < 0.7,
+  ).length;
+  const step = near % 4;
   damagePops.push({
     fx: target.fx,
     fy: target.fy,
