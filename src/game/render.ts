@@ -589,22 +589,40 @@ function drawCat(
   const x = cx - size / 2;
   const y = cy - size / 2 - L.cell * 0.03;
 
-  // 발밑 그림자. 유닛이 바닥에 서 있는 느낌을 주고 겹칠 때 앞뒤를 읽게 해준다.
+  /**
+   * 발밑 표식. 그림자이면서 **진영 표시**다.
+   *
+   * 전에는 검은 타원 하나였다. 그런데 양쪽이 같은 스프라이트를 쓰고 전투가
+   * 시작되면 가운데로 뒤섞이므로, 위치도 스프라이트도 진영을 말해 주지 못했다 —
+   * 남는 단서가 판 구석의 작은 "우리 편/상대" 글자뿐이었다.
+   *
+   * 발밑은 언제나 보이고 유닛끼리 겹쳐도 가려지지 않는 자리다. 여기에 진영색을
+   * 넣으면 난전 한가운데서도 내 고양이가 어느 것인지 한눈에 갈린다.
+   */
   if (cat.alive) {
+    const ally = cat.side === "ally";
+    const ring = ally ? T.ally : T.enemy;
     ctx.save();
-    ctx.globalAlpha = dimmed ? 0.12 : 0.3;
+    ctx.globalAlpha = dimmed ? 0.12 : 0.34;
     ctx.beginPath();
-    ctx.ellipse(
-      cx,
-      cy + size * 0.44,
-      size * 0.3,
-      size * 0.1,
-      0,
-      0,
-      Math.PI * 2,
-    );
+    ctx.ellipse(cx, cy + size * 0.44, size * 0.32, size * 0.11, 0, 0, Math.PI * 2);
     ctx.fillStyle = "#000";
     ctx.fill();
+    ctx.globalAlpha = dimmed ? 0.2 : 0.85;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + size * 0.44, size * 0.3, size * 0.1, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = ring;
+    ctx.lineWidth = Math.max(1.5, size * 0.045);
+    ctx.stroke();
+    // 적은 고리를 점선으로 끊는다. 색을 못 봐도 무늬로 갈린다.
+    if (!ally) {
+      ctx.globalAlpha = dimmed ? 0.2 : 0.9;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + size * 0.44, size * 0.3, size * 0.1, 0, -0.5, 0.5);
+      ctx.strokeStyle = T.inkDeep;
+      ctx.lineWidth = Math.max(1.5, size * 0.05);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -618,7 +636,21 @@ function drawCat(
   const img = spriteFor(cat.breed.id, cat.pose);
   if (img) {
     if (cat.flash > 0) ctx.filter = "brightness(2.4) saturate(0.6)";
-    ctx.drawImage(img, x, y, size, size);
+    if (cat.side === "enemy") {
+      // 적은 좌우를 뒤집어 **우리 쪽을 보게** 한다. 양쪽이 같은 방향을 보고
+      // 있으면 같은 편이 줄 서 있는 것처럼 읽힌다 — 대치라는 것 자체가 전달되지
+      // 않는다.
+      //
+      // save/restore로 감싼다. setTransform으로 되돌리면 main.ts가 걸어 둔
+      // 고해상도 배율까지 지워져서 화면 전체가 깨진다.
+      ctx.save();
+      ctx.translate(cx * 2, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, x, y, size, size);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, x, y, size, size);
+    }
     ctx.filter = "none";
   } else {
     ctx.fillStyle = cat.side === "ally" ? T.ally : T.enemy;
@@ -2007,6 +2039,10 @@ function mapBox(L: Layout): Rect {
 
 function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   if (s.phase !== "map") return;
+  // 지도는 화면을 통째로 가진다. 판 위에 겹쳐 그렸더니 고양이·시너지 바와
+  // 선이 뒤엉켜서 어느 원이 고를 수 있는 칸인지 읽히지 않았다.
+  ctx.fillStyle = "rgba(12,8,6,0.88)";
+  ctx.fillRect(0, 0, L.w, L.h);
   const step = mapStep(s);
   const open = new Set(openLanes(s.map, step));
   const rects = mapNodeRects(L, s);
@@ -2116,7 +2152,7 @@ export function buttonText(s: RunState): string {
       // 상점 다음은 배치가 아니라 지도다. 어디로 갈지 먼저 고른다.
       return "길 고르기";
     case "map":
-      return "";
+      return "길을 고르세요";
     case "gameover":
       return "다시 도전";
   }
@@ -2143,7 +2179,7 @@ function drawButton(
    * 버튼까지 정답을 알려주면 읽을 이유가 사라진다.
    */
   const armed =
-    s.phase !== "battle" ||
+    (s.phase !== "battle" && s.phase !== "map") ||
     openBoss ||
     (s.dodgeCharges > 0 && s.enemy.some((c) => c?.telegraph));
   const idle = !armed;
