@@ -23,9 +23,14 @@ import {
   mapStep,
   bossIndexAt,
   bossesSeen,
+  relicActive,
   type Offer,
   type RunState,
 } from "./run.ts";
+import { RELICS } from "./relics.ts";
+
+/** 유물 총 종류. 오른쪽 줄이 "몇 개 중 몇 개"를 말하고 칸 높이를 여기서 뽑는다. */
+const RELIC_TOTAL = RELICS.length;
 import {
   bevelPanel,
   fitTextSize,
@@ -1866,6 +1871,107 @@ function offerHeadline(s: RunState): string {
   return `${team} · 생선을 쓰거나, 그냥 다음 웨이브로`;
 }
 
+/**
+ * 보유 유물 — 세로줄 구성의 오른쪽 줄이 상점이 아닐 때 쓰는 자리.
+ *
+ * 두 문제를 함께 푼다.
+ *
+ * 1. **배치·전투에서 오른쪽 줄이 통째로 비어** 화면이 왼쪽으로 쏠렸다. 카드가
+ *    없는 국면이 판 시간의 대부분인데 그동안 3분의 1이 배경이었다.
+ * 2. **유물이 판 중에 안 보였다.** 측정상 이 게임에서 가장 깊은 축인데
+ *    (격차 5.1웨이브 · 신탁 격차 5.9) 무엇을 갖고 있는지는 죽어서 부검 화면에
+ *    가야 알 수 있었다. 조건이 전부 팀 구성이라 왼쪽 줄의 직업 수와 나란히
+ *    놓여야 "지금 켜져 있나"를 읽을 수 있다.
+ *
+ * 조건 충족 여부를 색과 글자로 함께 낸다 — 켜졌는지가 유물의 전부다.
+ */
+function drawRelicColumn(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+  head: Rect,
+): void {
+  const r = L.offerCards;
+  const cats = livingCats(s.ally);
+
+  uiText(ctx, "유물", head.x, head.y + head.h / 2, Math.max(11, Math.min(15, head.h * 0.46)), T.muted, {
+    align: "left",
+    weight: 800,
+  });
+  uiText(
+    ctx,
+    `${s.relics.length}/${RELIC_TOTAL}`,
+    head.x + head.w,
+    head.y + head.h / 2,
+    Math.max(10, Math.min(14, head.h * 0.42)),
+    T.muted,
+    { align: "right", weight: 700 },
+  );
+
+  if (s.relics.length === 0) {
+    // 빈 줄을 그냥 두면 고장으로 보인다. 어디서 얻는지를 적어 둔다.
+    uiText(ctx, "아직 없다", r.x + r.w / 2, r.y + r.h * 0.4, Math.max(11, r.w * 0.075), T.muted, {
+      align: "center",
+      weight: 700,
+    });
+    uiText(
+      ctx,
+      "정예를 넘거나 상점에서",
+      r.x + r.w / 2,
+      r.y + r.h * 0.4 + Math.max(16, r.w * 0.1),
+      Math.max(10, r.w * 0.058),
+      "rgba(156,139,118,0.7)",
+      { align: "center", weight: 500, maxWidth: r.w * 0.92 },
+    );
+    return;
+  }
+
+  const gap = Math.max(6, r.w * 0.04);
+  // 칸 높이는 유물 수가 아니라 상한에서 뽑는다. 하나 살 때마다 카드가 줄어들면
+  // 같은 유물이 판마다 다른 크기로 보인다.
+  const rowH = Math.min((r.h - gap * (RELIC_TOTAL - 1)) / RELIC_TOTAL, Math.max(46, r.w * 0.2));
+
+  s.relics.forEach((relic, i) => {
+    const on = relicActive(relic, cats);
+    const cr: Rect = { x: r.x, y: r.y + i * (rowH + gap), w: r.w, h: rowH };
+    if (cr.y + cr.h > r.y + r.h) return;
+
+    roundRect(ctx, cr, cr.h * 0.22);
+    ctx.fillStyle = on ? "rgba(240,186,74,0.13)" : "rgba(239,224,198,0.035)";
+    ctx.fill();
+    ctx.strokeStyle = on ? T.gold : "rgba(239,224,198,0.10)";
+    ctx.lineWidth = on ? 2 : 1;
+    ctx.stroke();
+
+    const padX = cr.h * 0.24;
+    const fs = Math.max(10, cr.h * 0.29);
+    uiText(ctx, relic.name, cr.x + padX, cr.y + cr.h * 0.33, fs, on ? T.text : T.muted, {
+      align: "left",
+      weight: 800,
+      maxWidth: cr.w - padX * 2 - fs * 2.4,
+    });
+    // 켜짐/꺼짐은 색만으로 두지 않는다 — 색맹 대응이고, 조건이 뭔지도 같이 읽혀야 한다.
+    uiText(
+      ctx,
+      on ? "켜짐" : "꺼짐",
+      cr.x + cr.w - padX,
+      cr.y + cr.h * 0.33,
+      fs * 0.82,
+      on ? T.gold : "rgba(156,139,118,0.75)",
+      { align: "right", weight: 800 },
+    );
+    uiText(
+      ctx,
+      on ? relic.toll : `${relic.want} · ${relic.toll}`,
+      cr.x + padX,
+      cr.y + cr.h * 0.71,
+      fs * 0.76,
+      on ? "rgba(156,139,118,0.9)" : T.muted,
+      { align: "left", weight: 500, maxWidth: cr.w - padX * 2 },
+    );
+  });
+}
+
 /** 다시 뽑기 버튼. 두 구성이 같은 그림을 쓰도록 따로 뺐다. */
 function drawRerollButton(
   ctx: CanvasRenderingContext2D,
@@ -1917,15 +2023,15 @@ function drawBottomZone(
      * 상점은 **적을 보면서 사는 자리**다 — 판을 어둡게 하면 그 순서를 만든 이유가
      * 사라진다.
      */
-    if (reward) {
-      const p = L.offersPanel;
-      roundRect(ctx, p, Math.min(16, p.w * 0.06));
-      ctx.fillStyle = "rgba(20,14,11,0.72)";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(239,224,198,0.08)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
+    // 오른쪽 줄은 국면에 따라 내용만 바뀌고 자리는 늘 있다 — 상점이면 카드,
+    // 아니면 보유 유물. 국면마다 패널이 생겼다 사라지면 화면이 요동친다.
+    const p = L.offersPanel;
+    roundRect(ctx, p, Math.min(16, p.w * 0.06));
+    ctx.fillStyle = "rgba(20,14,11,0.72)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(239,224,198,0.08)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
     // 왼쪽 줄(직업 수 + 목표)은 전투 중에도 남는다. 무엇이 몇 마리 살아 있고
     // 목표를 얼마나 채웠는지가 전투를 보는 정보다. 두 블록을 한 패널로 묶어야
     // 한 덩어리로 읽힌다 — 따로 깔았더니 직업 수만 떠 있는 상자로 보였다.
@@ -1942,8 +2048,13 @@ function drawBottomZone(
     ctx.lineWidth = 1;
     ctx.stroke();
     drawTeamStrip(ctx, L, s);
-    if (reward) drawRerollButton(ctx, L, s, rr);
-    if (reward) drawOffers(ctx, L, s);
+    if (reward) {
+      drawRerollButton(ctx, L, s, rr);
+      drawOffers(ctx, L, s);
+    } else {
+      // 카드가 없는 국면(배치·전투·지도)에는 같은 자리에 보유 유물을 세운다.
+      drawRelicColumn(ctx, L, s, rr);
+    }
     return;
   }
 
