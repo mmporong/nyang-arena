@@ -815,6 +815,20 @@ export function inTelegraph(t: Telegraph, fx: number, fy: number): boolean {
  * 봤고 그중 몇 번을 맞았는가 — 이 게임에서 가장 큰 결정 축이 개입이므로,
  * 부검에서 가장 먼저 나와야 할 숫자다.
  */
+/**
+ * 예고가 한 마리에게 주는 피해.
+ *
+ * 비율 몫과 고정 몫을 섞는다. 비율만 쓰면 체력이 아무 값을 안 해서 전사와
+ * 마법사가 같은 횟수에 죽고, 그러면 보스전에서 배치가 의미를 잃는다.
+ * 고정 몫의 기준을 보스 공격력으로 두면 웨이브에 따라 같이 커진다.
+ */
+function telegraphHit(target: Cat, boss: Cat, frac: number): number {
+  const share = BALANCE.telegraphFlatShare;
+  const pct = target.maxHp * frac;
+  const flat = boss.atk * BALANCE.telegraphFlatMul * (frac / BALANCE.telegraphDmg);
+  return Math.max(1, Math.round(pct * (1 - share) + flat * share));
+}
+
 function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
   const t = boss.telegraph;
   if (!t) return;
@@ -832,10 +846,10 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
     if (inside.length < need) {
       tally.telegraphsEaten += 1;
       const miss = frac * BALANCE.gatherMissMul;
-      for (const f of foes) damage(f, Math.max(1, Math.round(f.maxHp * miss)), false);
+      for (const f of foes) damage(f, telegraphHit(f, boss, miss), false);
     } else {
       const share = frac / inside.length;
-      for (const f of inside) damage(f, Math.max(1, Math.round(f.maxHp * share)), false);
+      for (const f of inside) damage(f, telegraphHit(f, boss, share), false);
     }
     // 뭉침이 끝나면 곧바로 흩어질 수 있어야 한다. 묶어 두면 다음 원형 예고가
     // 무게중심을 노려 통째로 맞고, 그러면 모인 것이 벌이 된다.
@@ -846,7 +860,7 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
       if (!inTelegraph(t, f.fx, f.fy)) continue;
       caught += 1;
       // 최대 체력 대비 비율이라 웨이브·팀 구성과 무관하게 "뭉치면 아프다"가 성립한다.
-      damage(f, Math.max(1, Math.round(f.maxHp * frac)), false);
+      damage(f, telegraphHit(f, boss, frac), false);
     }
     // 한 마리라도 걸리면 실패로 친다. "몇 마리 맞았나"는 팀 크기에 따라 달라져
     // 판끼리 비교가 안 되지만, "피했나 못 피했나"는 언제나 같은 뜻이다.

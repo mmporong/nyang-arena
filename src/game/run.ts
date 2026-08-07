@@ -630,7 +630,10 @@ function buildBossWave(state: RunState, wave: number, scale: number): void {
   const hpMul = (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp) * bossKit(breed.id).power;
   boss.maxHp = Math.round(boss.maxHp * scale * hpMul);
   boss.hp = boss.maxHp;
-  boss.atk = Math.round(boss.atk * scale * BALANCE.bossAtkMul);
+  // 평타도 체력과 같은 램프를 탄다. 고정값이면 첫 보스가 벽이 되고, 그러면
+  // 탱킹을 살리려던 것이 판을 끝내 버린다.
+  const atkMul = BALANCE.bossAtkMulFirst + (BALANCE.bossAtkMul - BALANCE.bossAtkMulFirst) * ramp;
+  boss.atk = Math.round(boss.atk * scale * atkMul);
   state.enemy[bossCell] = boss;
 
   const escortCells = ROW_ORDER.map((r) => r * BOARD_COLS + 0);
