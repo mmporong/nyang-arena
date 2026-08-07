@@ -83,7 +83,8 @@ $ npm test
 ```
 $ npm run sim
 런 300회 (정책: 살 수 있으면 가장 비싼 것 구매, 재배치 없음)
-  최소 5  p25 8  중앙값 13  p75 15  최대 31
+  최소 2  p25 9  중앙값 12  p75 18  최대 37
+  ↑ 이 값은 npm run sim이 지금 내는 것으로 갱신한다. 원본은 docs/generated/metrics-current.md
 ```
 
 이 과정에서 실제로 잡은 결함:

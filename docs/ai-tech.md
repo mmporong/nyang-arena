@@ -180,8 +180,8 @@ $ npm run gen:synergies
 ```
 $ npm run sim
 런 300회 (정책: 살 수 있으면 가장 비싼 것 구매, 재배치 없음)
-  최소 6  p25 13  중앙값 14  p75 18  최대 39
-  평균 15.7웨이브
+  최소 2  p25 9  중앙값 12  p75 18  최대 37
+  ↑ 이 값은 npm run sim이 지금 내는 것으로 갱신한다. 원본은 docs/generated/metrics-current.md
 판정: 목표 구간(6~20) 안
 ```
 
