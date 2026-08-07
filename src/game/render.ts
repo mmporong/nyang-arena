@@ -20,6 +20,7 @@ import {
   waveKind,
   waveKindInfo,
   mapStep,
+  bossesSeen,
   type Offer,
   type RunState,
 } from "./run.ts";
@@ -162,6 +163,15 @@ export interface DragState {
   y: number;
   /** 드래그를 시작한 포인터. 멀티터치에서 다른 손가락이 끼어드는 걸 막는다. */
   pointerId: number;
+  /**
+   * 마우스가 지금 있는 자리. 드래그 중이 아니어도 늘 갱신된다.
+   *
+   * 손가락에는 호버가 없으므로 터치에서는 -1로 남는다. 호버는 **덤**이지
+   * 정보를 거기에만 두면 안 된다는 뜻이다 — 지금 지도의 갈래 설명이 요약
+   * 줄에도 같이 뜨는 이유다.
+   */
+  hoverX: number;
+  hoverY: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2037,7 +2047,7 @@ function mapBox(L: Layout): Rect {
   return { x: L.w * 0.06, y: top, w: L.w * 0.88, h: Math.max(L.scale * 120, bottom - top) };
 }
 
-function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: DragState): void {
   if (s.phase !== "map") return;
   // 지도는 화면을 통째로 가진다. 판 위에 겹쳐 그렸더니 고양이·시너지 바와
   // 선이 뒤엉켜서 어느 원이 고를 수 있는 칸인지 읽히지 않았다.
@@ -2070,6 +2080,25 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     }
   }
 
+  /**
+   * 마우스가 올라간 칸.
+   *
+   * 고를 수 있는 칸만 반응한다. 못 가는 칸이 커지면 갈 수 있는 줄 알고 누르게
+   * 되고, 그건 호버가 정보를 주는 게 아니라 거짓말을 하는 것이다.
+   */
+  let hovered = -1;
+  if (drag.hoverX >= 0) {
+    for (const { rect, step: st, idx } of rects) {
+      if (st !== step || !open.has(idx)) continue;
+      const dx = drag.hoverX - (rect.x + rect.w / 2);
+      const dy = drag.hoverY - (rect.y + rect.h / 2);
+      if (Math.hypot(dx, dy) <= rect.w / 2 + 6) {
+        hovered = idx;
+        break;
+      }
+    }
+  }
+
   for (const { rect, step: st, idx } of rects) {
     const node = s.map.steps[st]?.[idx];
     if (!node) continue;
@@ -2077,6 +2106,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     const here = st === step;
     const pickable = here && open.has(idx);
     const done = st < step;
+    const hot = here && idx === hovered;
 
     const hue =
       node.kind === "boss" ? T.enemy
@@ -2086,19 +2116,26 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     // 고를 수 있는 칸만 살아 있다. 나머지는 지도의 배경이다.
     const alpha = pickable ? 1 : taken ? 0.55 : done ? 0.2 : 0.3;
 
+    // 올라간 칸은 조금 커진다. 크기 변화가 색 변화보다 먼저 눈에 띈다.
+    const grow = hot ? rect.w * 0.09 : 0;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2, 0, Math.PI * 2);
+    ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2 + grow, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(14,10,8,0.92)";
     ctx.fill();
-    ctx.strokeStyle = hue;
-    ctx.lineWidth = pickable ? Math.max(2, L.scale * 2.6) : Math.max(1, L.scale * 1.4);
+    ctx.strokeStyle = hot ? "#FFFFFF" : hue;
+    ctx.lineWidth = hot ? Math.max(3, L.scale * 3.4) : pickable ? Math.max(2, L.scale * 2.6) : Math.max(1, L.scale * 1.4);
     ctx.stroke();
-    uiText(ctx, NODE_MARK[node.kind], rect.x + rect.w / 2, rect.y + rect.h / 2, Math.max(10, rect.w * 0.34), hue, {
-      align: "center",
-      weight: pickable ? 800 : 400,
-    });
+    uiText(
+      ctx,
+      NODE_MARK[node.kind],
+      rect.x + rect.w / 2,
+      rect.y + rect.h / 2,
+      Math.max(10, (rect.w + grow * 2) * 0.34),
+      hot ? T.paper : hue,
+      { align: "center", weight: pickable ? 800 : 400 },
+    );
     ctx.restore();
 
     // 고를 수 있는 칸은 맥동한다. 여섯 칸 중 어디를 눌러야 하는지가 한눈에 보인다.
@@ -2116,9 +2153,18 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
 
   const cur = s.map.steps[step] ?? [];
   const kinds = [...new Set(cur.filter((_, i) => open.has(i)).map((n) => n.kind))];
+  // 올라간 칸이 있으면 그 칸의 설명을, 없으면 갈래 요약을 준다. 터치에는
+  // 호버가 없으므로 요약이 늘 남아 있어야 한다.
+  const hotNode = hovered >= 0 ? cur[hovered] : undefined;
+  // 커서까지 바뀌어야 "누를 수 있다"가 끝까지 전달된다. 캔버스 게임은 이걸
+  // 안 하면 그림처럼 보인다.
+  ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
+  const info = hotNode ? nodeInfo(hotNode.kind) : null;
   uiText(
     ctx,
-    `${s.map.stage}번째 여정 · ${step + 1}/${STAGE_STEPS}걸음 — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
+    info
+      ? `${info.name} — ${info.hint}`
+      : `${s.map.stage}번째 여정 · ${step + 1}/${STAGE_STEPS}걸음 — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,
     mapBox(L).y - L.scale * 6,
     L.scale * 13,
@@ -2536,6 +2582,114 @@ function drawGameOver(
 
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* 막 — 판·여정의 경계에서 한 번 나왔다 사라지는 화면                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 전환 막.
+ *
+ * 지금까지 판이 시작되는지, 여정이 넘어가는지, 보스를 넘었는지가 화면에서
+ * 구분되지 않았다. 상점 → 지도 → 배치 → 전투가 같은 무게로 이어져서 **어디가
+ * 마디인지**가 없었다. 마디가 없으면 12분이 한 덩어리로 느껴진다.
+ *
+ * 막은 렌더러만 안다. `RunState`에 넣지 않은 이유는 헤드리스 시뮬이 이걸 알
+ * 필요가 없어서다 — 연출은 판정과 분리한다는 이 저장소의 규칙 그대로다.
+ * 대신 상태의 **변화를 렌더러가 관찰**해서 스스로 띄운다.
+ */
+interface Curtain {
+  title: string;
+  sub: string;
+  life: number;
+  max: number;
+}
+
+const CURTAIN_MS = 1500;
+let curtain: Curtain | null = null;
+let curtainAt = 0;
+/** 무엇이 바뀌었는지 알려면 직전 값을 들고 있어야 한다. */
+let seenSeed = -1;
+let seenStage = -1;
+let seenBosses = -1;
+
+function raise(title: string, sub: string): void {
+  curtain = { title, sub, life: CURTAIN_MS, max: CURTAIN_MS };
+}
+
+/** 상태의 변화를 보고 막을 올린다. 게임 코드는 이걸 모른다. */
+function watchTransitions(s: RunState): void {
+  const bosses = bossesSeen(s);
+
+  if (s.seed !== seenSeed) {
+    // 새 판. 시드가 곧 판의 신원이다.
+    seenSeed = s.seed;
+    seenStage = s.map.stage;
+    seenBosses = bosses;
+    raise("냥 아레나", "고양이 오토배틀러인데, 보스전은 레이드다");
+    return;
+  }
+  // 보스를 넘은 것이 먼저다. 넘는 순간 여정도 함께 바뀌는 경우가 있는데,
+  // 그때 여정 안내만 뜨면 방금 해낸 일이 화면에서 사라진다.
+  if (bosses > seenBosses) {
+    seenBosses = bosses;
+    seenStage = s.map.stage;
+    raise("보스 격파", `${s.wave - 1}웨이브까지 살아남았다`);
+    return;
+  }
+  if (s.map.stage !== seenStage) {
+    seenStage = s.map.stage;
+    raise(`${s.map.stage}번째 여정`, "여섯 걸음 끝에 보스가 둘 있다");
+  }
+}
+
+/**
+ * 막을 그린다. 들어올 때 빠르고 나갈 때 느리다 — 정보는 즉시 주고,
+ * 사라지는 것은 눈이 따라올 수 있게.
+ */
+function drawCurtain(ctx: CanvasRenderingContext2D, L: Layout): void {
+  if (!curtain) return;
+  const now = performance.now();
+  const dt = curtainAt ? Math.min(48, now - curtainAt) : 16;
+  curtainAt = now;
+  curtain.life -= dt;
+  if (curtain.life <= 0) {
+    curtain = null;
+    return;
+  }
+
+  const t = 1 - curtain.life / curtain.max; // 0 → 1
+  // 앞 12%에 들어오고, 뒤 35%에 나간다.
+  const alpha = t < 0.12 ? t / 0.12 : t > 0.65 ? 1 - (t - 0.65) / 0.35 : 1;
+  const a = Math.max(0, Math.min(1, alpha));
+
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.fillStyle = "rgba(9,6,5,0.9)";
+  ctx.fillRect(0, 0, L.w, L.h);
+
+  const cy = L.h / 2;
+  // 위아래 선. 글자만 있으면 떠 있는 자막처럼 보인다.
+  const lw = Math.min(L.w * 0.6, L.scale * 420);
+  ctx.strokeStyle = `rgba(244,227,193,${0.35 * a})`;
+  ctx.lineWidth = Math.max(1, L.scale * 1.5);
+  for (const dy of [-L.scale * 40, L.scale * 40]) {
+    ctx.beginPath();
+    ctx.moveTo(L.w / 2 - lw / 2, cy + dy);
+    ctx.lineTo(L.w / 2 + lw / 2, cy + dy);
+    ctx.stroke();
+  }
+
+  uiText(ctx, curtain.title, L.w / 2, cy - L.scale * 8, L.scale * 30, T.paper, {
+    align: "center",
+    weight: 800,
+  });
+  uiText(ctx, curtain.sub, L.w / 2, cy + L.scale * 20, L.scale * 14, T.paperDim, {
+    align: "center",
+    weight: 400,
+  });
+  ctx.restore();
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -2596,10 +2750,13 @@ export function render(
   drawPops(ctx, L);
   drawBottomZone(ctx, L, s);
   drawSynergies(ctx, L, s);
-  drawMap(ctx, L, s);
+  drawMap(ctx, L, s, drag);
   drawNotice(ctx, L, s);
   // 부검을 먼저 깔고 버튼을 그 위에 올린다. 순서가 반대면 전면 어둠막이 버튼까지
   // 덮어서, 유일하게 누를 수 있는 물건이 비활성처럼 보였다.
   drawGameOver(ctx, L, s);
   drawButton(ctx, L, s);
+  // 막은 맨 위다. 아래에 무엇이 있든 전환이 전환으로 읽혀야 한다.
+  watchTransitions(s);
+  drawCurtain(ctx, L);
 }

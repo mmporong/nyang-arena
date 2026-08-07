@@ -90,8 +90,12 @@ for (const [name, pick] of Object.entries(MAP_POLICIES)) {
 const vals = Object.values(means);
 const spread = Math.max(...vals) - Math.min(...vals);
 console.log(`\n최선과 최악의 격차: ${spread.toFixed(1)}웨이브`);
+const mapOk = spread >= 1.5;
 console.log(
-  spread < 1.5
-    ? "판정: 지도가 결정이 아니다 — 어느 길로 가든 같은 곳에 도착한다"
-    : "판정: 지도가 길을 가른다",
+  mapOk
+    ? "판정: 지도가 길을 가른다"
+    : "판정: 지도가 결정이 아니다 — 어느 길로 가든 같은 곳에 도착한다",
 );
+// 미달이면 실패로 끝낸다. 관측만 하고 0을 반환하면 CI가 관측과 합격을
+// 구분하지 못하고, 그러면 '측정으로 만든다'가 말뿐이 된다.
+if (!mapOk) process.exitCode = 1;

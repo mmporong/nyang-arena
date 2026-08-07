@@ -26,7 +26,7 @@ app.appendChild(canvas);
 
 let layout: Layout = computeLayout(800, 600);
 let state: RunState = newRun();
-const drag: DragState = { active: false, fromCell: -1, x: 0, y: 0, pointerId: -1 };
+const drag: DragState = { active: false, fromCell: -1, x: 0, y: 0, pointerId: -1, hoverX: -1, hoverY: -1 };
 let hoverCell = -1;
 
 /**
@@ -207,6 +207,8 @@ canvas.addEventListener("pointermove", (e) => {
     drag.x = x;
     drag.y = y;
   }
+  drag.hoverX = x;
+  drag.hoverY = y;
   hoverCell = canRearrange() ? hitCell(layout, "ally", x, y) : -1;
 });
 
@@ -229,6 +231,10 @@ window.addEventListener("pointercancel", () => {
   // 손가락이 취소되면 의도도 버린다. 어중간하게 흩어지면 오히려 손해다.
   pressOnButton = false;
   cancelDrag();
+});
+canvas.addEventListener("pointerleave", () => {
+  drag.hoverX = -1;
+  drag.hoverY = -1;
 });
 canvas.addEventListener("lostpointercapture", cancelDrag);
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());

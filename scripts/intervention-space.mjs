@@ -140,6 +140,7 @@ console.log(`런 ${RUNS}회 · 구매·배치 정책 고정 · 개입만 변경 
 console.log("정책          보스통과율   W3      W6      전체중앙값   평균");
 
 const base = {};
+const results = {};
 for (const [name, policy] of Object.entries(POLICIES)) {
   const finals = [];
   const tried = new Map();
@@ -160,9 +161,12 @@ for (const [name, policy] of Object.entries(POLICIES)) {
     return t ? `${(((t - l) / t) * 100).toFixed(1)}%` : "  -  ";
   };
   const avg = finals.reduce((a, b) => a + b, 0) / finals.length;
+  const median = pct(finals, 0.5);
+  results[name] = { pass, avg, median };
   if (name === "개입 없음") {
     base.pass = pass;
     base.avg = avg;
+    base.median = median;
   }
   console.log(
     `${name.padEnd(12)} ${pass.toFixed(1).padStart(8)}% ${rate(3).padStart(8)} ${rate(6).padStart(8)} ` +
@@ -174,6 +178,25 @@ console.log("\n판정");
 for (const [name, policy] of Object.entries(POLICIES)) {
   if (!policy) continue;
 }
+/**
+ * 합격 판정. 관측만 찍고 0으로 끝내면 CI가 관측과 합격을 구분하지 못한다.
+ *
+ * 세 기준을 여기서 계산해 하나라도 어기면 실패로 끝낸다. 특히 AC-B2는 지금
+ * 크게 초과하고 있는데(+48%p), **초과도 미충족이다** — 개입이 세면 빌드와
+ * 배치 결정을 덮는다는 것이 이 상한의 존재 이유다.
+ */
+const perfect = results["완벽(읽고 판단)"];
+const gain = perfect ? perfect.pass - base.pass : 0;
+const medianRise = perfect ? perfect.median - base.median : 0;
+const ac1 = base.pass >= 75 && base.pass <= 85;
+const ac2 = gain >= 15 && gain <= 25;
+const ac3 = medianRise <= 3;
+
 console.log(`  기준선(개입 없음) 보스 통과율 ${base.pass.toFixed(1)}%`);
-console.log("  AC-B1: 비개입 통과율이 75~85% 구간 →", base.pass >= 75 && base.pass <= 85 ? "충족" : "미충족");
-console.log("  AC-B2: 개입 시 +15~25%p / AC-B3: 전체 중앙값 상승 +3 이하 (위 표에서 확인)");
+console.log(`  AC-B1 비개입 75~85%          ${base.pass.toFixed(1)}%  ${ac1 ? "충족" : "미충족"}`);
+console.log(`  AC-B2 개입 이득 +15~25%p     +${gain.toFixed(1)}%p  ${ac2 ? "충족" : "미충족"}`);
+console.log(`  AC-B3 중앙값 상승 +3 이하    +${medianRise}  ${ac3 ? "충족" : "미충족"}`);
+if (!ac1 || !ac2 || !ac3) {
+  console.log("\n판정: 개입 축이 합의된 경계를 벗어났다");
+  process.exitCode = 1;
+}
