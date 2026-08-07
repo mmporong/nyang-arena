@@ -9,6 +9,15 @@ import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts"
 import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = 300;
+/**
+ * 지도는 아무 길이나 간다. 이 스크립트가 재는 축은 **구매**지 경로가 아니므로
+ * 경로 정책을 고정해 잡음을 줄인다.
+ *
+ * 이 선언이 빠져 있어서 스크립트가 통째로 죽어 있었다 — 지도를 붙이며 다른
+ * 스크립트에는 넣고 여기만 빠뜨렸다. 구매 축은 이 저장소의 출발점("이 게임에
+ * 결정이 있는가")이었는데 그 근거가 재현되지 않는 상태였다.
+ */
+const mapPick = MAP_POLICIES["무작위"];
 
 const POLICIES = {
   "아무것도 안 삼": () => null,
