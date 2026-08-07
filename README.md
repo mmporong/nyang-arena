@@ -100,15 +100,37 @@ $ npm run sim
 
 ## 개발
 
+**Node 22.6 이상이 필요하다.** 측정 스크립트가 `--experimental-strip-types`로
+TypeScript를 그대로 임포트한다(브라우저와 헤드리스가 같은 코드를 쓰기 위한
+장치다). 그 아래 버전에서는 `npm run sim` 계열이 전부 실패한다. `.nvmrc`가
+있으므로 `nvm use`면 맞는다.
+
 ```bash
-npm install
+nvm use            # 또는 Node 22.6+ 를 직접 설치
+npm ci
 npm run dev        # 개발 서버
 npm run build      # 타입체크 + 프로덕션 빌드
 npm test           # 검증기 적대 테스트
 npm run sim        # 밸런스 시뮬레이션
+npm run verify     # 위 전부 + 결정 축 전체 (관문)
 ```
 
-런타임 의존성 0개. 빌드 산출물은 JS 약 25 kB(gzip 10 kB) + 스프라이트.
+런타임 의존성 0개. 번들 크기는 `docs/generated/metrics-current.md`가 매번
+다시 재서 적는다 — **여기에 숫자를 적어 두면 낡는다.**
+
+### 다른 기기에서 시작할 때
+
+`npm ci` 다음에 바로 되는 것과, 별도 준비가 필요한 것이 갈린다.
+
+| 명령 | 추가로 필요한 것 |
+|---|---|
+| `dev` `build` `test` `sim` `verify` 등 | **없다.** Node 22.6+ 면 끝 |
+| `npm run docs` (PDF) | python3 + `pip install markdown` + Chrome/Chromium |
+| `npm run slice` (스프라이트 재생성) | python3 + Pillow + 원본 시트. **보통 필요 없다** — `public/sprites/`의 결과물 120장이 커밋돼 있다. 원본을 옮겼다면 `NYANG_SHEET=/경로/CatCharacterSheet.png npm run slice` |
+| `npm run gen:synergies` | `OPENAI_API_KEY`. 없으면 커밋된 후보 파일을 쓴다 |
+
+`git clone` 주소가 SSH(`git@github.com:...`)라 새 기기에서는 SSH 키를 등록하거나
+HTTPS로 바꿔야 한다.
 
 ## 기술
 

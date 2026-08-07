@@ -8,6 +8,7 @@ Chrome headless의 --print-to-pdf를 쓴다(이 머신에 pandoc/weasyprint가 �
 
 실행: npm run docs
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -60,14 +61,35 @@ TEMPLATE = """<!doctype html>
 
 
 def find_chrome() -> str:
-    for name in ("google-chrome", "chromium", "chromium-browser"):
+    forced = os.environ.get("CHROME")
+    if forced:
+        if not Path(forced).exists():
+            sys.exit(f"CHROME={forced} 경로에 실행 파일이 없습니다")
+        return forced
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
         p = shutil.which(name)
         if p:
             return p
-    # playwright가 받아둔 크로미움도 후보
-    for p in sorted((Path.home() / ".cache/ms-playwright").glob("chromium-*/chrome-linux/chrome")):
-        return str(p)
-    sys.exit("Chrome 계열 브라우저를 찾지 못했습니다")
+    # 기기마다 다른 고정 위치들. 리눅스만 보고 있어서 다른 기기에서 못 찾았다.
+    fixed = [
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+        Path(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+    ]
+    for p in fixed:
+        if p.exists():
+            return str(p)
+    # playwright가 받아둔 크로미움도 후보 (기기별 하위 경로가 다르다)
+    for pat in ("chromium-*/chrome-linux/chrome", "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+                "chromium-*/chrome-win/chrome.exe"):
+        for p in sorted((Path.home() / ".cache/ms-playwright").glob(pat)):
+            return str(p)
+    sys.exit(
+        "Chrome 계열 브라우저를 찾지 못했습니다.\n"
+        "  PDF 생성에만 필요하고 게임·측정에는 필요 없습니다 — 이 단계는 건너뛰어도 됩니다.\n"
+        "  설치했는데도 못 찾으면 실행 파일 경로를 PATH에 넣거나 CHROME 환경변수로 알려 주세요."
+    )
 
 
 def convert(md_path: Path, chrome: str) -> Path:

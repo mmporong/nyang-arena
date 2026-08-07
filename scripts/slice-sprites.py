@@ -12,13 +12,20 @@
 출력은 197x197 균일 셀을 유지한다. bbox로 타이트하게 자르면 스프라이트마다 크기가
 달라져 앵커 오프셋을 따로 관리해야 하고, 포즈 전환 시 발 위치가 튄다.
 """
+import os
 import sys
 from collections import deque
 from pathlib import Path
 
 from PIL import Image
 
-SHEET = Path.home() / "PKM/06_Ideas/assets/CatCharacterSheet.png"
+# 원본 시트는 저장소 밖에 있다(용량 때문에 커밋하지 않는다). 기본 경로는 만든
+# 기기의 위치이고, 다른 기기에서는 NYANG_SHEET로 알려 주면 된다.
+#
+#   NYANG_SHEET=/경로/CatCharacterSheet.png npm run slice
+#
+# 보통은 돌릴 일이 없다 — 잘라 낸 결과 120장이 public/sprites/에 커밋돼 있다.
+SHEET = Path(os.environ.get("NYANG_SHEET") or Path.home() / "PKM/06_Ideas/assets/CatCharacterSheet.png")
 OUT = Path(__file__).resolve().parent.parent / "public/sprites"
 
 ORIGIN_X, ORIGIN_Y, PITCH, CELL = 124, 144, 208, 197

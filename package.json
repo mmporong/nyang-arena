@@ -1,9 +1,11 @@
 {
   "name": "nyang-arena",
-  "version": "0.1.0",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
-  "description": "픽셀 고양이 오토배틀러 — 배치하고, 관전하고, 몇 웨이브까지 버티는지 겨룬다",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -30,5 +32,6 @@
   "devDependencies": {
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
-  }
+  },
+  "description": "픽셀 고양이 오토배틀러 — 배치하고, 관전하고, 몇 웨이브까지 버티는지 겨룬다"
 }
