@@ -37,7 +37,7 @@ const byCost = (a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" 
  * **상태를 보는** 최초의 구매 정책이다. 교체 카드도 쓴다 — 지금까지 모든 정책이
  * `replace`를 맨 뒤로 밀어 두고 있었는데, 몰빵에는 곁가지를 쳐내는 수단이 필요하다.
  */
-function pivot(state, afford) {
+function pivot(state, afford, useRelics = true) {
   const count = new Map();
   for (const c of livingCats(state.ally)) {
     count.set(c.breed.cls, (count.get(c.breed.cls) ?? 0) + 1);
@@ -50,16 +50,17 @@ function pivot(state, afford) {
       want = cls;
     }
   }
-  if (!want) return [...afford].sort(byCost)[0] ?? null;
+  if (!want) return [...(useRelics ? afford : afford.filter((o) => o.kind !== "relic"))].sort(byCost)[0] ?? null;
   const mine = (o) => o.breed?.cls === want;
+  const pool = useRelics ? afford : afford.filter((o) => o.kind !== "relic");
   return (
     // 몰빵 직업의 유물이 최우선 — 조건을 이미 채우고 있으므로 대가만 남지 않는다.
-    afford.find((o) => o.kind === "relic" && o.relic?.condition?.cls === want) ??
-    [...afford].filter((o) => o.kind === "upgrade" && mine(o)).sort(byCost)[0] ??
-    [...afford].filter((o) => o.kind === "recruit" && mine(o)).sort(byCost)[0] ??
+    (useRelics ? pool.find((o) => o.kind === "relic" && o.relic?.condition?.cls === want) : null) ??
+    [...pool].filter((o) => o.kind === "upgrade" && mine(o)).sort(byCost)[0] ??
+    [...pool].filter((o) => o.kind === "recruit" && mine(o)).sort(byCost)[0] ??
     // 곁가지를 몰빵 직업으로 바꾼다. 조건(3마리 이상)을 채우는 유일한 지렛대일 때가 있다.
-    [...afford].filter((o) => o.kind === "replace" && mine(o)).sort(byCost)[0] ??
-    [...afford].filter((o) => o.kind !== "relic" && o.kind !== "replace").sort(byCost)[0] ??
+    [...pool].filter((o) => o.kind === "replace" && mine(o)).sort(byCost)[0] ??
+    [...pool].filter((o) => o.kind !== "relic" && o.kind !== "replace").sort(byCost)[0] ??
     null
   );
 }
@@ -72,6 +73,14 @@ const POLICIES = {
   "강화만": (afford) => afford.filter((o) => o.kind === "upgrade")[0] ?? null,
   "영입만": (afford) => afford.filter((o) => o.kind === "recruit")[0] ?? null,
   "몰빵 피벗(로스터를 읽음)": (afford, state) => pivot(state, afford),
+  /**
+   * 같은 피벗인데 유물만 안 산다.
+   *
+   * 구매 축의 깊이가 **유물 축의 그림자인지**를 가르는 칸이다. 몰빵 피벗은
+   * 직업을 모으는 정책이고 유물 조건도 직업 수라, 둘이 같은 것을 재고 있을
+   * 수 있다. 유물을 끄고도 깊이가 남으면 두 축은 독립이다.
+   */
+  "몰빵 피벗(유물 제외)": (afford, state) => pivot(state, afford, false),
 };
 
 /**
