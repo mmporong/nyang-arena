@@ -131,12 +131,43 @@ for (const [name, arrange] of Object.entries(ARRANGERS)) {
   );
 }
 
+/**
+ * **폭과 깊이를 갈라서 본다.**
+ *
+ * 오래 `max - min`만 찍고 "배치가 결정이다"라고 판정해 왔다. 그런데 그 격차는
+ * 거의 전부 `역할 반대(근접 뒤)`에서 나온다 — **고의로 틀리게 놓은 정책**이다.
+ * 즉 재고 있던 것은 "배치를 망치면 나빠지는가"였고, 그건 결정의 폭이지 깊이가
+ * 아니다.
+ *
+ *   폭   = 최선 − 고의적 최악   "배치를 망칠 수 있는가"
+ *   깊이 = 최선 − 자동 배치     "손으로 놓으면 자동보다 나은가"
+ *
+ * 깊이 쪽이 사람에게 실제로 남는 질문이다. 자동 배치가 이미 최선에 가까우면
+ * 드래그는 장식이다.
+ */
 const vals = Object.values(means);
 const spread = Math.max(...vals) - Math.min(...vals);
-console.log(`\n최선과 최악의 평균 격차: ${spread.toFixed(1)}웨이브`);
-/** 기준 2.0웨이브. 개입을 조정해도 배치가 결과를 갈라야 한다. */
+const auto = means["그대로 (bestFreeCell)"] ?? 0;
+const bestPlace = Math.max(...vals);
+const depth = bestPlace - auto;
+
+console.log(`\n폭   (최선 ${bestPlace.toFixed(1)} − 고의적 최악 ${Math.min(...vals).toFixed(1)}) = ${spread.toFixed(1)}웨이브`);
+console.log(`깊이 (최선 ${bestPlace.toFixed(1)} − 자동 배치 ${auto.toFixed(1)}) = ${depth.toFixed(1)}웨이브`);
+
+/**
+ * 관문은 **폭**으로 잡는다. 이 시험의 임무는 "배치가 결정인가"를 증명하는 것이
+ * 아니라, 개입·밸런스를 조정하다가 **배치가 아예 무의미해지는 것을 잡는** 회귀
+ * 감시다(intervention-space의 B3가 이 값을 참조한다).
+ *
+ * 깊이는 판정하되 관문에 걸지 않는다. 이미 얕다는 것을 알고 있고, 그걸로
+ * verify를 빨갛게 만들면 지도 축이 내는 신호와 섞여 정보가 줄어든다. 대신
+ * 미해결 항목으로 `docs/generated/metrics-current.json`에 남긴다.
+ */
 const placeOk = spread >= 2.0;
+console.log(placeOk ? "회귀 감시: 통과 — 배치를 망치면 나빠진다" : "회귀 감시: 실패 — 어디에 놓든 같다");
 console.log(
-  placeOk ? "판정: 배치가 결정이다" : "판정: 배치가 결정이 아니다 — 어디에 놓든 같다",
+  depth >= 1.5
+    ? "판정: 배치에 깊이가 있다 — 손으로 놓을 값을 한다"
+    : "판정: 배치에 깊이가 없다 — 자동 배치가 이미 최선에 가깝고, 드래그는 장식이다",
 );
 if (!placeOk) process.exitCode = 1;

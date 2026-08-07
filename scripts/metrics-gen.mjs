@@ -133,11 +133,32 @@ const git = (cmd) => {
   }
 };
 
+/**
+ * 작업 트리가 더러우면 이 산출물은 **어느 커밋으로도 재현되지 않는다.**
+ *
+ * `dirty: true`를 적어 두기만 하고 조용히 넘어가고 있었다. 그래서 저장소에
+ * 커밋된 기준 수치가 "커밋 f7de9d5 (작업 트리 변경 있음)"에서 나온 값이었고,
+ * 그 커밋을 체크아웃해도 같은 값이 안 나온다. 기준 수치의 존재 이유가
+ * 재현인데 그게 깨져 있었다.
+ *
+ * 그래서 이제 시끄럽게 알린다. 막지는 않는다 — 개발 중에는 더러운 트리에서
+ * 돌려 보는 것이 정상이고, 관문을 여기서 막으면 verify를 못 돌린다. 대신
+ * **커밋할 산출물은 깨끗한 트리에서 다시 뽑아야 한다**는 것을 산출물 자신이
+ * 말하게 한다.
+ */
+const dirty = git("git status --porcelain") !== "";
+if (dirty) {
+  console.warn("경고: 작업 트리에 변경이 있다. 이 산출물은 어느 커밋으로도 재현되지 않는다.");
+  console.warn("      커밋할 값을 뽑으려면 먼저 커밋하고 다시 돌릴 것.");
+}
+
 const metrics = {
   schema: SCHEMA,
   generatedFrom: {
     commit: git("git rev-parse --short HEAD"),
-    dirty: git("git status --porcelain") !== "",
+    dirty,
+    /** 이 값이 false면 표의 숫자를 공개 문서에 인용하면 안 된다. */
+    reproducible: !dirty,
     node: process.version,
     seeds: { from: 1, to: RUNS },
     runs: RUNS,
@@ -185,6 +206,22 @@ const metrics = {
    */
   openIssues: [
     {
+      id: "placement-no-depth",
+      what: "배치에 깊이가 없다 — 드래그가 장식이다",
+      measured: "폭 3.1웨이브(고의적 최악 대비) / 깊이 0.2웨이브(자동 배치 대비)",
+      diagnosis:
+        "자동 배치(bestFreeCell)가 이미 최선에 가깝다. 관문은 폭으로 잡고 있어 통과하지만, 그 관문은 '배치를 망칠 수 있는가'를 재는 회귀 감시지 '배치가 결정인가'의 증명이 아니다",
+      gate: "npm run placement가 폭으로만 판정하고 깊이는 판정만 찍는다 (exit 0)",
+    },
+    {
+      id: "strike-not-a-choice",
+      what: "취약 창 연타가 선택이 아니다",
+      measured: "회피만 83.3% → 읽고 판단 85.7% (합산 기준 +2.4%p)",
+      diagnosis:
+        "연타에 비용이 없고 창이 3초로 제한돼 있어 '열리면 무조건 누른다'가 유일한 답이다. 화면에서 가장 화려한 연출인데 결정으로서는 가장 작다",
+      consequence: "강화하거나(비용·상충 부여), 결정이 아닌 보상 연출로 인정하고 그렇게 설명해야 한다",
+    },
+    {
       id: "map-axis",
       what: "지도(경로 선택)가 결정 기준을 못 넘는다",
       measured: "격차 0.9웨이브 (기준 1.5)",
@@ -213,7 +250,7 @@ const wk = metrics.waveKinds;
 const md = `<!-- 이 파일은 npm run metrics가 생성한다. 손으로 고치지 말 것. -->
 # 기준 수치
 
-- 커밋 \`${metrics.generatedFrom.commit}\`${metrics.generatedFrom.dirty ? " (작업 트리 변경 있음)" : ""}
+- 커밋 \`${metrics.generatedFrom.commit}\`${metrics.generatedFrom.dirty ? " — **작업 트리 변경 있음. 이 값은 어느 커밋으로도 재현되지 않으므로 인용하지 말 것**" : ""}
 - 시드 ${metrics.generatedFrom.seeds.from}~${metrics.generatedFrom.seeds.to} · Node ${metrics.generatedFrom.node} · 스키마 v${SCHEMA}
 
 ## 구조

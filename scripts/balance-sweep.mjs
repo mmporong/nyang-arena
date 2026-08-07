@@ -14,9 +14,24 @@ import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts"
 
 const RUNS = Number(process.env.RUNS ?? 120);
 const MAX_WAVE = 80;
+/**
+ * 지도는 아무 길이나 간다. 이 스크립트가 재는 축은 밸런스 상수지 경로가 아니다.
+ *
+ * **이 선언이 빠져 있어서 스윕이 통째로 죽어 있었다** — `decisions`를 죽였던
+ * 것과 똑같은 버그를 같은 날 두 곳에 심었고, 스윕은 verify 사슬에 없어서
+ * 몇 주 동안 아무도 몰랐다. 관문 밖의 도구는 썩는다.
+ */
+const mapPick = MAP_POLICIES["무작위"];
 
-function playOne() {
-  const s = newRun();
+/**
+ * 조합마다 **같은 시드 범위**를 쓴다.
+ *
+ * 예전에는 `newRun()`을 인자 없이 불러서 조합마다 다른 판을 돌렸다. 그러면
+ * 조합 A와 B의 차이가 상수 때문인지 시드 운 때문인지 갈리지 않는다 — 같은
+ * 시드로 짝지어 비교하라고 다른 스크립트에는 다 적어 놓고 여기만 빠졌다.
+ */
+function playOne(seed) {
+  const s = newRun(seed);
   let rerolls = 0;
   let lastWave = 0;
   for (let guard = 0; guard < MAX_WAVE * 500; guard++) {
@@ -59,7 +74,7 @@ function playOne() {
 
 function measure() {
   const rs = [];
-  for (let i = 0; i < RUNS; i++) rs.push(playOne());
+  for (let i = 0; i < RUNS; i++) rs.push(playOne(i + 1));
   rs.sort((a, b) => a - b);
   const q = (p) => rs[Math.min(rs.length - 1, Math.floor(rs.length * p))];
   return { p10: q(0.1), med: q(0.5), p90: q(0.9), spread: q(0.9) - q(0.1) };
