@@ -1243,7 +1243,7 @@ function drawSideLabels(ctx: CanvasRenderingContext2D, L: Layout): void {
     });
   };
 
-  if (L.portrait) {
+  if (L.stacked) {
     put(a.x + inset, a.y + fs * 1.1, "상대", T.enemy, "left");
     put(a.x + inset, a.y + a.h - fs * 1.1, "우리 편", T.ally, "left");
   } else {
@@ -1258,24 +1258,23 @@ function drawDivider(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.lineWidth = 1;
   ctx.setLineDash([3, 7]);
   ctx.beginPath();
-  if (L.portrait) {
-    const y =
-      Math.round((L.enemyBoard.y + L.enemyBoard.h + L.allyBoard.y) / 2) + 0.5;
+  if (L.stacked) {
+    const y = Math.round((L.enemyBoard.y + L.enemyBoard.h + L.allyBoard.y) / 2) + 0.5;
     ctx.moveTo(L.allyBoard.x, y);
     ctx.lineTo(L.allyBoard.x + L.allyBoard.w, y);
   } else {
-    const x =
-      Math.round((L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2) + 0.5;
+    const x = Math.round((L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2) + 0.5;
     ctx.moveTo(x, L.allyBoard.y - L.labelH);
     ctx.lineTo(x, L.allyBoard.y + L.allyBoard.h);
   }
   ctx.stroke();
   ctx.restore();
 
-  const cx = L.portrait
-    ? L.w / 2
+  // 두 보드 사이가 곧 전선이다.
+  const cx = L.stacked
+    ? L.allyBoard.x + L.allyBoard.w / 2
     : (L.allyBoard.x + L.allyBoard.w + L.enemyBoard.x) / 2;
-  const cy = L.portrait
+  const cy = L.stacked
     ? (L.enemyBoard.y + L.enemyBoard.h + L.allyBoard.y) / 2
     : L.allyBoard.y + L.allyBoard.h / 2;
   const rad = Math.max(10, L.cell * 0.15);
@@ -1305,16 +1304,44 @@ function drawDivider(ctx: CanvasRenderingContext2D, L: Layout): void {
 /** 다시 뽑기 버튼. 카드 머리줄 오른쪽 끝에 둔다. */
 export function rerollRect(L: Layout): Rect {
   const r = L.offerCards;
+  if (L.columns) {
+    /**
+     * 세로줄에서는 카드가 줄을 꽉 채우므로 머리줄도 줄 폭을 그대로 쓴다.
+     *
+     * 높이를 고정값으로 두면 안 된다 — 844×320 같은 납작한 가로에서 머리줄 띠가
+     * 44px뿐인데 버튼이 34px+여백을 먹어 안내 문구 위로 2px 올라탔다.
+     * **띠에서 비율로 뽑아야** 화면이 줄어도 안 넘친다.
+     */
+    const top = L.notice.y + L.notice.h;
+    const band = Math.max(1, r.y - top);
+    const h = Math.max(22, Math.min(34, band * 0.62));
+    return { x: r.x, y: r.y - h - band * 0.16, w: r.w, h };
+  }
   const h = Math.max(24, Math.min(34, r.h * 0.13));
   const w = Math.max(88, r.w * 0.28);
   return { x: r.x + r.w - w, y: r.y - h - h * 0.34, w, h };
 }
 
-/** 슬롯은 늘 세 칸. 하나를 사도 남은 카드가 넓어지지 않는다. */
+/**
+ * 슬롯은 늘 세 칸. 하나를 사도 남은 카드가 넓어지지 않는다.
+ *
+ * 세로줄에서는 위에서 아래로 쌓고, 접힌 구성에서는 가로로 늘어놓는다.
+ * **보이는 곳과 눌리는 곳이 이 함수 하나에서 나온다** — 렌더도 히트테스트도
+ * 여기만 부른다. 둘을 따로 계산하면 반드시 갈라진다.
+ */
 export function offerRects(L: Layout, count: number = OFFER_SLOTS): Rect[] {
   const r = L.offerCards;
   const n = Math.max(1, count);
   const gap = L.offerGap;
+  if (L.columns) {
+    const ch = (r.h - gap * (n - 1)) / n;
+    return Array.from({ length: count }, (_, i) => ({
+      x: r.x,
+      y: r.y + i * (ch + gap),
+      w: r.w,
+      h: ch,
+    }));
+  }
   const cw = (r.w - gap * (n - 1)) / n;
   return Array.from({ length: count }, (_, i) => ({
     x: r.x + i * (cw + gap),
@@ -1343,45 +1370,53 @@ function drawTeamStrip(
   };
   for (const c of cats) counts[c.breed.cls] += 1;
 
+  const order: ClassKind[] = ["warrior", "rogue", "archer", "mage"];
+  const rows: [string, number, string][] = [
+    ...order.map((cls) => [CLASS_LABEL[cls], counts[cls], CLASS_COLOR[cls]] as [string, number, string]),
+    ["상대", livingCats(s.enemy).length, T.enemy],
+  ];
+
+  if (L.columns) {
+    /**
+     * 세로줄에서는 **한 줄에 하나씩** — 이름 왼쪽, 수 오른쪽.
+     *
+     * 가로 띠였을 때는 다섯 칸을 나눠 이름 위·수 아래로 쌓았는데, 그 배치가
+     * 화면에서 가장 크고 밝은 물건이 되어 판 위의 예고보다 눈에 먼저 들어왔다
+     * (design-brief 4-2가 잡은 위계 역전). 옆으로 나오면서 크기를 줄일 수 있다.
+     */
+    const rowH = r.h / rows.length;
+    const fs = Math.max(10, Math.min(15, rowH * 0.42));
+    const px = Math.max(1, rowH * 0.062);
+    rows.forEach(([label, n, hue], i) => {
+      const cy = r.y + rowH * (i + 0.5);
+      uiText(ctx, label, r.x, cy, fs, T.muted, { align: "left", weight: 700 });
+      numText(ctx, String(n), r.x + r.w, cy, px, n > 0 ? hue : T.muted, "right", false);
+      if (i < rows.length - 1) {
+        const y = Math.round(r.y + rowH * (i + 1)) + 0.5;
+        ctx.strokeStyle = "rgba(239,224,198,0.07)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(r.x, y);
+        ctx.lineTo(r.x + r.w, y);
+        ctx.stroke();
+      }
+    });
+    return;
+  }
+
   const cap = Math.max(9, r.h * 0.17);
   const px = Math.max(2, Math.round(r.h * 0.048));
-  const order: ClassKind[] = ["warrior", "rogue", "archer", "mage"];
-  const cols = order.length + 1;
+  const cols = rows.length;
   const cw = r.w / cols;
 
-  order.forEach((cls, i) => {
+  rows.forEach(([label, n, hue], i) => {
     const cx = r.x + cw * i + cw / 2;
-    uiText(ctx, CLASS_LABEL[cls], cx, r.y + r.h * 0.3, cap, T.muted, {
+    uiText(ctx, label, cx, r.y + r.h * 0.3, cap, T.muted, {
       align: "center",
       weight: 700,
     });
-    numText(
-      ctx,
-      String(counts[cls]),
-      cx,
-      r.y + r.h * 0.66,
-      px,
-      CLASS_COLOR[cls],
-      "center",
-      false,
-    );
+    numText(ctx, String(n), cx, r.y + r.h * 0.66, px, hue, "center", false);
   });
-
-  const cx = r.x + cw * order.length + cw / 2;
-  uiText(ctx, "상대", cx, r.y + r.h * 0.3, cap, T.muted, {
-    align: "center",
-    weight: 700,
-  });
-  numText(
-    ctx,
-    String(livingCats(s.enemy).length),
-    cx,
-    r.y + r.h * 0.66,
-    px,
-    T.enemy,
-    "center",
-    false,
-  );
 
   ctx.strokeStyle = "rgba(239,224,198,0.08)";
   ctx.lineWidth = 1;
@@ -1469,6 +1504,18 @@ function drawPortraitWell(
  * 오른쪽 끝은 옛 원의 오른쪽 끝에 그대로 둔다. 호출부 셋이 카드 오른쪽 모서리에서
  * 자리를 잡고 있어서, 기준이 움직이면 그 셋을 다시 맞춰야 한다.
  */
+/**
+ * 뱃지가 실제로 먹는 폭.
+ *
+ * 알약이 되면서 폭이 자릿수에 따라 달라진다. 눕힌 카드는 글 오른쪽에 뱃지를
+ * 두므로 **글이 자리를 미리 떼야** 하는데, `br * 2.1`처럼 어림하면 두 자리
+ * 비용에서 뱃지가 능력 줄을 덮는다(실제로 그랬다).
+ */
+function costBadgeWidth(ctx: CanvasRenderingContext2D, r: number, cost: number): number {
+  const px = Math.max(1, (r * 1.0) / 7);
+  return r * 0.88 + r * 1.24 * 0.86 + r * 0.12 + numTextWidth(ctx, String(cost), px);
+}
+
 function drawCostBadge(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -1536,19 +1583,29 @@ function drawRelicCard(
   const fsName = Math.max(12, Math.min(21, cr.w * 0.11));
   const fsBody = Math.max(10, fsName * 0.68);
 
-  const br = Math.max(11, (vertical ? cr.w : cr.h) * 0.105);
-  drawCostBadge(ctx, cr.x + cr.w - pad - br * 0.9, cr.y + pad + br * 0.9, br, cost, afford);
+  const br = Math.max(11, (vertical ? cr.w : cr.h) * (vertical ? 0.105 : 0.17));
+  // 세운 카드는 모서리에, 눕힌 카드는 오른쪽 가운데에. 눕힌 카드에서 모서리에
+  // 두면 이름 줄과 같은 높이가 되어 알약이 글자를 덮는다.
+  drawCostBadge(
+    ctx,
+    cr.x + cr.w - pad - br,
+    vertical ? cr.y + pad + br * 0.9 : cr.y + cr.h / 2,
+    br,
+    cost,
+    afford,
+  );
 
   if (!vertical) {
+    const relicTw = tw - costBadgeWidth(ctx, br, cost) - pad * 0.6;
     uiText(ctx, relic.name, cr.x + pad, cr.y + cr.h * 0.32, fsName, afford ? T.text : T.muted, {
       align: "left",
       weight: 800,
-      maxWidth: tw - br * 2,
+      maxWidth: relicTw,
     });
     uiText(ctx, `${relic.want} · ${relic.toll}`, cr.x + pad, cr.y + cr.h * 0.66, fsBody, afford ? T.fish : T.muted, {
       align: "left",
       weight: 600,
-      maxWidth: tw - br * 2,
+      maxWidth: relicTw,
     });
     return;
   }
@@ -1672,14 +1729,7 @@ function drawOffers(
         t,
       );
       const br = Math.max(12, cr.w * 0.105);
-      drawCostBadge(
-        ctx,
-        cr.x + cr.w - pad - br * 0.9,
-        cr.y + pad + br * 0.9,
-        br,
-        o.cost,
-        afford,
-      );
+      drawCostBadge(ctx, cr.x + cr.w - pad - br, cr.y + pad + br * 0.9, br, o.cost, afford);
 
       const fsName = Math.max(12, Math.min(22, cr.w * 0.115));
       const fsAbil = fsName * 0.78;
@@ -1741,7 +1791,8 @@ function drawOffers(
     const br = Math.max(11, cr.h * 0.17);
     const fs = Math.max(11, cr.h * 0.19);
     const textX = well.x + well.w + pad;
-    const textW = cr.x + cr.w - pad - br * 2.1 - textX;
+    // 뱃지가 실제로 먹는 폭만큼 뗀다. 어림하면 두 자리 비용에서 글을 덮는다.
+    const textW = cr.x + cr.w - pad - costBadgeWidth(ctx, br, o.cost) - pad * 0.6 - textX;
     const roomy = cr.h >= 84;
 
     uiText(
@@ -1815,6 +1866,40 @@ function offerHeadline(s: RunState): string {
   return `${team} · 생선을 쓰거나, 그냥 다음 웨이브로`;
 }
 
+/** 다시 뽑기 버튼. 두 구성이 같은 그림을 쓰도록 따로 뺐다. */
+function drawRerollButton(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+  rr: Rect,
+): void {
+  const canRoll = s.gold >= REROLL_COST;
+  roundRect(ctx, rr, rr.h * 0.5);
+  ctx.fillStyle = canRoll ? "rgba(111,182,220,0.14)" : "rgba(239,224,198,0.04)";
+  ctx.fill();
+  ctx.strokeStyle = canRoll ? T.fish : "rgba(239,224,198,0.12)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  const rfs = Math.max(10, rr.h * 0.46);
+  // 세로줄에서는 버튼이 줄 폭을 다 쓰므로 글자를 가운데로 몬다. 접힌 구성에서는
+  // 오른쪽 끝에 붙은 작은 버튼이라 글자를 오른쪽으로 민다.
+  const rollPx = Math.max(1, rr.h * 0.09);
+  const rollRight = rr.x + rr.w - rr.w * (L.columns ? 0.06 : 0.12);
+  const numW = numTextWidth(ctx, String(REROLL_COST), rollPx);
+  uiText(
+    ctx,
+    "다시 뽑기",
+    L.columns ? rr.x + rr.w * 0.06 : rr.x + rr.w * 0.42,
+    rr.y + rr.h / 2,
+    rfs,
+    canRoll ? T.text : T.muted,
+    { align: L.columns ? "left" : "right", weight: 700 },
+  );
+  // 값 왼쪽에 생선. 카드 뱃지·HUD와 같은 그림이라 "이것도 생선 값"이 붙는다.
+  drawFish(ctx, rollRight - numW - rr.h * 0.34, rr.y + rr.h / 2, rr.h * 0.5, canRoll ? T.fish : T.muted);
+  numText(ctx, String(REROLL_COST), rollRight, rr.y + rr.h / 2, rollPx, canRoll ? T.fish : T.muted, "right", false);
+}
+
 function drawBottomZone(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -1822,6 +1907,45 @@ function drawBottomZone(
 ): void {
   const reward = s.phase === "reward";
   const rr = rerollRect(L);
+
+  if (L.columns) {
+    /**
+     * 세로줄에서는 **아무것도 덮지 않는다.**
+     *
+     * 접힌 구성에서는 카드가 판 위로 자라므로 화면을 어둡게 깔아 "지금은 카드를
+     * 보는 시간"임을 알렸다. 세로줄에서는 카드가 제 줄에 서 있고, 무엇보다 이제
+     * 상점은 **적을 보면서 사는 자리**다 — 판을 어둡게 하면 그 순서를 만든 이유가
+     * 사라진다.
+     */
+    if (reward) {
+      const p = L.offersPanel;
+      roundRect(ctx, p, Math.min(16, p.w * 0.06));
+      ctx.fillStyle = "rgba(20,14,11,0.72)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(239,224,198,0.08)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    // 왼쪽 줄(직업 수 + 목표)은 전투 중에도 남는다. 무엇이 몇 마리 살아 있고
+    // 목표를 얼마나 채웠는지가 전투를 보는 정보다. 두 블록을 한 패널로 묶어야
+    // 한 덩어리로 읽힌다 — 따로 깔았더니 직업 수만 떠 있는 상자로 보였다.
+    const lp = {
+      x: L.offers.x - 10,
+      y: L.offers.y - 10,
+      w: L.offers.w + 20,
+      h: L.synergyBar.y + L.synergyBar.h - L.offers.y + 20,
+    };
+    roundRect(ctx, lp, Math.min(16, lp.w * 0.06));
+    ctx.fillStyle = "rgba(20,14,11,0.72)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(239,224,198,0.08)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    drawTeamStrip(ctx, L, s);
+    if (reward) drawRerollButton(ctx, L, s, rr);
+    if (reward) drawOffers(ctx, L, s);
+    return;
+  }
 
   // 보상 단계에는 카드가 보드 위로 자란다. 그동안 보드는 어차피 만질 수 없으므로
   // (main.ts canRearrange) 덮어도 되지만, 덮는다는 걸 눈에 보이게 해야 한다.
@@ -1869,50 +1993,7 @@ function drawBottomZone(
       T.muted,
       { align: "left", weight: 600 },
     );
-
-    const canRoll = s.gold >= REROLL_COST;
-    roundRect(ctx, rr, rr.h * 0.5);
-    ctx.fillStyle = canRoll
-      ? "rgba(111,182,220,0.14)"
-      : "rgba(239,224,198,0.04)";
-    ctx.fill();
-    ctx.strokeStyle = canRoll ? T.fish : "rgba(239,224,198,0.12)";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    const rfs = Math.max(10, rr.h * 0.46);
-    uiText(
-      ctx,
-      "다시 뽑기",
-      rr.x + rr.w * 0.42,
-      rr.y + rr.h / 2,
-      rfs,
-      canRoll ? T.text : T.muted,
-      {
-        align: "right",
-        weight: 700,
-      },
-    );
-    // 값 왼쪽에 생선. 카드 뱃지·HUD와 같은 그림이라 "이것도 생선 값"이 붙는다.
-    const rollPx = Math.max(1, rr.h * 0.09);
-    const rollRight = rr.x + rr.w - rr.w * 0.12;
-    drawFish(
-      ctx,
-      rollRight - numTextWidth(ctx, String(REROLL_COST), rollPx) - rr.h * 0.34,
-      rr.y + rr.h / 2,
-      rr.h * 0.5,
-      canRoll ? T.fish : T.muted,
-    );
-    numText(
-      ctx,
-      String(REROLL_COST),
-      rollRight,
-      rr.y + rr.h / 2,
-      rollPx,
-      canRoll ? T.fish : T.muted,
-      "right",
-      false,
-    );
-
+    drawRerollButton(ctx, L, s, rr);
     drawOffers(ctx, L, s);
   } else if (s.phase !== "battle") {
     // 전투에는 이 자리를 판에게 넘긴다. 직업 수는 무엇을 살지 정할 때 쓰는
@@ -1939,38 +2020,44 @@ function drawSynergies(
 ): void {
   const r = L.synergyBar;
   const n = Math.max(1, s.synergies.length);
-  const gap = r.w * 0.016;
-  const cw = (r.w - gap * (n - 1)) / n;
   const units = boardUnits(s);
-  const fs = Math.max(10, r.h * 0.27);
+  // 세로줄에서는 위아래로 쌓고, 접힌 구성에서는 좌우로 늘어놓는다.
+  // 세로줄에서는 `synergyBar`가 이미 칩 셋에 딱 맞게 잡혀 있다(computeLayout).
+  // 같은 식을 써야 칩이 패널을 안 넘는다.
+  const gap = L.columns ? Math.max(6, r.w * 0.04) : r.w * 0.016;
+  const cw = L.columns ? r.w : (r.w - gap * (n - 1)) / n;
+  const ch = L.columns ? (r.h - gap * (n - 1)) / n : r.h;
 
   s.synergies.forEach((syn, i) => {
     const on = s.activeSynergyIds.has(syn.id);
     const hue = TRIGGER_COLOR[syn.trigger] ?? T.gold;
     const { have, need } = synergyProgress(syn.trigger, units);
-    const cr: Rect = { x: r.x + i * (cw + gap), y: r.y, w: cw, h: r.h };
+    const cr: Rect = L.columns
+      ? { x: r.x, y: r.y + i * (ch + gap), w: cw, h: ch }
+      : { x: r.x + i * (cw + gap), y: r.y, w: cw, h: ch };
+    const fs = Math.max(10, cr.h * 0.27);
 
-    roundRect(ctx, cr, r.h * 0.22);
+    roundRect(ctx, cr, cr.h * 0.22);
     ctx.fillStyle = on ? "rgba(240,186,74,0.13)" : "rgba(239,224,198,0.035)";
     ctx.fill();
     ctx.strokeStyle = on ? hue : "rgba(239,224,198,0.10)";
     ctx.lineWidth = on ? 2 : 1;
     ctx.stroke();
 
-    const padX = r.h * 0.22;
+    const padX = cr.h * 0.22;
     const inner = cr.w - padX * 2;
-    const px = Math.max(1, r.h * 0.03);
+    const px = Math.max(1, cr.h * 0.03);
     const prog = `${Math.min(have, need)}/${need}`;
 
     // 칩이 좁으면 좌우로 나눌 수 없다. 세로 화면에서 글자가 겹치던 문제.
-    const wide = cr.w > r.h * 6;
+    const wide = cr.w > cr.h * 6;
 
     if (wide) {
       uiText(
         ctx,
         triggerLabel(syn.trigger),
         cr.x + padX,
-        cr.y + r.h * 0.34,
+        cr.y + cr.h * 0.34,
         fs * 0.86,
         on ? hue : T.muted,
         {
@@ -1983,7 +2070,7 @@ function drawSynergies(
         ctx,
         prog,
         cr.x + padX,
-        cr.y + r.h * 0.72,
+        cr.y + cr.h * 0.72,
         px,
         on ? hue : T.muted,
         "left",
@@ -1993,7 +2080,7 @@ function drawSynergies(
         ctx,
         syn.name,
         cr.x + cr.w - padX,
-        cr.y + r.h * 0.34,
+        cr.y + cr.h * 0.34,
         fs * 0.86,
         on ? T.text : T.muted,
         {
@@ -2006,7 +2093,7 @@ function drawSynergies(
         ctx,
         effectLabel(syn.effect),
         cr.x + cr.w - padX,
-        cr.y + r.h * 0.72,
+        cr.y + cr.h * 0.72,
         fs * 0.8,
         on ? T.gold : "rgba(156,139,118,0.6)",
         { align: "right", weight: 600, maxWidth: inner * 0.55 },
@@ -2021,7 +2108,7 @@ function drawSynergies(
       ctx,
       triggerLabel(syn.trigger),
       cr.x + padX,
-      cr.y + r.h * 0.32,
+      cr.y + cr.h * 0.32,
       fs * 0.86,
       on ? hue : T.muted,
       {
@@ -2034,7 +2121,7 @@ function drawSynergies(
       ctx,
       prog,
       cr.x + cr.w - padX,
-      cr.y + r.h * 0.32,
+      cr.y + cr.h * 0.32,
       px,
       on ? hue : T.muted,
       "right",
@@ -2044,7 +2131,7 @@ function drawSynergies(
       ctx,
       effectLabel(syn.effect),
       cr.x + cr.w / 2,
-      cr.y + r.h * 0.72,
+      cr.y + cr.h * 0.72,
       fs * 0.76,
       on ? T.gold : "rgba(156,139,118,0.6)",
       { align: "center", weight: 600, maxWidth: inner },

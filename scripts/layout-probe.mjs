@@ -43,7 +43,7 @@ function overlapArea(a, b) {
 }
 
 let failed = 0;
-console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  전투셀  판정");
+console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  전투셀  구성    판정");
 for (const [name, w, h] of DEVICES) {
   const L = computeLayout(w, h);
   /**
@@ -68,16 +68,24 @@ for (const [name, w, h] of DEVICES) {
   // 카드가 세로로 섰는지 눕혔는지 — 눈으로 확인할 때 어느 분기인지 알아야 한다.
   const shape = L.offerCards.h >= L.offerCards.w / 3 ? "세로" : "가로";
 
+  /**
+   * 전투 배치에서 판이 정보 자리를 침범하면 안 된다.
+   *
+   * 어디를 보는지는 구성에 따라 다르다. 접힌 구성에서는 시너지 바가 판 **아래**
+   * 띠이므로 판의 밑변을 보면 되지만, 세로줄 구성에서는 시너지가 왼쪽 줄에
+   * 있어 그 검사가 늘 실패한다(판 밑변이 줄 시작보다 항상 아래다). 세로줄에서는
+   * 판이 좌우 줄과 가로로 겹치는지를 본다.
+   */
+  const battleClear = L.columns
+    ? B.allyBoard.x >= B.offers.x + B.offers.w &&
+      B.allyBoard.x + B.allyBoard.w <= B.offerCards.x &&
+      B.cell >= L.cell
+    : Math.max(B.allyBoard.y + B.allyBoard.h, B.enemyBoard.y + B.enemyBoard.h) <=
+        B.synergyBar.y + 1 && B.cell >= L.cell;
+
   // roomy=false는 준비 단계 띠까지 보드를 덮는 좁은 화면이다. 그때도 입력은 안 샌다.
   // 5x5는 세로로 10줄이 필요해 3x3보다 셀이 작다. 판정 영역을 셀 간격의 절반만큼
   // 넓혀 두었으므로 시각 셀 24px면 손가락으로 집을 수 있다.
-  // 전투 배치에서도 판이 시너지 바를 침범하면 안 된다.
-  const fieldBottom = Math.max(
-    B.allyBoard.y + B.allyBoard.h,
-    B.enemyBoard.y + B.enemyBoard.h,
-  );
-  const battleClear = fieldBottom <= B.synergyBar.y + 1 && B.cell >= L.cell;
-
   const ok =
     (L.roomy ? worst < 0.01 : true) &&
     headroom >= 0 &&
@@ -91,6 +99,7 @@ for (const [name, w, h] of DEVICES) {
       `${shape} ${String(Math.round(L.offerCards.w / 3)).padStart(3)}x${String(Math.round(L.offerCards.h)).padEnd(4)}` +
       `${String(Math.round(headroom)).padStart(8)}  ${String(Math.round(L.cell)).padStart(5)}  ` +
       `${String(Math.round(L.button.h)).padStart(4)}  ${String(Math.round(B.cell)).padStart(5)}  ` +
+      `${(L.columns ? "세로줄" : L.stacked ? "쌓음" : "눕힘").padEnd(6)}` +
       (ok ? "OK" : "실패"),
   );
 }
