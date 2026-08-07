@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "9240b7f",
+    "commit": "2a376a5",
     "dirty": false,
     "reproducible": true,
     "node": "v24.12.0",
