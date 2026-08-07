@@ -87,8 +87,8 @@ export const MAP_POLICIES = {
   "전투만": (open, row) => open.find((i) => row[i]?.kind === "battle") ?? open[0],
   // 위험을 산다. 정예가 있으면 무조건 간다.
   "정예 몰빵": (open, row) => open.find((i) => row[i]?.kind === "elite") ?? open[0],
-  // 힘을 산다. 상점이 있으면 무조건 간다.
-  "상점 몰빵": (open, row) => open.find((i) => row[i]?.kind === "shop") ?? open[0],
+  // 보스를 대비한다. 정찰이 있으면 무조건 간다.
+  "정찰 몰빵": (open, row) => open.find((i) => row[i]?.kind === "shop") ?? open[0],
   // 아무 길이나. 지도가 결정인지 아닌지의 기준선이다.
   "무작위": (open) => open[Math.floor(rng() * open.length)] ?? open[0],
 };

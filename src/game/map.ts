@@ -266,7 +266,8 @@ export function nodeInfo(kind: NodeKind): { name: string; hint: string } {
     case "elite":
       return { name: "정예", hint: "저격대가 온다. 이기면 생선과 유물" };
     case "shop":
-      return { name: "상점", hint: "싸우지 않는다. 생선을 받고 카드를 더 본다" };
+      // 종류 id는 shop이지만 하는 일은 정찰이다. 다음 보스를 대비하는 자리다.
+      return { name: "정찰", hint: "안 싸운다. 다음 보스전 회피 +2" };
     case "boss":
       return { name: "보스", hint: "레이드다. 예고를 읽어라" };
     case "battle":

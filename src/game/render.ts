@@ -2018,7 +2018,7 @@ function drawSynergies(
 const NODE_MARK: Record<NodeKind, string> = {
   battle: "전투",
   elite: "정예",
-  shop: "상점",
+  shop: "정찰",
   boss: "보스",
 };
 

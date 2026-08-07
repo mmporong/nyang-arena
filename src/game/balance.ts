@@ -17,7 +17,14 @@ export const BALANCE = {
    * 전투 보상(goldBase + wave*goldPerWave)보다 조금 적어야 한다. 더 주면
    * 싸우지 않는 쪽이 언제나 이득이라 지도가 "상점만 밟는 길 찾기"가 된다.
    */
-  shopNodeGold: 9,
+  shopNodeGold: 5,
+  /**
+   * 정찰이 주는 다음 보스전 여분 회피.
+   *
+   * 기본 회피가 6이므로 +2는 3분의 1이다. 보스전이 예고 열 번쯤 도는 것을
+   * 감안하면 두 번을 더 읽을 수 있다는 뜻이다.
+   */
+  scoutDodgeBonus: 2,
   /** 정예를 넘었을 때의 생선 배수. 저격대는 통과율이 낮으므로 값을 해야 한다. */
   eliteGoldMul: 1.6,
 

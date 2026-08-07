@@ -122,6 +122,15 @@ export interface RunState {
   nodeWave: WaveKind | null;
   /** 상점 노드가 주는 무료 재추첨. 생선을 안 쓰고 카드를 더 본다. */
   freeRerolls: number;
+  /**
+   * 다음 보스전에서만 쓰는 여분 회피.
+   *
+   * 지도가 결정이 아니었던 이유는 자원이 생선 하나뿐이라 모든 선택이 "더 벌까
+   * 덜 쓸까"로 수렴했기 때문이다. 이건 **생선으로 바꿀 수 없고** 다음 보스가
+   * 지나면 사라진다 — 환전도 저축도 안 되는 자원이라야 경로가 산수가 아닌
+   * 판단이 된다.
+   */
+  bonusDodge: number;
   /** 다음 카드 묶음에 유물을 반드시 한 장 섞는다. 정예 보상. */
   forceRelic: boolean;
   /** 마지막에 나를 막은 것. 보스면 이름과 남은 체력이 함께 뜬다. */
@@ -284,7 +293,9 @@ export function chooseNode(state: RunState, idx: number): boolean {
   if (node.kind === "shop") {
     // 싸우지 않고 힘만 사는 자리. 생선과 무료 재추첨을 주고 웨이브를 넘긴다.
     state.gold += BALANCE.shopNodeGold;
-    state.freeRerolls += 2;
+    state.freeRerolls += 1;
+    // 환전되지 않는 자원. 이것 때문에 이 길을 고르는 것이지 생선 때문이 아니다.
+    state.bonusDodge += BALANCE.scoutDodgeBonus;
     // 걸음만 먹고 웨이브는 그대로다. 보스는 같은 걸음에 오므로 **덜 싸운 팀으로**
     // 보스를 만나게 된다 — 그게 안 싸우고 얻는 것의 대가다.
     state.step += 1;
@@ -471,6 +482,7 @@ export function newRun(seed?: number): RunState {
     nodeKind: null,
     nodeWave: null,
     freeRerolls: 0,
+    bonusDodge: 0,
     forceRelic: false,
     killer: null,
     seed: runSeed,
@@ -967,6 +979,12 @@ export function startBattle(state: RunState): void {
   const wk = currentKind(state);
   state.dodgeCharges =
     wk === "boss" ? BALANCE.dodgeCharges : wk === "snipe" ? BALANCE.sniperDodgeCharges : 0;
+  if (wk === "boss" && state.bonusDodge > 0) {
+    // 얹고 곧바로 비운다. 다음 보스까지 들고 가면 저축이 되고, 저축되는 자원은
+    // 결국 생선과 같은 성질이 된다.
+    state.dodgeCharges += state.bonusDodge;
+    state.bonusDodge = 0;
+  }
   state.battleElapsed = 0;
   state.phase = "battle";
   state.notice = "";
