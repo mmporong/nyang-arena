@@ -104,8 +104,14 @@ const noRelic = means["유물 안 삼"] ?? 0;
 const bestFocus = Math.max(...["전사", "도적", "궁수", "마법사"].map((c) => means[`${c} 몰빵`] ?? 0));
 console.log(`\n최선과 최악의 격차: ${spread.toFixed(1)}웨이브`);
 console.log(`유물을 안 사는 것(${noRelic.toFixed(1)}) 대비 최고 몰빵(${bestFocus.toFixed(1)}): ${(bestFocus - noRelic).toFixed(1)}웨이브`);
+/**
+ * 기준 4.0웨이브. 개입 축을 재조정할 때 빌드가 살아 있는지 지키는 관문이다 —
+ * 실행 실력이 빌드 결정을 덮으면 안 된다는 것이 이 숫자의 존재 이유다.
+ */
+const relicOk = bestFocus - noRelic >= 4.0;
 console.log(
-  spread < 1.5
-    ? "판정: 유물이 빌드를 가르지 못한다 — 무엇을 사든 같은 곳에 도착한다"
-    : "판정: 유물이 빌드를 가른다",
+  relicOk
+    ? "판정: 유물이 빌드를 가른다"
+    : "판정: 유물이 빌드를 가르지 못한다 — 무엇을 사든 같은 곳에 도착한다",
 );
+if (!relicOk) process.exitCode = 1;

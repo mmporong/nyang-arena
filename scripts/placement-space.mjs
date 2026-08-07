@@ -134,10 +134,9 @@ for (const [name, arrange] of Object.entries(ARRANGERS)) {
 const vals = Object.values(means);
 const spread = Math.max(...vals) - Math.min(...vals);
 console.log(`\n최선과 최악의 평균 격차: ${spread.toFixed(1)}웨이브`);
+/** 기준 2.0웨이브. 개입을 조정해도 배치가 결과를 갈라야 한다. */
+const placeOk = spread >= 2.0;
 console.log(
-  spread < 1.0
-    ? "판정: 배치는 결정이 아니다 — 어떻게 놓든 같은 곳에 도착한다"
-    : spread < 2.5
-      ? "판정: 배치가 조금 영향을 준다"
-      : "판정: 배치가 결정이다",
+  placeOk ? "판정: 배치가 결정이다" : "판정: 배치가 결정이 아니다 — 어디에 놓든 같다",
 );
+if (!placeOk) process.exitCode = 1;
