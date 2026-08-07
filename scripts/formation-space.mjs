@@ -69,6 +69,15 @@ const TARGET_WIN = 0.6;
  */
 const CAL_RUNS = Number(process.env.CAL_RUNS ?? RUNS);
 /** 포화된 칸(0%·100%)은 대형 차이를 못 담는다. 판정에서 뺀다. */
+/**
+ * 회피 차지를 바꿔 볼 수 있게 연다.
+ *
+ * 기본 6인데 보스전 예고가 4~6회다. **정확히 전부 막을 수 있는 수다.** 개입하면
+ * 예고를 다 피하고, 예고를 안 맞으면 어디에 서 있었는지가 무의미해진다 —
+ * 배치 깊이가 0.2인 진짜 이유가 이것이라는 가설을 여기서 시험한다.
+ */
+const DODGE = process.env.DODGE ? Number(process.env.DODGE) : null;
+
 const SAT_LO = 3;
 const SAT_HI = 97;
 
@@ -83,6 +92,24 @@ const TEAM = [
 ];
 
 const cell = (row, col) => row * BOARD_COLS + col;
+
+/**
+ * 실제 게임이 이 웨이브의 보스에게 주는 체력.
+ *
+ * **보정하지 않는다.** 이 스크립트가 묻는 것은 "이 보스에게 어느 대형이 나은가"
+ * (열 안 비교)지 "어느 보스가 센가"(열 간 비교)가 아니다. 열 안에서만 비교하면
+ * 보스마다 난이도가 달라도 상관없다.
+ *
+ * 보정을 넣었더니 오히려 비교가 망가졌다 — 같은 승률을 만들려니 체력이 8,864와
+ * 96,140으로 11배 벌어졌고, 전투 시간이 10.9초와 115.2초가 됐다. 실제 보스전은
+ * p50 18.2초다. **115초짜리 전투에서 좋은 대형은 이 게임의 답이 아니다.**
+ */
+function gameHp(breed) {
+  const scale = Math.pow(BALANCE.enemyScale, WAVE - 1);
+  const ramp = 0.5; // 첫 보스와 후반 보스의 중간
+  const hpMul = (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp) * bossKit(breed.id).power;
+  return Math.round(breed.hp * scale * hpMul);
+}
 
 /**
  * 대형 넷. `[근접 셋의 자리, 원거리 셋의 자리]`로 적는다.
@@ -124,7 +151,7 @@ const ARCHETYPES = BOSS_BREEDS.map((b) => ({
  * 대형은 셀에 놓기만 하면 `startBattle`이 `resetPositions`로 좌표를 잡아 준다 —
  * 브라우저와 같은 경로다.
  */
-function fight(formation, archetype, seed, intervene, tgMul) {
+function fight(formation, archetype, seed, intervene, hp) {
   const s = newRun(seed);
 
   s.ally = emptyBoard();
@@ -141,10 +168,9 @@ function fight(formation, archetype, seed, intervene, tgMul) {
   const bossCell = cell(2, 2);
   const boss = makeCat(archetype.breed, "enemy", bossCell);
   boss.radius = BOSS_RADIUS;
-  // 체력은 게임 공식 그대로. 난이도 손잡이가 아니다.
-  const hpMul = (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * 0.5) * bossKit(archetype.breed.id).power;
-  boss.maxHp = Math.round(boss.maxHp * scale * hpMul);
-  boss.hp = boss.maxHp;
+  // 난이도는 보스 체력으로 맞춘다. 이유는 calibrate() 주석에 있다.
+  boss.maxHp = hp;
+  boss.hp = hp;
   // 평타는 게임 공식 그대로. 여기를 만지면 존재할 수 없는 상태를 재게 된다.
   boss.atk = Math.round(boss.atk * scale * BALANCE.bossAtkMul);
   s.enemy[bossCell] = boss;
@@ -166,48 +192,68 @@ function fight(formation, archetype, seed, intervene, tgMul) {
 
   startBattle(s);
   if (s.phase !== "battle") return null;
+  if (DODGE !== null) s.dodgeCharges = DODGE;
 
-  /**
-   * 난이도 손잡이는 **예고 피해**다.
-   *
-   * 체력으로 맞추려 했더니 개입을 켠 쪽에서 상한(20만)에 걸렸다. 원인은
-   * 취약 창이 `maxHp * strikeFrac * 콤보`로 **비율 피해**라, 체력을 아무리
-   * 올려도 개입하는 쪽은 같은 횟수로 뚫기 때문이다. 창 하나가 최대 체력의
-   * 15~20%를 깎는다.
-   *
-   * 예고 피해는 개입으로 피할 수 있는 것이므로, 이걸 손잡이로 쓰면 개입을
-   * 켠 쪽과 끈 쪽 모두 정상 범위 안에서 난이도가 움직인다.
-   */
-  const keepFirst = BALANCE.telegraphDmgFirst;
-  const keepMain = BALANCE.telegraphDmg;
-  BALANCE.telegraphDmgFirst = keepFirst * tgMul;
-  BALANCE.telegraphDmg = keepMain * tgMul;
-  try {
-    const respond = intervene ? makeBossBot() : null;
-    for (let g = 0; g < 4000; g++) {
-      if (s.phase !== "battle") break;
-      if (respond) respond(s);
-      stepBattle(s, 100);
-    }
-  } finally {
-    BALANCE.telegraphDmgFirst = keepFirst;
-    BALANCE.telegraphDmg = keepMain;
+  const respond = intervene ? makeBossBot() : null;
+  for (let g = 0; g < 4000; g++) {
+    if (s.phase !== "battle") break;
+    if (respond) respond(s);
+    stepBattle(s, 100);
   }
-  // 보스가 죽었으면 이긴 것이다. 타임아웃도 패배로 친다(게임과 같은 규칙).
-  return livingCats(s.enemy).length === 0 && livingCats(s.ally).length > 0;
+  /**
+   * 승패만 돌려주면 0%·100% 칸이 왜 그런지 알 수 없다. 그래서 **어떻게** 끝났는지를
+   * 같이 돌려준다 — 전멸인지 타임아웃인지, 예고를 몇 번 맞았는지, 보스를 얼마나
+   * 깎았는지. 0%가 "예고에 녹았다"인지 "보스를 못 깎아 시간이 다 됐다"인지에 따라
+   * 고칠 곳이 완전히 다르다.
+   */
+  const bossNow = s.enemy.find((c) => c?.radius > 0);
+  const bossDead = livingCats(s.enemy).length === 0;
+  const allyLeft = livingCats(s.ally).length;
+  return {
+    win: bossDead && allyLeft > 0,
+    wipe: allyLeft === 0,
+    timeout: !bossDead && allyLeft > 0,
+    sec: s.battleElapsed / 1000,
+    seen: s.telegraphsSeen,
+    eaten: s.telegraphsEaten,
+    bossLeft: bossNow ? Math.max(0, bossNow.hp) / Math.max(1, bossNow.maxHp) : 0,
+    allyLeft,
+  };
 }
 
 /** 어떤 설정에서의 승률. */
-function winRate(formation, arch, intervene, tgMul, runs) {
-  let win = 0;
-  let n = 0;
+/** 승률만 필요할 때. 보정 이분 탐색이 쓴다. */
+function winRate(formation, arch, intervene, hp, runs) {
+  return detail(formation, arch, intervene, hp, runs).winPct / 100;
+}
+
+/** 승률과 함께 **어떻게 끝났는지**를 모은다. */
+function detail(formation, arch, intervene, hp, runs) {
+  const acc = { n: 0, win: 0, wipe: 0, timeout: 0, sec: 0, seen: 0, eaten: 0, bossLeft: 0, allyLeft: 0 };
   for (let i = 0; i < runs; i++) {
-    const r = fight(formation, arch, i + 1, intervene, tgMul);
+    const r = fight(formation, arch, i + 1, intervene, hp);
     if (r === null) continue;
-    n += 1;
-    if (r) win += 1;
+    acc.n += 1;
+    if (r.win) acc.win += 1;
+    if (r.wipe) acc.wipe += 1;
+    if (r.timeout) acc.timeout += 1;
+    acc.sec += r.sec;
+    acc.seen += r.seen;
+    acc.eaten += r.eaten;
+    acc.bossLeft += r.bossLeft;
+    acc.allyLeft += r.allyLeft;
   }
-  return n ? win / n : 0;
+  const d = Math.max(1, acc.n);
+  return {
+    winPct: (acc.win / d) * 100,
+    wipePct: (acc.wipe / d) * 100,
+    timeoutPct: (acc.timeout / d) * 100,
+    sec: acc.sec / d,
+    seen: acc.seen / d,
+    eaten: acc.eaten / d,
+    bossLeftPct: (acc.bossLeft / d) * 100,
+    allyLeft: acc.allyLeft / d,
+  };
 }
 
 /**
@@ -217,20 +263,47 @@ function winRate(formation, arch, intervene, tgMul, runs) {
  * 상태로 맞춘다 — 개입을 켜고 맞추면 개입 효과가 보정에 흡수돼 버린다.
  */
 /**
- * 보정을 **개입 모드마다 따로** 한다.
+ * 정석 대형이 목표 승률이 되는 **보스 체력**을 찾는다.
  *
- * 개입을 끈 기준으로만 맞추면 켰을 때 전부 100%가 되고, 그러면 두 가지가
- * 구분되지 않는다 — 개입이 대형을 지운 것인지, 개입이 그냥 세서 천장에 붙은
- * 것인지. 각각 정석 대형이 같은 승률이 되게 맞춰 놓고 비교해야 대형 효과만
- * 남는다.
+ * ## 왜 체력인가
+ *
+ * 난이도를 조절할 값으로 셋을 시도했고 앞의 둘은 틀렸다.
+ *
+ *   공격력  보스의 위협은 평타가 아니라 예고인데, 예고 피해는 맞는 쪽 최대
+ *           체력 비율로 들어가고 boss.atk과 무관하다. 게다가 bossAtkMul이
+ *           0.28로 평타를 죽여 놨다. 그래서 무쇠발톱은 공격력 4000(정상값의
+ *           360배)에서도 승률 90%였다.
+ *   예고 피해  개입하면 예고를 피해 버려서 0이 된다. 개입을 켠 쪽에서는
+ *           아무리 올려도 승률이 안 내려간다.
+ *   체력    전투가 길어져 예고를 더 맞고, 취약 창(한 판에 한 번, 최대 체력의
+ *           24.5%)의 비중도 상대적으로 줄어든다. **개입을 켜든 끄든 통한다.**
+ *
+ * ## 못 찾으면 에러를 낸다
+ *
+ * 예전 구현은 탐색 범위(20만)를 못 벗어나면 그 경계값을 조용히 답으로 돌려줬다.
+ * 체력 20만에서도 승률이 70%였는데 "보정 완료"로 읽혔고, 그 위에서 만든 표를
+ * 믿었다가 결과가 이상하니 코드 버그를 의심하며 시간을 버렸다.
+ * **못 찾은 것과 찾은 것은 구분돼야 한다.**
  */
+const HP_LO = 100;
+const HP_HI = 10_000_000;
+
 function calibrate(arch, intervene) {
   const base = FORMATIONS["정석 (근접 앞)"];
-  // 예고 피해가 오르면 승률은 단조 감소한다.
-  let lo = 0.05;
-  let hi = 12;
-  for (let i = 0; i < 18; i++) {
-    const mid = (lo + hi) / 2;
+  let lo = HP_LO;
+  let hi = HP_HI;
+  // 경계에서 목표를 감싸는지 먼저 확인한다. 안 감싸면 이분 탐색이 무의미하다.
+  const atLo = winRate(base, arch, intervene, HP_LO, CAL_RUNS);
+  const atHi = winRate(base, arch, intervene, HP_HI, CAL_RUNS);
+  if (atLo < TARGET_WIN || atHi > TARGET_WIN) {
+    throw new Error(
+      `보정 실패: ${arch.label} (개입 ${intervene ? "O" : "X"}) — ` +
+        `체력 ${HP_LO}에서 승률 ${(atLo * 100).toFixed(0)}%, ${HP_HI}에서 ${(atHi * 100).toFixed(0)}%. ` +
+        `목표 ${(TARGET_WIN * 100).toFixed(0)}%가 이 범위 밖이다. 범위를 넓히거나 팀/웨이브를 조정할 것.`,
+    );
+  }
+  for (let i = 0; i < 24; i++) {
+    const mid = Math.round((lo + hi) / 2);
     if (winRate(base, arch, intervene, mid, CAL_RUNS) > TARGET_WIN) lo = mid;
     else hi = mid;
   }
@@ -242,7 +315,7 @@ function table(intervene, hpOf) {
   for (const [fname, formation] of Object.entries(FORMATIONS)) {
     rows[fname] = {};
     for (const arch of ARCHETYPES) {
-      rows[fname][arch.label] = winRate(formation, arch, intervene, hpOf[arch.label], RUNS) * 100;
+      rows[fname][arch.label] = detail(formation, arch, intervene, hpOf[arch.label], RUNS);
     }
   }
   return rows;
@@ -253,7 +326,7 @@ function print(title, rows) {
   console.log(`\n${title}`);
   console.log(`${"대형".padEnd(22)}${labels.map((l) => l.padStart(16)).join("")}   최선-최악`);
   for (const [fname, byArch] of Object.entries(rows)) {
-    const vals = labels.map((l) => byArch[l]);
+    const vals = labels.map((l) => byArch[l].winPct);
     const spread = Math.max(...vals) - Math.min(...vals);
     console.log(
       `${fname.padEnd(22)}${vals.map((v) => `${v.toFixed(1)}%`.padStart(16)).join("")}   ${spread.toFixed(1)}%p`,
@@ -266,32 +339,47 @@ function print(title, rows) {
     let bn = null;
     let bv = -1;
     for (const [fname, byArch] of Object.entries(rows)) {
-      if (byArch[l] > bv) {
-        bv = byArch[l];
+      if (byArch[l].winPct > bv) {
+        bv = byArch[l].winPct;
         bn = fname;
       }
     }
     best[l] = { name: bn, val: bv };
   }
   console.log(`${"최선 대형".padEnd(22)}${labels.map((l) => best[l].name.split(" ")[0].padStart(16)).join("")}`);
+
+  /**
+   * **왜 그 승률인지**를 칸마다 편다. 승률만 보면 0%가 전멸인지 시간초과인지
+   * 알 수 없고, 그 둘은 고칠 곳이 완전히 다르다.
+   */
+  console.log(`\n  [상세] 전멸% · 시간초과% · 전투초 · 예고 본/맞은 · 보스잔여% · 생존마리`);
+  for (const [fname, byArch] of Object.entries(rows)) {
+    for (const l of labels) {
+      const d = byArch[l];
+      console.log(
+        `  ${fname.padEnd(20)} ${l.padEnd(16)} ` +
+          `전멸 ${d.wipePct.toFixed(0).padStart(3)}% · 시간초과 ${d.timeoutPct.toFixed(0).padStart(3)}% · ` +
+          `${d.sec.toFixed(1).padStart(5)}초 · 예고 ${d.seen.toFixed(1).padStart(4)}/${d.eaten.toFixed(1).padStart(4)} · ` +
+          `보스잔여 ${d.bossLeftPct.toFixed(0).padStart(3)}% · 생존 ${d.allyLeft.toFixed(1)}마리`,
+      );
+    }
+  }
   return best;
 }
 
 console.log(`보스전 ${RUNS}판 x 대형 ${Object.keys(FORMATIONS).length} x 원형 ${ARCHETYPES.length}`);
 console.log(`팀 고정(근접3·원거리3, Lv${LEVEL}) · W${WAVE} 기준 · 호위 ${BALANCE.bossEscortCount}기 · 시드 1~${RUNS}`);
 
-const hpOff = {};
-const hpOn = {};
-for (const arch of ARCHETYPES) {
-  hpOff[arch.label] = calibrate(arch, false);
-  hpOn[arch.label] = calibrate(arch, true);
-}
-const show = (m) => ARCHETYPES.map((a) => `${a.label} x${m[a.label].toFixed(2)}`).join(" · ");
-console.log(`\n난이도 보정 — 정석 대형이 승률 ${(TARGET_WIN * 100).toFixed(0)}%가 되는 예고 피해 배수`);
-console.log(`  개입 없음  ${show(hpOff)}`);
-console.log(`  개입 있음  ${show(hpOn)}`);
-console.log("  체력·평타는 게임 공식 그대로. 예고 피해만 움직인다. 모드마다 따로 맞춰야 천장이 안 섞인다.");
+const hpOf = {};
+for (const arch of ARCHETYPES) hpOf[arch.label] = gameHp(arch.breed);
+console.log(
+  `\n보스 체력 — 실제 게임 값 그대로(W${WAVE}): ` +
+    ARCHETYPES.map((a) => `${a.label} ${hpOf[a.label].toLocaleString()}`).join(" · "),
+);
+console.log("  보정하지 않는다. 열 안에서만 비교하므로 보스별 난이도 차이는 문제가 아니다.");
 
+const hpOff = hpOf;
+const hpOn = hpOf;
 const off = table(false, hpOff);
 const bestOff = print("개입 없음 — 대형만의 효과", off);
 
@@ -331,7 +419,7 @@ console.log(`  대형이 만드는 승률 폭(평균)     개입 없음 ${avg(so
  * 100%라 순위가 표본 잡음으로 뒤집힌다. 그래서 순위를 말하기 전에 **말할 자격이
  * 있는지**를 먼저 찍는다.
  */
-const cells = [...Object.values(off), ...Object.values(on)].flatMap((r) => Object.values(r));
+const cells = [...Object.values(off), ...Object.values(on)].flatMap((r) => Object.values(r).map((d) => d.winPct));
 const sat = cells.filter((v) => v <= SAT_LO || v >= SAT_HI).length;
 const satPct = (sat / cells.length) * 100;
 console.log(`  포화된 칸(<=${SAT_LO}% 또는 >=${SAT_HI}%)  ${sat}/${cells.length} (${satPct.toFixed(0)}%)`);
