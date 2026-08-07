@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "5984d52",
+    "commit": "685198b",
     "dirty": true,
     "node": "v22.23.2",
     "seeds": {
@@ -24,34 +24,34 @@
     "p25": 9,
     "median": 12,
     "p75": 17,
-    "max": 40,
-    "mean": 12.99,
+    "max": 36,
+    "mean": 13.68,
     "hitMaxWave": 0
   },
   "waveKinds": {
     "mixed": {
-      "tried": 1098,
-      "passPct": 99.7,
-      "p50Sec": 3.3,
-      "p90Sec": 5.1
+      "tried": 1097,
+      "passPct": 99.2,
+      "p50Sec": 3.2,
+      "p90Sec": 4.9
     },
     "rush": {
-      "tried": 822,
+      "tried": 895,
       "passPct": 100,
       "p50Sec": 3.6,
       "p90Sec": 5.2
     },
     "snipe": {
-      "tried": 550,
-      "passPct": 97.8,
-      "p50Sec": 4,
+      "tried": 614,
+      "passPct": 97.7,
+      "p50Sec": 3.9,
       "p90Sec": 7.2
     },
     "boss": {
-      "tried": 1427,
-      "passPct": 80,
-      "p50Sec": 18.3,
-      "p90Sec": 33.6
+      "tried": 1498,
+      "passPct": 81.5,
+      "p50Sec": 18.2,
+      "p90Sec": 32.8
     }
   },
   "balance": {
@@ -65,6 +65,6 @@
     "dodgeCharges": 6
   },
   "build": {
-    "bundleBytes": 87240
+    "bundleBytes": 87366
   }
 }

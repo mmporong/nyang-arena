@@ -42,6 +42,83 @@ let hoverCell = -1;
  */
 let phaseChangedAt = 0;
 let lastPhase: RunState["phase"] = state.phase;
+
+/* ------------------------------------------------------------------ */
+/* 계측                                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 실제 플레이 시간을 잰다.
+ *
+ * 지금까지 "한 판 12분"이라고 써 왔는데 **근거가 없었다.** 헤드리스 시뮬은
+ * 웨이브 수만 세고, 사람이 상점에서 고민하는 시간이나 배치를 만지는 시간은
+ * 세지 않는다. 외부 검토가 이걸 P1으로 잡았다 — 측정 안 된 숫자를 공개 문서에
+ * 적고 있었다.
+ *
+ * 네트워크는 쓰지 않는다. 브라우저 안에 쌓고 사람이 꺼내 간다.
+ * `window.nyangTelemetry()`가 JSON을 돌려준다.
+ */
+interface Telemetry {
+  startedAt: number;
+  endedAt: number | null;
+  wave: number;
+  /** 첫 보스전에 들어간 시각(판 시작 기준 ms). 심사자가 핵심을 보기까지의 시간. */
+  firstBossAt: number | null;
+  /** 첫 개입(회피·모임·약점)까지. 이게 곧 "게임이 시작된 순간"이다. */
+  firstInterventionAt: number | null;
+  /** 국면별 누적 시간(ms). 어디에 시간을 쓰는지가 여기서 드러난다. */
+  phaseMs: Record<string, number>;
+}
+
+let telem: Telemetry = freshTelemetry();
+const finished: Telemetry[] = [];
+let phaseEnteredAt = performance.now();
+
+function freshTelemetry(): Telemetry {
+  return {
+    startedAt: performance.now(),
+    endedAt: null,
+    wave: 1,
+    firstBossAt: null,
+    firstInterventionAt: null,
+    phaseMs: { prepare: 0, battle: 0, reward: 0, map: 0, gameover: 0 },
+  };
+}
+
+/** 국면이 끝날 때 그 국면에 머문 시간을 더한다. */
+function closePhase(now: number, phase: string): void {
+  telem.phaseMs[phase] = (telem.phaseMs[phase] ?? 0) + (now - phaseEnteredAt);
+  phaseEnteredAt = now;
+}
+
+function markIntervention(): void {
+  if (telem.firstInterventionAt === null) {
+    telem.firstInterventionAt = Math.round(performance.now() - telem.startedAt);
+  }
+}
+
+Object.defineProperty(window, "nyangTelemetry", {
+  value: () => ({
+    current: { ...telem, elapsedMs: Math.round(performance.now() - telem.startedAt) },
+    finished,
+    // 사람이 바로 읽을 수 있는 요약. 판이 여럿 쌓여야 뜻이 생긴다.
+    summary:
+      finished.length === 0
+        ? "아직 끝난 판이 없다"
+        : (() => {
+            const durs = finished.map((t) => (t.endedAt ?? 0) - t.startedAt).sort((a, b) => a - b);
+            const p = (q: number) => Math.round(durs[Math.min(durs.length - 1, Math.floor(durs.length * q))]! / 1000);
+            const firstBoss = finished.map((t) => t.firstBossAt).filter((v): v is number => v !== null);
+            return {
+              runs: finished.length,
+              durationSec: { p50: p(0.5), p90: p(0.9), max: p(1) },
+              firstBossSec: firstBoss.length
+                ? Math.round(firstBoss.reduce((a, b) => a + b, 0) / firstBoss.length / 1000)
+                : null,
+            };
+          })(),
+  }),
+});
 const PHASE_LOCK_MS = 350;
 
 /**
@@ -121,6 +198,7 @@ function resolveButtonPress(): void {
   pressOnButton = false;
   if (state.phase !== "battle" || state.dodgeCharges <= 0) return;
   const held = performance.now() - pressStartedAt;
+  markIntervention();
   state.pending.push({ kind: held >= HOLD_MS ? "gather" : "dodge" });
 }
 
@@ -141,6 +219,7 @@ canvas.addEventListener("pointerdown", (e) => {
       // 취약 창에는 연타가 곧 화력이므로 누르는 즉시 들어간다.
       const openBoss = state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
       if (openBoss) {
+        markIntervention();
         state.pending.push({ kind: "strike" });
         return;
       }
@@ -259,6 +338,7 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
  */
 function pushIntent(kind: "dodge" | "gather"): void {
   if (state.phase !== "battle") return;
+  markIntervention();
   const openBoss = state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
   if (openBoss) {
     state.pending.push({ kind: "strike" });
@@ -351,6 +431,20 @@ function frame(now: number): void {
     // 카드가 뜨고 지는 국면에서 아래 띠의 높이가 달라진다. 그때만 판을 다시
     // 잡는다 — 전투 중에 다시 잡으면 유닛이 눈앞에서 크기가 변한다.
     const wasBattle = lastPhase === "battle";
+    closePhase(now, lastPhase);
+    if (state.phase === "battle" && telem.firstBossAt === null && state.enemy.some((c) => c?.radius && c.radius > 0)) {
+      telem.firstBossAt = Math.round(now - telem.startedAt);
+    }
+    telem.wave = state.wave;
+    if (state.phase === "gameover") {
+      telem.endedAt = now;
+      finished.push(telem);
+      // 다음 판은 '다시 도전'을 누른 순간부터가 아니라 여기서부터 잰다.
+      // 죽은 화면을 보는 시간은 판이 아니다.
+    } else if (lastPhase === "gameover") {
+      telem = freshTelemetry();
+      phaseEnteredAt = now;
+    }
     lastPhase = state.phase;
     phaseChangedAt = now;
     if (wasBattle !== (state.phase === "battle")) resize();
