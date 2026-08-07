@@ -176,6 +176,23 @@ const metrics = {
     dodgeCharges: BALANCE.dodgeCharges,
   },
   build: { bundleBytes: bundleBytes() },
+  /**
+   * 미해결 축. **관문이 빨간불인 이유를 산출물이 스스로 말해야 한다.**
+   *
+   * 실패하는 시험을 관문에서 빼면 녹색이 되지만 그건 거짓말이다. 넣어 두고
+   * 빨간불인 채로 두되, 왜 빨간지가 이 파일에 적혀 있어야 읽는 사람이
+   * "고장인가 미완인가"를 구분할 수 있다.
+   */
+  openIssues: [
+    {
+      id: "map-axis",
+      what: "지도(경로 선택)가 결정 기준을 못 넘는다",
+      measured: "격차 0.9웨이브 (기준 1.5)",
+      tried: ["정예 보상 강화", "노드를 성격으로 분화", "환전 불가 전술 슬롯(회피 +2/4/6)"],
+      diagnosis: "자원이 생선 하나뿐이라 모든 경로 선택이 '더 벌까 덜 쓸까'로 수렴한다",
+      gate: "npm run map이 exit 1을 내고 npm run verify가 그것 때문에 빨간불이다",
+    },
+  ],
 };
 
 mkdirSync("docs/generated", { recursive: true });
