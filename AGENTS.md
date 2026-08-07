@@ -9,6 +9,12 @@
 전투를 관전하며 몇 웨이브까지 버티는지 겨룬다. 매 판의 시너지 규칙은 LLM이
 빌드타임에 생성하고 검증기를 통과한 것만 게임에 들어간다.
 
+**한 걸음의 순서는 `map` → `reward` → `prepare` → `battle`이다.** 길을 골라야
+상대가 정해지고(`chooseNode`가 `buildEnemyWave`와 `rollOffers`를 부른다), 그
+상대를 보면서 산 다음, 산 것을 배치한다. 이 순서를 바꾸면 측정 스크립트 열 개가
+전부 옛 게임을 재게 된다 — 국면 전이는 `run.ts`에만 두고 브라우저와 하네스가
+같은 함수(`chooseNode` · `leaveShop`)를 부른다.
+
 ## 절대 규칙
 
 1. **런타임 네트워크 호출 금지.** 배포된 게임은 외부로 어떤 요청도 보내지 않는다.
@@ -49,8 +55,9 @@ src/game/balance.ts    밸런스 튜너블 (여기만 만지면 된다)
 src/game/breeds.ts     고양이 8종 정의. color는 시너지 판정 기준이라 외형과 일치해야 함
 src/game/run.ts        런 상태, 웨이브 생성, 상점, 시너지 적용
 src/game/battle.ts     고정 스텝 전투 시뮬레이션
-src/game/layout.ts     가로/세로 레이아웃 계산 (렌더와 입력이 공유)
+src/game/layout.ts     레이아웃 계산 (렌더와 입력이 공유). 판은 늘 세로, 넓으면 양옆 세로줄
 src/game/render.ts     캔버스 렌더링
+src/game/icons.ts      아이콘(생선·지도 칸). 전부 Canvas 2D 패스 — 외부 요청 0건이라 폰트도 SVG도 못 쓴다
 src/game/sprites.ts    스프라이트 로딩
 src/validate/          LLM 출력 검증기 — 빌드타임과 런타임이 공유
 scripts/               슬라이싱·생성·테스트·시뮬레이션

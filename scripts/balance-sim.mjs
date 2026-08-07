@@ -9,7 +9,7 @@
  *
  * 실행: npm run sim
  */
-import { walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, relicActive, rerollOffers, startBattle, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
@@ -109,6 +109,10 @@ function playOne(seed) {
         rerolls += 1;
         continue;
       }
+      leaveShop(s);
+      continue;
+    }
+    if (s.phase === "map") {
       walkMap(s, mapPick);
       continue;
     }

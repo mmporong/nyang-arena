@@ -9,7 +9,7 @@
  *
  * 실행: npm run trace [시드] [--dodge]
  */
-import { walkMap } from "./bot-policy.mjs";
+import { walkMap, leaveShop } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, startBattle, unitCap, relicActive, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
@@ -45,11 +45,13 @@ const team = () => {
   return `전${by.warrior} 도${by.rogue} 궁${by.archer} 법${by.mage}`;
 };
 
+// 판은 지도에서 시작한다. 길을 골라야 상대가 정해지고, 그 상대를 보고 산다.
+walkMap(s);
 const opening = buyPhase();
 console.log(`시작 상점  생선 ${s.gold + opening.reduce((a, b) => a + Number(b.match(/\((\d+)\)/)?.[1] ?? 0), 0)} → ${s.gold}`);
 console.log(`           구매: ${opening.join(", ") || "없음"}`);
 console.log(`           팀: ${team()}  (한도 ${unitCap(s.wave)})\n`);
-walkMap(s);
+leaveShop(s);
 
 // ── 웨이브 루프 ────────────────────────────────────────────────
 console.log("웨이브  성격   적  전투    예고/회피   결과   팀           생선");
@@ -57,10 +59,14 @@ console.log("──────────────────────�
 
 for (let guard = 0; guard < 200; guard++) {
   if (s.phase === "gameover") break;
+  if (s.phase === "map") {
+    walkMap(s);
+    continue;
+  }
   if (s.phase === "reward") {
     const got = buyPhase();
     if (got.length > 0) console.log(`        └ 구매: ${got.join(", ")}`);
-    walkMap(s);
+    leaveShop(s);
     continue;
   }
 

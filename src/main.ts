@@ -4,12 +4,12 @@ import { mapNodeRects, offerRects, render, rerollRect, type DragState } from "./
 import {
   buyOffer,
   chooseNode,
+  leaveShop,
   mapStep,
   moveCat,
   newRun,
   rerollOffers,
   startBattle,
-  syncStage,
   type RunState,
 } from "./game/run.ts";
 import { openLanes } from "./game/map.ts";
@@ -164,7 +164,7 @@ function pointerPos(e: PointerEvent): { x: number; y: number } {
  *
  * reward를 뺀 이유: 보상 카드 패널이 좁은 화면에서 보드를 덮는데, 그 상태로
  * 보드가 반응하면 고양이를 집으려던 탭이 카드 구매로 새어 들어간다.
- * 흐름은 전투 → 보상(구매) → 준비(배치) → 전투다.
+ * 흐름은 **지도(길) → 보상(적을 보며 구매) → 준비(배치) → 전투**다.
  */
 function canRearrange(): boolean {
   return state.phase === "prepare";
@@ -178,10 +178,8 @@ function onPrimaryAction(): void {
     case "battle":
       break;
     case "reward":
-      // 상점 다음은 배치가 아니라 지도다. 어디로 갈지 먼저 고른다.
-      syncStage(state);
-      state.phase = "map";
-      state.notice = "";
+      // 전이는 run.ts가 갖는다. 여기 인라인으로 두면 측정 스크립트와 갈라진다.
+      leaveShop(state);
       break;
     case "map":
       break;

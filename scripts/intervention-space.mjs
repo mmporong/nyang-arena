@@ -14,7 +14,7 @@
  *
  * 실행: npm run intervention
  */
-import { walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
 import { livingCats } from "../src/game/types.ts";
 import { buyOffer, newRun, startBattle, relicActive, currentKind } from "../src/game/run.ts";
@@ -97,6 +97,10 @@ function play(policy, seed) {
         if (!buyOffer(s, afford[0])) s.offers = s.offers.map((o) => (o === afford[0] ? null : o));
         continue;
       }
+      leaveShop(s);
+      continue;
+    }
+    if (s.phase === "map") {
       walkMap(s, mapPick);
       continue;
     }

@@ -63,6 +63,9 @@ export function affordable(s) {
  * 사람이 겪는 값이 아니게 된다. 예전에 상점 → 배치로 바로 넘어가던 자리를
  * 지도로 바꾸지 않았더니, 심은 옛 게임을 재고 있었다.
  *
+ * **한 걸음의 순서는 지도 → 상점 → 배치다.** 그래서 이 함수는 `map` 국면에서
+ * 불리고, 부르고 나면 `reward`(상점)가 된다. 상점을 나서는 것은 `leaveShop`이다.
+ *
  * `pick`은 고를 수 있는 칸들 중 하나를 고르는 함수다. 기본은 첫 칸(무작위에
  * 가깝지 않음)이 아니라 시드 난수 — 정책을 안 주면 아무 길이나 간다.
  */
@@ -80,6 +83,14 @@ export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
   const idx = pick(open, row) ?? open[0];
   if (!chooseNode(s, idx)) chooseNode(s, open[0]);
 }
+
+/**
+ * 상점을 나선다. 브라우저의 버튼과 **같은 함수**를 부른다.
+ *
+ * 정찰 칸이면 다시 지도로, 아니면 배치로 간다. 스크립트가 이 판정을 각자
+ * 복제하면 반드시 갈라진다 — 그래서 `run.ts`에만 둔다.
+ */
+export { leaveShop } from "../src/game/run.ts";
 
 /** 길 고르기 정책들. `npm run map`이 이걸 비교한다. */
 export const MAP_POLICIES = {

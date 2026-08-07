@@ -2360,8 +2360,8 @@ export function buttonText(s: RunState): string {
         : `탭 흩어짐 · 꾹 모임   ${s.dodgeCharges}`;
     }
     case "reward":
-      // 상점 다음은 배치가 아니라 지도다. 어디로 갈지 먼저 고른다.
-      return "길 고르기";
+      // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
+      return s.nodeKind === "shop" ? "길 고르기" : "배치하기";
     case "map":
       return "길을 고르세요";
     case "gameover":

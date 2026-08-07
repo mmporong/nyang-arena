@@ -25,7 +25,7 @@ import {
   rerollOffers,
   startBattle,
 } from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 
 const SCHEMA = 1;
 const RUNS = Number(process.argv[2] ?? 300);
@@ -82,6 +82,10 @@ for (let seed = 1; seed <= RUNS; seed++) {
         rerollOffers(s);
         buyAll();
       }
+      leaveShop(s);
+      continue;
+    }
+    if (s.phase === "map") {
       walkMap(s, mapPick);
       continue;
     }

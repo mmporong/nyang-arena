@@ -12,7 +12,7 @@
  * 실행: npm run dodge:test
  */
 import { inTelegraph, stepBattle } from "../src/game/battle.ts";
-import { walkMap } from "./bot-policy.mjs";
+import { walkMap, leaveShop } from "./bot-policy.mjs";
 import { isBossStep, STAGE_STEPS } from "../src/game/map.ts";
 import { buildEnemyWave, makeCat, newRun, startBattle, currentKind } from "../src/game/run.ts";
 import { breedById } from "../src/game/breeds.ts";
@@ -44,6 +44,8 @@ function bossFightWithTelegraph(arrange) {
   s.step = bossStep;
   s.wave = bossStep + 1;
   walkMap(s);
+  // 길을 고르면 상점이 열린다. 이 테스트는 사는 것을 재지 않으므로 그냥 나선다.
+  leaveShop(s);
   if (currentKind(s) !== "boss") throw new Error("보스 걸음을 못 찾았다");
   s.ally = emptyBoard();
   arrange(s);

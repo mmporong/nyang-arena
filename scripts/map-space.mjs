@@ -15,7 +15,7 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
@@ -46,7 +46,13 @@ function play(pick, seed) {
           if (!buyOffer(s, choice)) s.offers = s.offers.map((o) => (o === choice ? null : o));
         }
       }
+      leaveShop(s);
+      continue;
+    }
+    if (s.phase === "map") {
       walkMap(s, pick);
+      // 무엇을 밟았는지는 고른 **직후**에 센다. 상점을 나선 뒤에는 nodeKind가
+      // 다음 걸음의 것으로 바뀌어 있다.
       if (s.nodeKind) seen[s.nodeKind] += 1;
       continue;
     }

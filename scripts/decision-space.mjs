@@ -7,7 +7,7 @@
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
-import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = 300;
 /**
@@ -113,6 +113,10 @@ function run(pick, runSeed) {
       }
       if (s.wave !== lastWave) { lastWave = s.wave; rerolls = 0; }
       if (rerolls < 4 && s.gold >= 12 && rerollOffers(s)) { rerolls += 1; continue; }
+      leaveShop(s);
+      continue;
+    }
+    if (s.phase === "map") {
       walkMap(s, mapPick);
       continue;
     }

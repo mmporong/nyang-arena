@@ -315,12 +315,39 @@ export function chooseNode(state: RunState, idx: number): boolean {
     return true;
   }
 
-  // **고른 뒤에** 상대를 만든다. 이 순서라야 선택이 상대를 바꾸고, 배치 화면에서
-  // 보이는 적이 실제로 싸울 적이 된다.
+  /**
+   * **고른 뒤에** 상대를 만들고, 그 상대를 보면서 산다.
+   *
+   * 한 걸음의 순서가 길 → 적 → 구매 → 배치다. 예전에는 구매가 맨 앞이었는데,
+   * 그러면 **무엇과 싸울지 모르는 채로** 사게 된다. 저격대가 오는데 원거리를
+   * 사고, 돌격대가 오는데 앞줄이 비는 일이 그래서 생겼다. 상대를 먼저 보여
+   * 주면 같은 카드가 판마다 다른 값을 갖는다.
+   */
   buildEnemyWave(state);
-  state.phase = "prepare";
-  state.notice = node.kind === "elite" ? "정예다. 이기면 유물이 나온다" : "근접은 앞줄, 원거리는 뒷줄";
+  rollOffers(state);
+  state.phase = "reward";
+  state.notice = node.kind === "elite" ? "정예다. 이기면 유물이 나온다" : "상대를 보고 고르자";
   return true;
+}
+
+/**
+ * 상점을 나선다.
+ *
+ * 정찰 칸은 싸우지 않으므로 다시 지도로 돌아가고, 나머지는 배치로 간다.
+ * **브라우저와 측정 하네스가 같은 함수를 부른다** — 이 전이를 main.ts에
+ * 인라인으로 두었더니 스크립트가 옛 순서를 재고 있던 적이 있다(bot-policy의
+ * walkMap 주석 참고). 국면 전이는 전부 여기 있어야 한다.
+ */
+export function leaveShop(state: RunState): void {
+  if (state.phase !== "reward") return;
+  if (state.nodeKind === "shop") {
+    // 정찰은 걸음만 먹었다(chooseNode에서 이미 step을 넘겼다). 다음 갈림길로.
+    state.phase = "map";
+    state.notice = "";
+    return;
+  }
+  state.phase = "prepare";
+  state.notice = "근접은 앞줄, 원거리는 뒷줄";
 }
 
 /** 스테이지 경계를 넘었으면 새 지도를 만든다. */
@@ -468,9 +495,18 @@ export function newRun(seed?: number): RunState {
   uidSeq = 0;
   const pool = resolveSynergyPool();
   const state: RunState = {
-    // 시작부터 상점을 연다. 예전에는 생선 8마리를 쥐여 주고 첫 전투가 끝날 때까지
-    // 쓸 데가 없었다 — 자원이 있는데 쓸 수 없으면 자원이 아니라 장식이다.
-    phase: "reward",
+    /**
+     * **지도부터 연다.**
+     *
+     * 예전에는 상점에서 시작했다. 생선 8마리를 쥐여 주고 첫 전투가 끝날 때까지
+     * 쓸 데가 없던 것보다는 나았지만, 무엇과 싸울지 모르는 채로 사는 것은
+     * 마찬가지였다. 이제 한 걸음의 순서는 **길 → 적 → 구매 → 배치**이고,
+     * 첫 걸음이라고 예외를 두면 그 판만 순서가 다르다.
+     *
+     * 첫 걸음이 전부 전투라 고를 것이 없어 보이지만, 어느 갈래로 가느냐가
+     * 다음 걸음의 선택지를 정한다(`openLanes`). 빈 선택이 아니다.
+     */
+    phase: "map",
     wave: 1,
     gold: BALANCE.startGold,
     best: loadBest(),
@@ -516,8 +552,8 @@ export function newRun(seed?: number): RunState {
     state.ally[cell] = makeCat(b, "ally", cell);
   });
 
-  buildEnemyWave(state);
-  rollOffers(state);
+  // 적도 카드도 여기서 만들지 않는다. `chooseNode`가 길을 고른 뒤에 만든다 —
+  // 시작 화면이 지도이므로 그 전에 만들어 두면 고르기 전에 정해진 상대가 된다.
   return state;
 }
 
@@ -1067,16 +1103,16 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
     refreshed = true;
   }
 
-  // 적은 여기서 만들지 않는다.
+  // 적도 카드도 여기서 만들지 않는다.
   //
   // 순서가 거꾸로였다 — 전투가 끝나자마자 다음 적을 만들어 두고, 그 뒤에 지도를
   // 고르게 했다. 그러면 **무엇을 골라도 이미 정해진 적과 싸운다.** 정예를 골랐는데
   // 평범한 무리가 나오고, 배치 화면에서 본 적이 실제로 나올 적이 아니었다.
   //
-  // 적은 `chooseNode`가 만든다. 골라야 상대가 정해지고, 상대를 보고 배치한다.
-  rollOffers(state);
+  // 둘 다 `chooseNode`가 만든다. 골라야 상대가 정해지고, 상대를 보고 산 다음,
+  // 산 것을 배치한다.
   applySynergies(state);
-  state.phase = "reward";
+  state.phase = "map";
   state.notice = refreshed
     ? "새 목표가 걸렸습니다"
     : `웨이브 클리어! +${goldForWave(state.wave - 1, kind === "elite" ? "snipe" : kind === "boss" ? "boss" : null)}생선`;

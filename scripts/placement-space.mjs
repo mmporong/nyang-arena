@@ -12,7 +12,7 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, moveCat, newRun, startBattle } from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 import { BOARD_COLS , livingCats } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
@@ -96,6 +96,10 @@ function play(arrange, seed) {
         if (!buyOffer(s, afford[0])) s.offers = s.offers.map((o) => (o === afford[0] ? null : o));
         continue;
       }
+      leaveShop(s);
+      continue;
+    }
+    if (s.phase === "map") {
       walkMap(s, mapPick);
       continue;
     }

@@ -12,7 +12,7 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 300);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
@@ -64,6 +64,10 @@ function play(pick, seed) {
         }
         break;
       }
+      leaveShop(s);
+      continue;
+    }
+    if (s.phase === "map") {
       walkMap(s, mapPick);
       continue;
     }

@@ -24,7 +24,7 @@ import {
   unitCap,
   upgradeCost,
 } from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, MAP_POLICIES } from "./bot-policy.mjs";
+import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 40;
@@ -96,8 +96,14 @@ function play(seed) {
       bump(w, "cats", cats.length);
       bump(w, "lv", cats.reduce((a, c) => a + c.level, 0) / Math.max(1, cats.length));
 
-      walkMap(s, mapPick);
+      leaveShop(s);
       prevGold = s.gold;
+      continue;
+    }
+    if (s.phase === "map") {
+      walkMap(s, mapPick);
+      // 길이 주는 생선(정찰 +5)은 다음 상점의 '수입'으로 잡혀야 한다. 여기서
+      // prevGold를 갱신하면 그 수입이 사라진다 — 그래서 갱신하지 않는다.
       continue;
     }
     if (s.phase === "prepare") {
