@@ -1,6 +1,15 @@
 import { BALANCE } from "./balance.ts";
 import { RELICS, type Relic } from "./relics.ts";
-import { isBossStep, makeStage, openLanes, STAGE_STEPS, type NodeKind, type StageMap } from "./map.ts";
+import {
+  BOSSES_PER_STAGE,
+  bossOrdinalInStage,
+  isBossStep,
+  makeStage,
+  openLanes,
+  STAGE_STEPS,
+  type NodeKind,
+  type StageMap,
+} from "./map.ts";
 import { seedRng, shuffle } from "./rng.ts";
 import { BREEDS, breedById } from "./breeds.ts";
 import { BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
@@ -227,22 +236,7 @@ export function veterancyScale(wave: number): number {
  */
 export type WaveKind = "mixed" | "rush" | "snipe" | "boss";
 
-/**
- * 웨이브 성격 순환.
- *
- * 보스가 **세 웨이브마다** 온다. 예전에는 다섯이었는데, 측정해 보니 보스가
- * 웨이브 수의 17%인데 전투 시간의 50%를 차지하고 런의 41%가 거기서 끝났다.
- * 즉 이 게임의 심장은 이미 보스전이고 나머지는 통과 의례였다 — 일반 웨이브는
- * 96~99%가 그냥 지나간다.
- *
- * 여섯 길이로 둔 이유: 세 길이로 줄이면 돌격이나 저격 하나를 버려야 한다.
- * 여섯이면 둘 다 유지하면서 보스 밀도는 두 배가 된다.
- */
-const WAVE_CYCLE: readonly WaveKind[] = ["mixed", "rush", "boss", "mixed", "snipe", "boss"];
-
-export function waveKind(wave: number): WaveKind {
-  return WAVE_CYCLE[(wave - 1) % WAVE_CYCLE.length] ?? "mixed";
-}
+/* 웨이브 번호로 성격을 정하던 `WAVE_CYCLE`은 지웠다. 이유는 `currentKind` 참고. */
 
 /**
  * 지금 걸음과 스테이지. `wave` 하나에서 뽑는다.
@@ -257,13 +251,28 @@ export function mapStep(state: RunState): number {
 /**
  * 이번 전투의 성격.
  *
- * 보스 자리는 지도가 아니라 웨이브 번호가 정한다(세 걸음마다). 나머지 걸음의
- * 성격만 고른 칸에서 온다 — 난이도 곡선을 보스 순번으로 잡아 두었기 때문이다.
+ * 보스 자리는 걸음이 정하고(세 걸음마다), 나머지 걸음의 성격은 고른 칸에서 온다.
+ *
+ * **웨이브 번호는 여기에 못 들어온다.** 상점 칸이 걸음만 먹고 웨이브는 안 먹으므로
+ * 둘은 반드시 갈라지고, 갈라지면 보스가 지도에 없는 자리에서 튀어나온다.
+ * 이 게임에서 "지금 무엇과 싸우는가"의 유일한 답이 이 함수다.
  */
 export function currentKind(state: RunState): WaveKind {
-  // 보스는 **걸음**이 정한다. 웨이브 번호가 아니다 — 상점을 밟으면 둘이 어긋난다.
   if (isBossStep(state.step)) return "boss";
   return state.nodeWave ?? "mixed";
+}
+
+/**
+ * 지금 걸음에 설 보스가 이 런에서 몇 번째인가 (0부터).
+ *
+ * **보스 신원의 유일한 출처다.** 예전에는 셋이 따로 계산했다 —
+ * 스폰은 `bossIndexForWave(wave)`, 지도 라벨은 `bossesSeen(s) + 앞의 보스 수 - 1`,
+ * 호버 설명은 `bossesSeen(s)`. 상점을 세 번 밟은 여정에서 웨이브가 걸음보다
+ * 뒤처져 스폰 인덱스가 되감겼고, **한 여정에 무쇠발톱이 두 번 나왔다.**
+ * 지나간 보스 칸의 라벨도 걸음이 진행되면 다음 보스 이름으로 바뀌어 있었다.
+ */
+export function bossIndexAt(state: RunState, step: number = state.step): number {
+  return (state.map.stage - 1) * BOSSES_PER_STAGE + Math.max(0, bossOrdinalInStage(step));
 }
 
 /** 이 런에서 지금까지 만난 보스 수. 난이도 램프가 이걸 본다. */
@@ -586,47 +595,34 @@ function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
  * 호위를 붙이는 이유는 보스만 있으면 우리 원거리가 사거리 밖에서 할 일이 없기
  * 때문이다. 앞줄에 세워 근접이 먼저 부딪히게 한다.
  */
-/** 이번 웨이브가 몇 번째 보스인가 (0부터). 보스가 아니면 지금까지의 개수. */
-export function bossIndexForWave(wave: number): number {
-  let n = 0;
-  for (let w = 1; w < wave; w++) if (waveKind(w) === "boss") n += 1;
-  return n;
-}
-
 /**
  * 보스 강도가 첫 보스에서 후반까지 올라가는 정도(0~1).
  *
- * **웨이브 번호가 아니라 보스 순번으로 잰다.** 웨이브로 재면 주기를 바꿀 때마다
- * 어긋난다 — 보스를 5웨이브마다에서 3웨이브마다로 옮겼더니 첫 보스가 3웨이브에
- * 서면서 후반용 배수를 그대로 맞아 통과율이 40%로 떨어졌다.
+ * **보스 순번으로 잰다.** 웨이브로 재면 주기를 바꿀 때마다 어긋난다 — 보스를
+ * 5웨이브마다에서 3웨이브마다로 옮겼더니 첫 보스가 3웨이브에 서면서 후반용
+ * 배수를 그대로 맞아 통과율이 40%로 떨어졌다.
  *
- * 체력과 광역 피해에 **같은** 램프를 쓴다. 하나만 램프를 걸면 첫 보스가
- * "두껍지만 안 아프다" 또는 "얇지만 즉사"가 되어 둘 다 학습에 나쁘다.
+ * 체력·평타·광역 피해가 **같은 램프**를 써야 한다. 하나만 램프를 걸면 첫 보스가
+ * "두껍지만 안 아프다" 또는 "얇지만 즉사"가 되어 둘 다 학습에 나쁘다. 그런데
+ * 실제로 갈라져 있었다 — 체력은 `bossRamp(wave)`(첫 보스 0), 광역은
+ * `bossesSeen`(첫 보스 0.125)을 보고 있었다. `bossesSeen`은 지금 서 있는 보스도
+ * "만났다"고 세므로 보스 자리에서 한 칸 앞선다. 순번 자체를 쓰면 첫 보스가
+ * 정확히 0이고, 그게 `bossHpMulFirst`·`telegraphDmgFirst`가 가정하는 값이다.
  */
-export function bossRamp(wave: number): number {
-  return Math.min(1, bossIndexForWave(wave) / BALANCE.bossRampCount);
-}
-
-/**
- * 지금까지 만난 보스 수로 램프를 잡는다.
- *
- * 웨이브 번호로 세던 것을 바꿨다. 상점 칸이 걸음만 먹고 웨이브는 안 먹으므로
- * 둘이 어긋나고, 어긋나면 두 번째 보스가 첫 보스의 세기로 나온다.
- */
-export function bossRampFor(state: RunState): number {
-  return Math.min(1, bossesSeen(state) / BALANCE.bossRampCount);
+export function bossRampFor(state: RunState, step: number = state.step): number {
+  return Math.min(1, bossIndexAt(state, step) / BALANCE.bossRampCount);
 }
 
 function buildBossWave(state: RunState, wave: number, scale: number): void {
   state.enemy = emptyBoard();
 
-  const breed = bossForIndex(bossIndexForWave(wave));
+  const breed = bossForIndex(bossIndexAt(state));
   // 보드 한가운데(행 2, 열 2). 반경 1.5라 행 1~3 × 열 1~3을 덮는다.
   const bossCell = 2 * BOARD_COLS + 2;
   const boss = makeCat(breed, "enemy", bossCell);
   boss.radius = BOSS_RADIUS;
   // 첫 보스는 얇게, 후반으로 갈수록 두껍게. 고정 배수는 5웨이브를 벽으로 만든다.
-  const ramp = bossRamp(wave);
+  const ramp = bossRampFor(state);
   const hpMul = (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp) * bossKit(breed.id).power;
   boss.maxHp = Math.round(boss.maxHp * scale * hpMul);
   boss.hp = boss.maxHp;

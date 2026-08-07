@@ -65,6 +65,24 @@ export function isBossStep(step: number): boolean {
   return BOSS_STEPS.has(step % STAGE_STEPS);
 }
 
+/** 한 여정에 보스가 몇인가. `BOSS_STEPS`에서 파생되므로 주기를 바꿔도 안 어긋난다. */
+export const BOSSES_PER_STAGE = BOSS_STEPS.size;
+
+/**
+ * 이 걸음이 그 여정의 몇 번째 보스인가 (0부터). 보스 걸음이 아니면 -1.
+ *
+ * **보스의 신원은 걸음에서만 나와야 한다.** 예전에는 신원을 웨이브 번호로
+ * (`bossIndexForWave`), 램프를 걸음으로(`bossRampFor`), 지도 라벨을 또 다른
+ * 식으로 계산했다. 상점 칸이 걸음만 먹고 웨이브는 안 먹으므로 셋이 갈라졌고,
+ * 상점을 여럿 밟은 여정에서 **같은 이름의 보스가 두 번 나왔다.**
+ */
+export function bossOrdinalInStage(step: number): number {
+  if (!isBossStep(step)) return -1;
+  let n = 0;
+  for (let i = 0; i < step % STAGE_STEPS; i++) if (isBossStep(i)) n += 1;
+  return n;
+}
+
 /** 보스 걸음은 한 칸뿐이다 — 모든 길이 여기서 만난다. */
 function laneCount(step: number): number {
   return isBossStep(step) ? 1 : LANES;

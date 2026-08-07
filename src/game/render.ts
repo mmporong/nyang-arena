@@ -9,7 +9,7 @@ import {
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { bossHint, isBossStep, nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
+import { bossHint, nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -17,9 +17,10 @@ import {
   OFFER_SLOTS,
   REROLL_COST,
   unitCap,
-  waveKind,
+  currentKind,
   waveKindInfo,
   mapStep,
+  bossIndexAt,
   bossesSeen,
   type Offer,
   type RunState,
@@ -2129,14 +2130,13 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     ctx.stroke();
     // 보스 칸은 '보스' 대신 **이름**을 보여준다. 어떤 보스가 오는지가 곧
     // 무엇을 준비할지를 정하는데, 지금까지 그 정보가 화면에 없었다.
-    // 이 칸까지 가는 동안 만나게 될 보스가 몇 번째인가. 한 여정에 보스가 둘이라
-    // 단순히 +1을 하면 둘 다 같은 이름이 뜬다(실제로 그랬다).
-    const bossesAhead = Array.from({ length: STAGE_STEPS }, (_, i) => i).filter(
-      (i) => i >= step && i <= st && isBossStep(i),
-    ).length;
+    //
+    // 신원은 `bossIndexAt`에서만 나온다. 예전에는 현재 걸음 기준으로 "앞으로
+    // 만날 보스가 몇 번째인가"를 세어 라벨을 붙였는데, 그러면 **지나간 보스 칸이
+    // 다음 보스 이름으로 바뀌어** 한 지도에 같은 이름이 둘 뜬다.
     const label =
       node.kind === "boss"
-        ? bossForIndex(bossesSeen(s) + Math.max(0, bossesAhead - 1)).name
+        ? bossForIndex(bossIndexAt(s, st)).name
         : NODE_MARK[node.kind];
     uiText(
       ctx,
@@ -2168,8 +2168,10 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   // 호버가 없으므로 요약이 늘 남아 있어야 한다.
   const hotNode = hovered >= 0 ? cur[hovered] : undefined;
   // 보스 칸에 올리면 그 보스가 무엇을 하는지 알려준다. 정답이 아니라 성질이다.
+  // 라벨과 **같은 인덱스**를 써야 한다. 이름은 살금이인데 설명은 무쇠발톱이
+  // 나오던 자리다 — 여기만 앞의 보스 수를 안 세고 있었다.
   const bossLine =
-    hotNode?.kind === "boss" ? bossHint(bossForIndex(bossesSeen(s)).id) : null;
+    hotNode?.kind === "boss" ? bossHint(bossForIndex(bossIndexAt(s, step)).id) : null;
   // 커서까지 바뀌어야 "누를 수 있다"가 끝까지 전달된다. 캔버스 게임은 이걸
   // 안 하면 그림처럼 보인다.
   ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
@@ -2442,7 +2444,9 @@ function drawNotice(
   const cy = r.y + r.h / 2;
 
   if (s.phase === "prepare") {
-    const info = waveKindInfo(waveKind(s.wave));
+    // 웨이브 번호가 아니라 **고른 칸**이 성격을 정한다. `waveKind(s.wave)`를
+    // 쓰던 동안 상점을 밟은 판에서 배너가 실제 적과 다른 이름을 달고 있었다.
+    const info = waveKindInfo(currentKind(s));
     const nameW = ctx.measureText(info.name).width;
     uiText(
       ctx,

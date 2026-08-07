@@ -11,7 +11,7 @@
  */
 import { walkMap } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, startBattle, unitCap, waveKind , relicActive, currentKind } from "../src/game/run.ts";
+import { buyOffer, newRun, startBattle, unitCap, relicActive, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
 
 const SEED = Number(process.argv[2] ?? 7);

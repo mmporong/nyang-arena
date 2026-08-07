@@ -11,7 +11,7 @@
  */
 import { walkMap, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, relicActive, rerollOffers, startBattle, waveKind, currentKind } from "../src/game/run.ts";
+import { buyOffer, newRun, relicActive, rerollOffers, startBattle, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);

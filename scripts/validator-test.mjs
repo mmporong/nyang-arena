@@ -14,7 +14,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { EFFECT_RANGE, validateAll } from "../src/validate/synergy-schema.ts";
-import { checkStage, isBossStep, makeStage } from "../src/game/map.ts";
+import { BOSSES_PER_STAGE, checkStage, isBossStep, makeStage, STAGE_STEPS } from "../src/game/map.ts";
+import { BOSS_BREEDS, bossForIndex } from "../src/game/bosses.ts";
+import { bossIndexAt } from "../src/game/run.ts";
 import { seedRng } from "../src/game/rng.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -131,5 +133,58 @@ if (mapFailures.length === 0) {
 } else {
   for (const p of mapFailures.slice(0, 10)) console.log(`  실패 ${p}`);
   console.log(`  (총 ${mapFailures.length}건)`);
+  process.exit(1);
+}
+
+/* ------------------------------------------------------------------ */
+/* 보스 신원 계약                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 보스의 신원은 **(여정, 걸음)에서만** 나와야 한다.
+ *
+ * 상점 칸은 걸음만 먹고 웨이브는 안 먹는다. 그래서 신원이 웨이브 번호를 보면
+ * 상점을 밟은 판에서 인덱스가 되감기고, **한 여정에 같은 이름의 보스가 두 번**
+ * 나온다. 실제로 그랬다 — 스폰은 웨이브를, 지도 라벨은 걸음을, 호버 설명은 또
+ * 다른 식을 보고 있었다.
+ *
+ * 눈으로는 상점을 세 번 밟는 경로를 골라야만 보이는 고장이라 계약으로 묶는다.
+ */
+const bossFailures = [];
+
+// 종류가 한 여정의 보스 수보다 적으면 애초에 중복을 피할 수 없다.
+if (BOSS_BREEDS.length < BOSSES_PER_STAGE) {
+  bossFailures.push(`보스 종류 ${BOSS_BREEDS.length}가 한 여정의 보스 수 ${BOSSES_PER_STAGE}보다 적다`);
+}
+
+for (let stage = 1; stage <= 8; stage++) {
+  const seen = [];
+  for (let step = 0; step < STAGE_STEPS; step++) {
+    if (!isBossStep(step)) continue;
+    /**
+     * 같은 (여정, 걸음)인데 웨이브만 다른 상태. 상점을 몇 번 밟았느냐의 차이다.
+     * `bossIndexAt`이 웨이브를 읽으면 여기서 값이 갈린다.
+     */
+    const ids = [1, 4, 9, 17].map((wave) => bossForIndex(bossIndexAt({ map: { stage }, step, wave }, step)).id);
+    if (new Set(ids).size !== 1) {
+      bossFailures.push(`여정 ${stage} 걸음 ${step}: 웨이브에 따라 보스가 갈린다 (${ids.join("/")})`);
+    }
+    seen.push(ids[0]);
+  }
+  if (new Set(seen).size !== seen.length) {
+    const names = seen.map((id) => BOSS_BREEDS.find((b) => b.id === id)?.name ?? id);
+    bossFailures.push(`여정 ${stage}: 같은 보스가 두 번 나온다 — ${names.join(", ")}`);
+  }
+}
+
+console.log("\n보스 신원 계약");
+if (bossFailures.length === 0) {
+  const sample = Array.from({ length: STAGE_STEPS }, (_, i) => i)
+    .filter(isBossStep)
+    .map((step) => bossForIndex(bossIndexAt({ map: { stage: 1 }, step, wave: 1 }, step)).name);
+  console.log(`  OK   여정 8개 — 한 여정에 같은 보스 없음, 웨이브 번호에 안 흔들림`);
+  console.log(`  OK   1번째 여정: ${sample.join(" → ")}`);
+} else {
+  for (const p of bossFailures) console.log(`  실패 ${p}`);
   process.exit(1);
 }
