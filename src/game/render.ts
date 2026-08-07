@@ -7,9 +7,9 @@ import {
   skillName,
   type Fx,
 } from "./battle.ts";
-import { bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
+import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
+import { bossHint, isBossStep, nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -2127,9 +2127,20 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     ctx.strokeStyle = hot ? "#FFFFFF" : hue;
     ctx.lineWidth = hot ? Math.max(3, L.scale * 3.4) : pickable ? Math.max(2, L.scale * 2.6) : Math.max(1, L.scale * 1.4);
     ctx.stroke();
+    // 보스 칸은 '보스' 대신 **이름**을 보여준다. 어떤 보스가 오는지가 곧
+    // 무엇을 준비할지를 정하는데, 지금까지 그 정보가 화면에 없었다.
+    // 이 칸까지 가는 동안 만나게 될 보스가 몇 번째인가. 한 여정에 보스가 둘이라
+    // 단순히 +1을 하면 둘 다 같은 이름이 뜬다(실제로 그랬다).
+    const bossesAhead = Array.from({ length: STAGE_STEPS }, (_, i) => i).filter(
+      (i) => i >= step && i <= st && isBossStep(i),
+    ).length;
+    const label =
+      node.kind === "boss"
+        ? bossForIndex(bossesSeen(s) + Math.max(0, bossesAhead - 1)).name
+        : NODE_MARK[node.kind];
     uiText(
       ctx,
-      NODE_MARK[node.kind],
+      label,
       rect.x + rect.w / 2,
       rect.y + rect.h / 2,
       Math.max(10, (rect.w + grow * 2) * 0.34),
@@ -2156,13 +2167,18 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   // 올라간 칸이 있으면 그 칸의 설명을, 없으면 갈래 요약을 준다. 터치에는
   // 호버가 없으므로 요약이 늘 남아 있어야 한다.
   const hotNode = hovered >= 0 ? cur[hovered] : undefined;
+  // 보스 칸에 올리면 그 보스가 무엇을 하는지 알려준다. 정답이 아니라 성질이다.
+  const bossLine =
+    hotNode?.kind === "boss" ? bossHint(bossForIndex(bossesSeen(s)).id) : null;
   // 커서까지 바뀌어야 "누를 수 있다"가 끝까지 전달된다. 캔버스 게임은 이걸
   // 안 하면 그림처럼 보인다.
   ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
   const info = hotNode ? nodeInfo(hotNode.kind) : null;
   uiText(
     ctx,
-    info
+    bossLine
+      ? bossLine
+      : info
       ? `${info.name} — ${info.hint}`
       : `${s.map.stage}번째 여정 · ${step + 1}/${STAGE_STEPS}걸음 — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,

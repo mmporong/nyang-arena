@@ -260,6 +260,28 @@ export function openLanes(map: StageMap, step: number): number[] {
   return prev.next.filter((i) => i < row.length);
 }
 
+/**
+ * 다음 보스가 무엇이고 무엇을 노리는가.
+ *
+ * 측정에서 나온 것을 화면으로 옮기는 일이다 — **보스전은 팀 성격에 따라 통과율이
+ * 12%p 갈린다**(근접 위주 87% vs 원거리 위주 75%, 표본 157/229). 그 차이가
+ * 이미 존재하는데 플레이어는 볼 방법이 없었다. 지도에서 미리 알려 주면 새 자원도
+ * 새 시스템도 없이 결정 하나가 생긴다 — "저 보스에는 앞줄을 더 세울까".
+ *
+ * 정답은 안 알려준다. 보스가 **무엇을 하는지**만 말하고, 그래서 무엇을 해야
+ * 하는지는 플레이어가 정한다.
+ */
+export function bossHint(breedId: number): string {
+  switch (breedId) {
+    case 10:
+      return "살금이 — 순간이동한다. 붙어 있던 근접이 자꾸 놓친다";
+    case 11:
+      return "서리귀 — 제자리에서 원형 장판. 뭉쳐 있으면 통째로 맞는다";
+    default:
+      return "무쇠발톱 — 정면으로 온다. 앞줄이 버텨야 한다";
+  }
+}
+
 /** 사람이 읽을 이름과 한 줄 설명. 카드와 같은 어투를 쓴다. */
 export function nodeInfo(kind: NodeKind): { name: string; hint: string } {
   switch (kind) {
@@ -270,6 +292,7 @@ export function nodeInfo(kind: NodeKind): { name: string; hint: string } {
       return { name: "정찰", hint: "안 싸운다. 다음 보스전 회피 +2" };
     case "boss":
       return { name: "보스", hint: "레이드다. 예고를 읽어라" };
+    // 보스별 안내는 bossHint가 따로 만든다 — 어느 보스가 오는지 알아야 해서다.
     case "battle":
       return { name: "전투", hint: "평범한 무리" };
   }
