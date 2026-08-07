@@ -78,6 +78,19 @@ const CAL_RUNS = Number(process.env.CAL_RUNS ?? RUNS);
  */
 const DODGE = process.env.DODGE ? Number(process.env.DODGE) : null;
 
+/**
+ * 보스 평타 배수를 열어 둔다.
+ *
+ * 기본 0.28이라 W6 보스 공격력이 10인데 우리 고양이 체력은 400~700이다.
+ * 한 마리 죽이는 데 40번을 때려야 하니 **평타가 사실상 없다.**
+ * `pickTarget`이 가장 가까운 적을 고르므로 탱킹이 성립할 구조는 이미 있는데,
+ * 맞아도 안 아프니 앞에 누구를 두든 상관이 없다. 오토배틀러에서 배치의 첫째
+ * 이유가 "누가 먼저 맞느냐"인데 그 자리가 비어 있다.
+ *
+ * 여기를 올리면 배치가 살아나는지 본다.
+ */
+if (process.env.ATKMUL) BALANCE.bossAtkMul = Number(process.env.ATKMUL);
+
 const SAT_LO = 3;
 const SAT_HI = 97;
 
