@@ -224,19 +224,31 @@ else console.log("\n판정: 목표 구간(6~20) 안");
 
 const SHAPES = ["근접 위주", "균형", "원거리 위주"];
 const WK = ["mixed", "rush", "snipe", "boss"];
-console.log("\n궁합 — 팀 성격 x 웨이브 성격 통과율 (표본 40 미만은 -)");
-console.log("팀            " + WK.map((k) => k.padStart(9)).join(""));
+/**
+ * 표본이 적으면 이 표는 잡음을 읽는다.
+ *
+ * 실제로 그랬다 — 같은 코드·같은 시드 범위에서 격차가 4.2%p와 7.6%p로 갈렸고,
+ * 무관한 변수를 바꿨을 때 9.2%p와 5.0%p가 나왔다. 그 값으로 '일반 웨이브에
+ * 궁합이 있다/없다'를 판정했었는데, 판정보다 잡음이 컸다.
+ *
+ * 그래서 두 가지를 바꾼다. 문턱을 40에서 150으로 올리고, **표본 수를 표에 함께
+ * 찍는다.** 숫자 옆에 표본이 보이면 읽는 사람이 스스로 신뢰도를 판단한다 —
+ * 숨겨진 불확실성보다 보이는 불확실성이 낫다.
+ */
+const MIN_CELL = 150;
+console.log(`\n궁합 — 팀 성격 x 웨이브 성격 통과율 (표본 ${MIN_CELL} 미만은 -, 괄호는 표본 수)`);
+console.log("팀            " + WK.map((k) => k.padStart(11)).join(""));
 let worst = 0;
 for (const shape of SHAPES) {
   const cells = WK.map((k) => {
     const m = matchup.get(`${shape}|${k}`);
-    if (!m || m.tried < 40) return "        -";
-    return `${(((m.tried - m.lost) / m.tried) * 100).toFixed(0)}%`.padStart(9);
+    if (!m || m.tried < MIN_CELL) return `${m ? `-(${m.tried})` : "-"}`.padStart(11);
+    return `${(((m.tried - m.lost) / m.tried) * 100).toFixed(0)}%(${m.tried})`.padStart(11);
   });
   // 이 팀이 웨이브 성격에 따라 겪는 최대 차이
   const rates = WK.filter((k) => k !== "boss")
     .map((k) => matchup.get(`${shape}|${k}`))
-    .filter((m) => m && m.tried >= 40)
+    .filter((m) => m && m.tried >= MIN_CELL)
     .map((m) => ((m.tried - m.lost) / m.tried) * 100);
   if (rates.length >= 2) worst = Math.max(worst, Math.max(...rates) - Math.min(...rates));
   console.log(shape.padEnd(12) + cells.join(""));
