@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "8db9128",
+    "commit": "eb6c458",
     "dirty": false,
     "reproducible": true,
     "node": "v24.12.0",
@@ -24,35 +24,35 @@
     "min": 2,
     "p25": 9,
     "median": 12,
-    "p75": 17,
-    "max": 36,
-    "mean": 13.68,
+    "p75": 16,
+    "max": 32,
+    "mean": 12.77,
     "hitMaxWave": 0
   },
   "waveKinds": {
     "mixed": {
-      "tried": 1097,
+      "tried": 1058,
       "passPct": 99.2,
-      "p50Sec": 3.2,
-      "p90Sec": 4.9
-    },
-    "rush": {
-      "tried": 895,
-      "passPct": 100,
-      "p50Sec": 3.6,
+      "p50Sec": 3.3,
       "p90Sec": 5.2
     },
+    "rush": {
+      "tried": 818,
+      "passPct": 100,
+      "p50Sec": 3.6,
+      "p90Sec": 5.7
+    },
     "snipe": {
-      "tried": 614,
-      "passPct": 97.7,
-      "p50Sec": 3.9,
-      "p90Sec": 7.2
+      "tried": 546,
+      "passPct": 97.1,
+      "p50Sec": 4.1,
+      "p90Sec": 7.6
     },
     "boss": {
-      "tried": 1498,
-      "passPct": 81.5,
-      "p50Sec": 18.2,
-      "p90Sec": 32.8
+      "tried": 1409,
+      "passPct": 80.4,
+      "p50Sec": 18.8,
+      "p90Sec": 33.6
     }
   },
   "balance": {
@@ -62,11 +62,11 @@
     "upgradeCostGrowth": 1.32,
     "goldBase": 5,
     "goldPerWave": 1.5,
-    "telegraphDmg": 1.15,
+    "telegraphDmg": 1.277,
     "dodgeCharges": 6
   },
   "build": {
-    "bundleBytes": 89181
+    "bundleBytes": 92193
   },
   "openIssues": [
     {
