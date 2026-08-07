@@ -10,7 +10,7 @@ import {
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
 import { bossHint, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
-import { drawFish, drawNodeIcon } from "./icons.ts";
+import { drawFish, drawIcon, drawNodeIcon, type IconName } from "./icons.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -100,8 +100,9 @@ const CLASS_COLOR: Record<ClassKind, string> = {
  * 넓은 사다리꼴(방패) · 대각선(단검) · 열린 호(활) · 대칭 십자(별).
  * 무기 고증보다 **7px에서 구분되는가**가 기준이다.
  *
- * 픽셀 에셋으로 갈아 끼울 수 있다. `CLASS_ICON_IMG`에 이미지가 들어 있으면
- * 그쪽을 먼저 쓴다 — 아래 `drawClassIcon`을 볼 것.
+ * 세로줄의 직업 목록은 이걸 안 쓴다(`CLASS_PICTO` 참고). 거기는 20px이라
+ * 그림이 들어가지만, 판 위 뱃지는 7~10px이라 실루엣이 뭉갠다. 같은 정보를
+ * 두 크기로 보여주는 자리라 **그림도 둘**이어야 한다.
  */
 const CLASS_ICON: Record<ClassKind, readonly number[]> = {
   // 방패 — 넓게 시작해 아래로 좁아진다
@@ -114,20 +115,15 @@ const CLASS_ICON: Record<ClassKind, readonly number[]> = {
   mage: [0x08, 0x08, 0x1c, 0x7f, 0x1c, 0x08, 0x08],
 };
 
-/**
- * 직업 아이콘을 픽셀 에셋으로 갈아 끼우는 자리.
- *
- * `public/icons/{warrior|rogue|archer|mage}.png`를 넣고 `loadClassIcons()`를
- * 부르면 그때부터 그 그림이 쓰인다. 파일이 없으면 위 비트맵이 그대로 남으므로
- * 에셋이 없어도 게임은 똑같이 돈다.
- */
-const CLASS_ICON_IMG: Partial<Record<ClassKind, HTMLImageElement>> = {};
+/** 세로줄 직업 목록용 그림. 판 위 뱃지(7x7 비트맵)와 크기가 달라 따로 둔다. */
+const CLASS_PICTO: Record<ClassKind, IconName> = {
+  warrior: "cls-warrior",
+  rogue: "cls-rogue",
+  archer: "cls-archer",
+  mage: "cls-mage",
+};
 
-export function setClassIcon(cls: ClassKind, img: HTMLImageElement): void {
-  CLASS_ICON_IMG[cls] = img;
-}
-
-/** 뱃지 안에 직업 표식을 그린다. 에셋이 있으면 에셋, 없으면 내장 비트맵. */
+/** 뱃지 안에 직업 표식을 그린다. */
 function drawClassIcon(
   ctx: CanvasRenderingContext2D,
   cls: ClassKind,
@@ -136,14 +132,6 @@ function drawClassIcon(
   size: number,
   color: string,
 ): void {
-  const img = CLASS_ICON_IMG[cls];
-  if (img && img.complete && img.naturalWidth > 0) {
-    const prev = ctx.imageSmoothingEnabled;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, Math.round(cx - size / 2), Math.round(cy - size / 2), size, size);
-    ctx.imageSmoothingEnabled = prev;
-    return;
-  }
   const rows = CLASS_ICON[cls];
   // 픽셀을 정수로 떨어뜨린다. 소수 크기로 그리면 7px 도형이 흐려져 아이콘의
   // 유일한 장점(또렷함)이 사라진다.
@@ -1376,9 +1364,15 @@ function drawTeamStrip(
   for (const c of cats) counts[c.breed.cls] += 1;
 
   const order: ClassKind[] = ["warrior", "rogue", "archer", "mage"];
-  const rows: [string, number, string][] = [
-    ...order.map((cls) => [CLASS_LABEL[cls], counts[cls], CLASS_COLOR[cls]] as [string, number, string]),
-    ["상대", livingCats(s.enemy).length, T.enemy],
+  const rows: [string, number, string, IconName | null][] = [
+    ...order.map(
+      (cls) =>
+        [CLASS_LABEL[cls], counts[cls], CLASS_COLOR[cls], CLASS_PICTO[cls]] as
+          [string, number, string, IconName | null],
+    ),
+    // 상대는 직업이 아니라 진영이라 아이콘을 안 붙인다. 붙이면 다섯 줄이
+    // 같은 종류의 것으로 읽혀 "우리 넷 + 상대"라는 구분이 사라진다.
+    ["상대", livingCats(s.enemy).length, T.enemy, null],
   ];
 
   if (L.columns) {
@@ -1392,9 +1386,14 @@ function drawTeamStrip(
     const rowH = r.h / rows.length;
     const fs = Math.max(10, Math.min(15, rowH * 0.42));
     const px = Math.max(1, rowH * 0.062);
-    rows.forEach(([label, n, hue], i) => {
+    const iconSize = Math.min(rowH * 0.62, r.w * 0.13);
+    rows.forEach(([label, n, hue, icon], i) => {
       const cy = r.y + rowH * (i + 0.5);
-      uiText(ctx, label, r.x, cy, fs, T.muted, { align: "left", weight: 700 });
+      // 아이콘이 있으면 글자를 그만큼 민다. 없는 줄(상대)도 같은 자리에서
+      // 시작해야 다섯 줄의 글머리가 어긋나지 않는다.
+      const textX = r.x + iconSize * 1.35;
+      if (icon) drawIcon(ctx, icon, r.x + iconSize * 0.5, cy, iconSize, n > 0 ? hue : T.muted);
+      uiText(ctx, label, textX, cy, fs, T.muted, { align: "left", weight: 700 });
       numText(ctx, String(n), r.x + r.w, cy, px, n > 0 ? hue : T.muted, "right", false);
       if (i < rows.length - 1) {
         const y = Math.round(r.y + rowH * (i + 1)) + 0.5;
@@ -1945,10 +1944,21 @@ function drawRelicColumn(
 
     const padX = cr.h * 0.24;
     const fs = Math.max(10, cr.h * 0.29);
-    uiText(ctx, relic.name, cr.x + padX, cr.y + cr.h * 0.33, fs, on ? T.text : T.muted, {
+    // 아이콘은 세로 가운데. 이름·조건 두 줄을 합친 덩어리 옆에 선다.
+    const icon = cr.h * 0.52;
+    const hasIcon = drawIcon(
+      ctx,
+      `relic-${relic.id}` as IconName,
+      cr.x + padX + icon * 0.5,
+      cr.y + cr.h * 0.5,
+      icon,
+      on ? T.gold : T.muted,
+    );
+    const textX = cr.x + padX + (hasIcon ? icon * 1.3 : 0);
+    uiText(ctx, relic.name, textX, cr.y + cr.h * 0.33, fs, on ? T.text : T.muted, {
       align: "left",
       weight: 800,
-      maxWidth: cr.w - padX * 2 - fs * 2.4,
+      maxWidth: cr.x + cr.w - padX - fs * 2.4 - textX,
     });
     // 켜짐/꺼짐은 색만으로 두지 않는다 — 색맹 대응이고, 조건이 뭔지도 같이 읽혀야 한다.
     uiText(
@@ -1963,11 +1973,11 @@ function drawRelicColumn(
     uiText(
       ctx,
       on ? relic.toll : `${relic.want} · ${relic.toll}`,
-      cr.x + padX,
+      textX,
       cr.y + cr.h * 0.71,
       fs * 0.76,
       on ? "rgba(156,139,118,0.9)" : T.muted,
-      { align: "left", weight: 500, maxWidth: cr.w - padX * 2 },
+      { align: "left", weight: 500, maxWidth: cr.x + cr.w - padX - textX },
     );
   });
 }

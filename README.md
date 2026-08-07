@@ -148,5 +148,9 @@ TypeScript · Vite · Canvas 2D. 엔진·프레임워크 없음.
 
 ## 라이선스 / 출처
 
-- 고양이 스프라이트: 자체 제작 (mmporong, 2026)
-- 외부 에셋·오픈소스 사용 없음
+- **고양이 스프라이트·배경·전투 연출**: 자체 제작 (mmporong, 2026)
+- **UI 아이콘 13장**: [GUI Pro - Minimal Game Light](https://assetstore.unity.com/packages/2d/gui/gui-pro-minimal-game-light-355406) (Layer Lab) —
+  생선·직업 4종·유물 8종. 흰 실루엣을 게임 색으로 틴트해서 쓴다
+- 그 외 외부 에셋·오픈소스 사용 없음. 런타임 의존성 0개
+
+어떤 팩을 검토했고 무엇을 왜 안 썼는지는 [`docs/assets.md`](docs/assets.md)에 있다.

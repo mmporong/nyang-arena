@@ -14,6 +14,7 @@ import {
 } from "./game/run.ts";
 import { openLanes } from "./game/map.ts";
 import { loadSprites } from "./game/sprites.ts";
+import { loadIcons } from "./game/icons.ts";
 
 const app = document.getElementById("app");
 const boot = document.getElementById("boot");
@@ -458,7 +459,8 @@ function frame(now: number): void {
 }
 
 async function boot0(): Promise<void> {
-  await loadSprites();
+  // 둘을 나란히 기다린다. 아이콘은 33KB뿐이라 스프라이트보다 먼저 끝난다.
+  await Promise.all([loadSprites(), loadIcons()]);
   resize();
   window.addEventListener("resize", resize);
   window.addEventListener("orientationchange", () => setTimeout(resize, 120));

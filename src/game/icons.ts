@@ -25,6 +25,101 @@ function stroke(ctx: CanvasRenderingContext2D, size: number, color: string, rati
   ctx.lineJoin = "round";
 }
 
+/* ------------------------------------------------------------------ */
+/* 픽토그램 (외부 에셋)                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 흰 실루엣 픽토그램을 색을 입혀 그린다.
+ *
+ * 직업과 유물은 손으로 그리기에 종류가 너무 많다(4 + 8). 손으로 그린 것들
+ * (발톱·별·눈)은 형태가 단순해서 패스로 충분했지만, "매의 눈"과 "무지개 방울"을
+ * 구분되게 그리려면 아이콘 하나에 패스 수십 줄이 든다.
+ *
+ * 원본이 **흰 실루엣 + 투명 배경**이라 `source-in`으로 색을 갈아 끼울 수 있다.
+ * 진영색·직업색·켜짐 여부에 따라 같은 그림을 다른 색으로 써야 하므로 이게 중요하다.
+ * 색을 입힌 결과는 캔버스에 캐시한다 — 매 프레임 합성하면 60fps에서 낭비다.
+ */
+const ICON_NAMES = [
+  "fish",
+  "cls-warrior",
+  "cls-rogue",
+  "cls-archer",
+  "cls-mage",
+  "relic-iron_collar",
+  "relic-shadow_claw",
+  "relic-hawk_eye",
+  "relic-stardust_rod",
+  "relic-lone_hunter",
+  "relic-the_swarm",
+  "relic-crown",
+  "relic-rainbow_bell",
+] as const;
+
+export type IconName = (typeof ICON_NAMES)[number];
+
+const icons = new Map<string, HTMLImageElement>();
+const tintCache = new Map<string, HTMLCanvasElement>();
+
+/** 전부 로드될 때까지 기다린다. 한 장 실패해도 게임은 떠야 하므로 폴백이 있다. */
+export async function loadIcons(): Promise<void> {
+  await Promise.all(
+    ICON_NAMES.map(
+      (name) =>
+        new Promise<void>((resolve) => {
+          const img = new Image();
+          icons.set(name, img);
+          img.onload = () => resolve();
+          img.onerror = () => {
+            console.warn(`아이콘 로드 실패: ${name}`);
+            resolve();
+          };
+          img.src = `${import.meta.env.BASE_URL}icons/${name}.png`;
+        }),
+    ),
+  );
+}
+
+/** 색을 입힌 사본. 원본은 흰색이므로 source-in 한 번이면 된다. */
+function tinted(name: IconName, color: string): HTMLCanvasElement | null {
+  const img = icons.get(name);
+  if (!img || !img.complete || img.naturalWidth === 0) return null;
+
+  const k = `${name}|${color}`;
+  const hit = tintCache.get(k);
+  if (hit) return hit;
+
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const g = c.getContext("2d");
+  if (!g) return null;
+  g.drawImage(img, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = color;
+  g.fillRect(0, 0, c.width, c.height);
+  tintCache.set(k, c);
+  return c;
+}
+
+/**
+ * `(cx, cy)`를 중심으로 한 변이 `size`인 정사각형 안에 그린다.
+ * @returns 그렸으면 true. false면 호출부가 폴백을 그려야 한다.
+ */
+export function drawIcon(
+  ctx: CanvasRenderingContext2D,
+  name: IconName,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): boolean {
+  const c = tinted(name, color);
+  if (!c) return false;
+  ctx.drawImage(c, cx - size / 2, cy - size / 2, size, size);
+  return true;
+}
+
 /**
  * 생선 — 이 게임의 화폐.
  *
@@ -38,6 +133,10 @@ export function drawFish(
   size: number,
   color: string,
 ): void {
+  // 아이콘이 있으면 그걸 쓰고, 못 불러왔으면 아래 손그림으로 떨어진다.
+  // 자원 표시가 로드 실패로 사라지면 무엇을 살 수 있는지 알 수 없게 된다.
+  if (drawIcon(ctx, "fish", cx, cy, size, color)) return;
+
   const w = size * 0.5;
   const h = size * 0.3;
   ctx.save();
