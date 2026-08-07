@@ -23,8 +23,9 @@
     "relics": "node --experimental-strip-types scripts/relic-space.mjs",
     "map": "node --experimental-strip-types scripts/map-space.mjs",
     "gold": "node --experimental-strip-types scripts/gold-curve.mjs",
-    "verify": "npm run typecheck && npm test && npm run probe && npm run dodge:test && npm run sim && npm run decisions && npm run relics && npm run placement && npm run intervention && npm run gold",
-    "typecheck": "tsc --noEmit"
+    "verify": "npm run typecheck && npm test && npm run probe && npm run dodge:test && npm run sim && npm run decisions && npm run relics && npm run placement && npm run intervention && npm run gold && npm run build && npm run metrics",
+    "typecheck": "tsc --noEmit",
+    "metrics": "node --experimental-strip-types scripts/metrics-gen.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

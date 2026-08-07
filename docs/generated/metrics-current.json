@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "generatedFrom": {
+    "commit": "5984d52",
+    "dirty": true,
+    "node": "v22.23.2",
+    "seeds": {
+      "from": 1,
+      "to": 300
+    },
+    "runs": 300,
+    "maxWave": 60
+  },
+  "structure": {
+    "stageSteps": 6,
+    "bossSteps": [
+      2,
+      5
+    ],
+    "bossSharePct": 33.3
+  },
+  "distribution": {
+    "min": 2,
+    "p25": 9,
+    "median": 12,
+    "p75": 17,
+    "max": 40,
+    "mean": 12.99,
+    "hitMaxWave": 0
+  },
+  "waveKinds": {
+    "mixed": {
+      "tried": 1098,
+      "passPct": 99.7,
+      "p50Sec": 3.3,
+      "p90Sec": 5.1
+    },
+    "rush": {
+      "tried": 822,
+      "passPct": 100,
+      "p50Sec": 3.6,
+      "p90Sec": 5.2
+    },
+    "snipe": {
+      "tried": 550,
+      "passPct": 97.8,
+      "p50Sec": 4,
+      "p90Sec": 7.2
+    },
+    "boss": {
+      "tried": 1427,
+      "passPct": 80,
+      "p50Sec": 18.3,
+      "p90Sec": 33.6
+    }
+  },
+  "balance": {
+    "enemyScale": 1.24,
+    "levelScale": 1.4,
+    "upgradeCostBase": 4,
+    "upgradeCostGrowth": 1.32,
+    "goldBase": 5,
+    "goldPerWave": 1.5,
+    "telegraphDmg": 1.15,
+    "dodgeCharges": 6
+  },
+  "build": {
+    "bundleBytes": 87240
+  }
+}
