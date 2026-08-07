@@ -68,11 +68,24 @@ function play(policy, seed) {
   let seen = 0;
   let wasUp = false;
   const boss = { tried: new Map(), lost: new Map() };
+  /**
+   * 이 런에서 몇 번째 보스인가. 웨이브 번호가 아니라 **기회 번호**다.
+   *
+   * 웨이브별로 묶으면 후반 웨이브 칸에는 거기까지 살아온 런만 들어간다.
+   * 실제로 비개입 봇의 W6 통과율(45.6%)이 W3(36.0%)보다 높게 나왔는데,
+   * 보스가 쉬워진 것이 아니라 **약한 런이 이미 죽어서 표본에서 빠진** 것이다.
+   * 첫 보스는 모든 런이 한 번씩 맞으므로 그 칸만 편향이 없다.
+   */
+  let bossIdx = 0;
+  const nth = { tried: new Map(), lost: new Map() };
 
   for (let g = 0; g < MAX_WAVE * 2000; g++) {
     if (s.phase === "gameover") {
-      if (kind === "boss") boss.lost.set(wave, (boss.lost.get(wave) ?? 0) + 1);
-      return { final: s.wave, boss };
+      if (kind === "boss") {
+        boss.lost.set(wave, (boss.lost.get(wave) ?? 0) + 1);
+        nth.lost.set(bossIdx, (nth.lost.get(bossIdx) ?? 0) + 1);
+      }
+      return { final: s.wave, boss, nth };
     }
     if (s.phase === "reward") {
       const afford = s.offers
@@ -88,14 +101,18 @@ function play(policy, seed) {
       continue;
     }
     if (s.phase === "prepare") {
-      if (s.wave > MAX_WAVE) return { final: MAX_WAVE, boss };
+      if (s.wave > MAX_WAVE) return { final: MAX_WAVE, boss, nth };
       kind = currentKind(s);
       wave = s.wave;
-      if (kind === "boss") boss.tried.set(wave, (boss.tried.get(wave) ?? 0) + 1);
+      if (kind === "boss") {
+        boss.tried.set(wave, (boss.tried.get(wave) ?? 0) + 1);
+        bossIdx += 1;
+        nth.tried.set(bossIdx, (nth.tried.get(bossIdx) ?? 0) + 1);
+      }
       upFor = 0;
       wasUp = false;
       startBattle(s);
-      if (s.phase !== "battle") return { final: s.wave, boss };
+      if (s.phase !== "battle") return { final: s.wave, boss, nth };
       continue;
     }
 
@@ -131,7 +148,33 @@ function play(policy, seed) {
 
     stepBattle(s, DT);
   }
-  return { final: s.wave, boss };
+  return { final: s.wave, boss, nth };
+}
+
+/**
+ * 시드 단위 bootstrap. 시드를 복원추출로 다시 뽑아 통과율을 2000번 다시 센다.
+ *
+ * 보스 시도를 독립표본처럼 합산하면 안 되는 이유는 **한 시드가 여러 번 등장**
+ * 하기 때문이다(군집). 재추출의 단위를 보스 시도가 아니라 시드로 두면 그
+ * 군집이 보존된다.
+ */
+function bootstrapCI(perSeed, iters = 2000) {
+  if (perSeed.length === 0) return [0, 0];
+  let st = 987654321;
+  const rnd = () => ((st = (st * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const out = [];
+  for (let i = 0; i < iters; i++) {
+    let t = 0;
+    let w = 0;
+    for (let k = 0; k < perSeed.length; k++) {
+      const p = perSeed[Math.floor(rnd() * perSeed.length)];
+      t += p.tried;
+      w += p.won;
+    }
+    out.push(t ? (w / t) * 100 : 0);
+  }
+  out.sort((a, b) => a - b);
+  return [out[Math.floor(iters * 0.025)], out[Math.floor(iters * 0.975)]];
 }
 
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
@@ -145,11 +188,20 @@ for (const [name, policy] of Object.entries(POLICIES)) {
   const finals = [];
   const tried = new Map();
   const lost = new Map();
+  const nthTried = new Map();
+  const nthLost = new Map();
+  const firstBySeed = [];
+  const finalBySeed = [];
   for (let i = 0; i < RUNS; i++) {
     const r = play(policy, i + 1);
     finals.push(r.final);
+    finalBySeed.push(r.final);
     for (const [w, n] of r.boss.tried) tried.set(w, (tried.get(w) ?? 0) + n);
     for (const [w, n] of r.boss.lost) lost.set(w, (lost.get(w) ?? 0) + n);
+    for (const [k, n] of r.nth.tried) nthTried.set(k, (nthTried.get(k) ?? 0) + n);
+    for (const [k, n] of r.nth.lost) nthLost.set(k, (nthLost.get(k) ?? 0) + n);
+    const t1 = r.nth.tried.get(1) ?? 0;
+    if (t1) firstBySeed.push({ tried: t1, won: t1 - (r.nth.lost.get(1) ?? 0) });
   }
   finals.sort((a, b) => a - b);
   const sum = (m) => [...m.values()].reduce((a, b) => a + b, 0);
@@ -162,11 +214,25 @@ for (const [name, policy] of Object.entries(POLICIES)) {
   };
   const avg = finals.reduce((a, b) => a + b, 0) / finals.length;
   const median = pct(finals, 0.5);
-  results[name] = { pass, avg, median };
+  const nthRate = (k) => {
+    const t = nthTried.get(k) ?? 0;
+    return t ? ((t - (nthLost.get(k) ?? 0)) / t) * 100 : null;
+  };
+  results[name] = {
+    pass,
+    avg,
+    median,
+    first: nthRate(1),
+    firstTried: nthTried.get(1) ?? 0,
+    ci: bootstrapCI(firstBySeed),
+    finalBySeed,
+  };
   if (name === "개입 없음") {
     base.pass = pass;
     base.avg = avg;
     base.median = median;
+    base.first = nthRate(1);
+    base.finalBySeed = finalBySeed;
   }
   console.log(
     `${name.padEnd(12)} ${pass.toFixed(1).padStart(8)}% ${rate(3).padStart(8)} ${rate(6).padStart(8)} ` +
@@ -174,10 +240,32 @@ for (const [name, policy] of Object.entries(POLICIES)) {
   );
 }
 
-console.log("\n판정");
-for (const [name, policy] of Object.entries(POLICIES)) {
-  if (!policy) continue;
+/**
+ * 편향 없는 칸과 편향 있는 칸을 갈라서 다시 찍는다.
+ *
+ * `보스통과율` 열은 한 런의 여러 보스 시도를 그냥 합산한 값이다. 두 가지가
+ * 섞여 있다 — 시드 군집(한 시드가 여러 번 등장)과 생존자 편향(오래 사는 정책이
+ * 더 어려운 후반 보스를 더 많이 맞는다). 그래서 **첫 보스만** 따로 본다.
+ * 모든 런이 정확히 한 번씩 맞으므로 정책 간 비교가 성립하는 유일한 칸이다.
+ */
+console.log("\n첫 보스만 (모든 런이 한 번씩 맞는다 · 시드 bootstrap 95% 구간)");
+console.log("정책            첫보스통과율   95% 구간        시드짝비교(도달웨이브)");
+for (const name of Object.keys(POLICIES)) {
+  const r = results[name];
+  if (!r || r.first === null) continue;
+  const [lo, hi] = r.ci;
+  let paired = "  기준";
+  if (name !== "개입 없음" && base.finalBySeed) {
+    const d = r.finalBySeed.map((v, i) => v - base.finalBySeed[i]).sort((a, b) => a - b);
+    const med = d[Math.floor(d.length / 2)];
+    const win = d.filter((x) => x > 0).length;
+    paired = `중앙값 ${med >= 0 ? "+" : ""}${med} · ${((win / d.length) * 100).toFixed(0)}% 시드에서 우세`;
+  }
+  console.log(
+    `${name.padEnd(14)} ${r.first.toFixed(1).padStart(10)}%   ${`${lo.toFixed(1)}~${hi.toFixed(1)}`.padStart(12)}   ${paired}`,
+  );
 }
+console.log(`  (첫 보스 표본 ${results["개입 없음"]?.firstTried ?? 0}판 · 시드 1~${RUNS})`);
 /**
  * 합격 판정.
  *
@@ -212,7 +300,34 @@ const gain = perfect ? perfect.pass - base.pass : 0;
 const ac1 = base.pass >= 25;
 
 console.log(`  개입 없이도 보스를 넘는가   ${base.pass.toFixed(1)}%  ${ac1 ? "충족" : "미충족 (>=25%)"}`);
-console.log(`  개입이 만드는 차이          +${gain.toFixed(1)}%p  (사람 흉내 +${human ? (human.pass - base.pass).toFixed(1) : "?"}%p)`);
+console.log(`  개입이 만드는 차이          +${gain.toFixed(1)}%p  (사람 흉내 +${human ? (human.pass - base.pass).toFixed(1) : "?"}%p)  ← 합산값, 편향 있음`);
+console.log(
+  `  첫 보스만 보면              ${base.first?.toFixed(1)}% → ${perfect?.first?.toFixed(1)}% ` +
+    `= +${perfect && base.first != null ? (perfect.first - base.first).toFixed(1) : "?"}%p  ← 이쪽을 인용할 것`,
+);
+/**
+ * **깊이도 여기서 판정한다.** 두 지표가 서로 다른 말을 하므로 둘 다 적는다.
+ *
+ *   첫 보스 통과율:  95.7% → 99.7%  = +4.0%p    작다
+ *   도달 웨이브 짝차:  시드별 중앙값 +5           크다
+ *
+ * 모순이 아니다. 첫 보스는 모두에게 쉬워서 아무 때나 눌러도 넘어간다. 색을
+ * 읽는 값은 **뒤로 갈수록** 나온다 — 뭉침 예고에 흩어지면 전원이 크게 맞고,
+ * 그 피해가 누적되는 데 몇 웨이브가 걸린다.
+ *
+ * 첫 보스 칸만 인용하면 개입의 깊이를 과소평가하고, 합산 통과율을 인용하면
+ * 과대평가한다. 짝지은 도달 웨이브가 이 축의 정직한 크기다.
+ */
+const always = results["늘 탭만"];
+if (always && perfect) {
+  const d = perfect.finalBySeed.map((v, i) => v - always.finalBySeed[i]).sort((a, b) => a - b);
+  const med = d[Math.floor(d.length / 2)];
+  const win = d.filter((x) => x > 0).length;
+  console.log(
+    `  깊이 (늘 탭만 → 읽고 판단)  첫 보스 +${(perfect.first - always.first).toFixed(1)}%p · ` +
+      `도달웨이브 짝차 중앙값 ${med >= 0 ? "+" : ""}${med} (${((win / d.length) * 100).toFixed(0)}% 시드 우세)`,
+  );
+}
 console.log("  빌드·배치가 살아 있는지는 npm run relics / npm run placement가 판정한다");
 if (!ac1) {
   console.log("\n판정: 개입이 필수 관문이 됐다 — 못 누르면 못 지나간다");

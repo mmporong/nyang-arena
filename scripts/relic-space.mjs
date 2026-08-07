@@ -84,10 +84,13 @@ const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 console.log(`런 ${RUNS}회 · 배치·개입 정책 고정 · 구매 전략만 변경 · 시드 1~${RUNS}\n`);
 console.log("전략                   최소  p10  p25  중앙값  p75  p90  최대   평균");
 const means = {};
+/** 시드 순서를 유지한 원본. 정렬본으로는 시드별 짝비교를 할 수 없다. */
+const bySeed = {};
 for (const [name, pick] of Object.entries(POLICIES)) {
-  const out = [];
-  for (let i = 0; i < RUNS; i++) out.push(play(pick, i + 1));
-  out.sort((a, b) => a - b);
+  const raw = [];
+  for (let i = 0; i < RUNS; i++) raw.push(play(pick, i + 1));
+  bySeed[name] = raw;
+  const out = [...raw].sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;
   means[name] = avg;
   console.log(
@@ -97,6 +100,53 @@ for (const [name, pick] of Object.entries(POLICIES)) {
       `${String(out[out.length - 1]).padStart(5)} ${avg.toFixed(1).padStart(6)}`,
   );
 }
+
+/**
+ * **고정 지배인가, 상황 선택인가.**
+ *
+ * 평균표만 보면 "도적 몰빵 18.2가 최고"로 끝난다. 그러면 이 축은 전략적 깊이가
+ * 아니라 **지식 시험**이다 — 정답을 한 번 배우면 매 판 같은 것을 고르면 된다.
+ *
+ * 그래서 시드마다 어느 전략이 이겼는지를 센다.
+ *
+ *   고정 최선 = 한 전략을 끝까지 밀었을 때의 평균 (위 표의 최고값)
+ *   신탁     = 시드마다 그 판에서 가장 좋았던 전략을 골랐을 때의 평균
+ *
+ * 신탁이 고정 최선보다 크게 높으면 **판마다 정답이 다르다**는 뜻이고, 그때만
+ * 이 축에 상황 판단이 있다. 다만 신탁은 결과를 미리 아는 상한이라 사람이 낼 수
+ * 있는 값이 아니다 — 여기서 재는 것은 "고를 값이 있는가"이지 "얼마나 낼 수
+ * 있는가"가 아니다.
+ */
+const focusNames = ["전사 몰빵", "도적 몰빵", "궁수 몰빵", "마법사 몰빵"];
+const wins = new Map(focusNames.map((n) => [n, 0]));
+let oracleSum = 0;
+for (let i = 0; i < RUNS; i++) {
+  let bestName = null;
+  let bestVal = -1;
+  for (const n of focusNames) {
+    if (bySeed[n][i] > bestVal) {
+      bestVal = bySeed[n][i];
+      bestName = n;
+    }
+  }
+  wins.set(bestName, wins.get(bestName) + 1);
+  oracleSum += bestVal;
+}
+const oracle = oracleSum / RUNS;
+const fixedBest = Math.max(...focusNames.map((n) => means[n] ?? 0));
+const topName = focusNames.find((n) => means[n] === fixedBest);
+const topShare = (wins.get(topName) / RUNS) * 100;
+
+console.log("\n시드마다 어느 몰빵이 이겼나 (동점은 먼저 나온 쪽)");
+for (const n of focusNames) {
+  console.log(`  ${n.padEnd(10)} ${String(wins.get(n)).padStart(4)}판  ${((wins.get(n) / RUNS) * 100).toFixed(1)}%`);
+}
+console.log(`\n고정 최선(${topName}) ${fixedBest.toFixed(1)}  ·  신탁 ${oracle.toFixed(1)}  ·  차이 ${(oracle - fixedBest).toFixed(1)}웨이브`);
+console.log(
+  topShare >= 50
+    ? `판정: ${topName} 하나가 ${topShare.toFixed(0)}% 시드에서 최선이다 — 상황 판단보다 지식 시험에 가깝다`
+    : `판정: 최선이 판마다 갈린다 (최다 ${topName} ${topShare.toFixed(0)}%) — 상황 판단의 여지가 있다`,
+);
 
 const vals = Object.values(means);
 const spread = Math.max(...vals) - Math.min(...vals);
