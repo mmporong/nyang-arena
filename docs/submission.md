@@ -152,11 +152,16 @@
 | | 항목 | 상태 |
 |---|---|---|
 | NAN | 웹 빌드 + 소스(커밋 히스토리 포함) | ✅ |
+| NAN | 소개 PDF | ✅ `docs/intro.pdf` (4쪽) |
+| NAN | AI 기술문서 PDF | ✅ `docs/ai-tech.pdf` (6쪽) |
 | NAN | 30~60초 게임플레이 영상 (실촬영) | ⬜ **직접 촬영 필요** |
-| NAN | 소개 PDF | ⬜ |
-| NAN | AI 기술문서 PDF | ⬜ (`docs/ai-tech.md` 기반) |
 | OpenAI | 브라우저 플레이 링크 | ✅ `mmporong.github.io/nyang-arena` |
-| OpenAI | 16:9 썸네일 | ⬜ |
+| OpenAI | 16:9 썸네일 | ✅ `docs/thumbnail.png` (1280×720) |
 | OpenAI | Codex를 개발 과정에 사용 | ⬜ |
 
-**영상과 썸네일은 대신할 수 없다.** 나머지는 저장소 안에 있다.
+스크린샷 열 장(`docs/shots/`)과 썸네일은 **배포본을 실제로 플레이해서** 찍었다.
+`npm run docs`가 PDF를 다시 만든다.
+
+**남은 것은 영상 하나다.** AI 합성이 금지(NAN 규정)라 실제 조작 화면이어야 하고,
+컷 구성은 `docs/video-storyboard.md`에 정해 두었다. 보스는 3웨이브에 처음 나오므로
+1분 안에 도달한다 — 여러 번 찍어도 부담이 없다.
