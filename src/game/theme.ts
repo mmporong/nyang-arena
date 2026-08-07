@@ -63,112 +63,83 @@ export const T = {
 } as const;
 
 /* ------------------------------------------------------------------ */
-/* 픽셀 숫자                                                            */
+/* 숫자                                                                 */
 /* ------------------------------------------------------------------ */
 
 /**
- * 5×7 비트맵 글리프. 각 행의 하위 5비트가 한 줄이다.
+ * 숫자·기호를 **UI 폰트로** 그린다.
  *
- * 숫자를 시스템 폰트로 찍으면 안티에일리어싱 때문에 픽셀 고양이 옆에서 흐릿하게
- * 뜬다. 같은 격자에서 그린 숫자가 아트와 한 몸으로 보인다. 한글 픽셀 폰트는
- * 용량이 커서 못 넣으므로(외부 요청 0건 제약), 숫자·기호만 이렇게 그리고
- * 한글은 시스템 폰트에 외곽선을 둘러 쓴다.
+ * 예전에는 5×7 비트맵 글리프를 손으로 찍었다. 픽셀 고양이와 한 격자에서 나온
+ * 물건처럼 보이게 하려던 것인데, 대가가 컸다. 글리프 집합이 닫혀 있어
+ * `0-9 L V S + - / ! %`밖에 못 찍었고(없는 글자는 조용히 빈칸이 됐다), 카드
+ * 비용·시너지 진행도·보스 퍼센트처럼 **작게 뜨는 숫자**가 저해상도에서 뭉갰다.
+ * 무엇보다 같은 줄에 한글은 시스템 폰트, 숫자는 비트맵이라 두 글꼴이 부딪혔다.
+ *
+ * `px` 인자는 옛 글리프의 픽셀 하나 크기를 그대로 받는다. 호출부 열세 곳이 전부
+ * 그 단위로 크기를 맞춰 두었으므로, 단위를 바꾸면 그 열세 곳을 눈으로 다시
+ * 맞춰야 한다. 안에서 폰트 크기로 환산해 **보이는 높이를 유지**한다.
  */
-const GLYPHS: Record<string, readonly number[]> = {
-  "0": [0x0e, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0e],
-  "1": [0x04, 0x0c, 0x04, 0x04, 0x04, 0x04, 0x0e],
-  "2": [0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f],
-  "3": [0x1f, 0x02, 0x04, 0x02, 0x01, 0x11, 0x0e],
-  "4": [0x02, 0x06, 0x0a, 0x12, 0x1f, 0x02, 0x02],
-  "5": [0x1f, 0x10, 0x1e, 0x01, 0x01, 0x11, 0x0e],
-  "6": [0x06, 0x08, 0x10, 0x1e, 0x11, 0x11, 0x0e],
-  "7": [0x1f, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08],
-  "8": [0x0e, 0x11, 0x11, 0x0e, 0x11, 0x11, 0x0e],
-  "9": [0x0e, 0x11, 0x11, 0x0f, 0x01, 0x02, 0x0c],
-  L: [0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1f],
-  V: [0x11, 0x11, 0x11, 0x11, 0x11, 0x0a, 0x04],
-  S: [0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e],
-  "+": [0x00, 0x04, 0x04, 0x1f, 0x04, 0x04, 0x00],
-  "-": [0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00],
-  "/": [0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10],
-  "!": [0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04],
-  // 보스 배너의 남은 체력 표기용. 없으면 "38%"가 "38?"로 찍힌다.
-  "%": [0x19, 0x19, 0x02, 0x04, 0x08, 0x13, 0x13],
-  " ": [0, 0, 0, 0, 0, 0, 0],
-};
-
-const GLYPH_W = 5;
+/** 옛 글리프의 행 수. 보이는 높이를 맞추는 기준이다. */
 const GLYPH_H = 7;
-/** 글자 사이 빈 열 */
-const TRACK = 1;
+/**
+ * 폰트의 숫자 높이 ÷ em.
+ *
+ * 산세리프 숫자는 대문자 높이와 같고 그게 대략 0.72em이다. 이 값으로 나눠야
+ * 폰트 크기가 옛 글리프와 같은 높이를 낸다.
+ */
+const NUM_CAP_RATIO = 0.72;
 
-export function pixelTextWidth(text: string, px: number): number {
-  if (text.length === 0) return 0;
-  return (text.length * (GLYPH_W + TRACK) - TRACK) * px;
+/** 옛 px 단위를 폰트 크기로. 레이아웃 계산이 이걸 쓴다. */
+export function numTextSize(px: number): number {
+  return (GLYPH_H * px) / NUM_CAP_RATIO;
 }
 
-export type PixelAlign = "left" | "center" | "right";
+/** 그려질 숫자의 높이. 라벨 자리를 이 값에서 뽑는 곳이 있다. */
+export function numTextHeight(px: number): number {
+  return GLYPH_H * px;
+}
 
 /**
- * 픽셀 숫자를 그린다.
- * @param px 픽셀 하나의 크기. 정수로 반올림해야 격자가 흐트러지지 않는다.
+ * 그려질 숫자의 폭.
+ *
+ * 옛 비트맵은 글자 수 × 고정 폭이라 계산으로 나왔지만 비례 폰트는 재야 한다.
+ * **`numText`와 같은 폰트로 재야** 아이콘 자리가 숫자와 안 갈린다.
  */
-export function pixelText(
+export function numTextWidth(ctx: CanvasRenderingContext2D, text: string, px: number): number {
+  ctx.font = fontOf(numTextSize(px), 800);
+  return ctx.measureText(text).width;
+}
+
+export type NumAlign = "left" | "center" | "right";
+
+/**
+ * @param px 옛 글리프의 픽셀 하나 크기. `numTextSize`로 환산된다.
+ * @param outline 사방 외곽선. 밝은 털 위에 뜨는 피해 숫자용이다 — 아래 그림자
+ *   하나로는 흰 고양이 위에서 흰 숫자가 그대로 사라진다.
+ */
+export function numText(
   ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
   y: number,
   px: number,
   color: string,
-  align: PixelAlign = "left",
+  align: NumAlign = "left",
   shadow = true,
-  /**
-   * 사방 외곽선. 밝은 털 위에 뜨는 피해 숫자용이다.
-   *
-   * 아래 그림자 하나로는 흰 고양이 위에서 흰 숫자가 그대로 사라진다. 사방을
-   * 검정으로 두르면 배경이 무엇이든 살아남는다. 글리프를 아홉 번 그리지만
-   * 한 번에 뜨는 숫자가 열 몇 개라 비용이 문제되는 자리가 아니다.
-   */
   outline = false,
 ): void {
-  const p = Math.max(1, Math.round(px));
-  const w = pixelTextWidth(text, p);
-  const h = GLYPH_H * p;
-  let cx = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
-  cx = Math.round(cx);
-  const cy = Math.round(y - h / 2);
+  const size = numTextSize(px);
+  // 숫자는 늘 굵게. 자원·비용·진행도라 옆의 한글 라벨보다 앞에 서야 한다.
+  const opts: UiTextOpts = { align, weight: 800, outline };
 
-  const draw = (ox: number, oy: number, fill: string) => {
-    ctx.fillStyle = fill;
-    let gx = cx + ox;
-    for (const ch of text.toUpperCase()) {
-      const g = GLYPHS[ch] ?? GLYPHS["?"] ?? GLYPHS[" "]!;
-      for (let row = 0; row < GLYPH_H; row++) {
-        const bits = g[row] ?? 0;
-        for (let col = 0; col < GLYPH_W; col++) {
-          if (bits & (1 << (GLYPH_W - 1 - col))) {
-            ctx.fillRect(gx + col * p, cy + oy + row * p, p, p);
-          }
-        }
-      }
-      gx += (GLYPH_W + TRACK) * p;
-    }
-  };
-
-  // 전장 위에 떠도 읽히도록 한 픽셀 아래에 그림자를 깐다.
-  if (outline) {
-    draw(0, p * 2, "rgba(12,8,6,0.85)");
-    for (const [ox, oy] of [
-      [-1, -1], [0, -1], [1, -1],
-      [-1, 0], [1, 0],
-      [-1, 1], [0, 1], [1, 1],
-    ] as const) {
-      draw(ox * p, oy * p, "#0E0A08");
-    }
-  } else if (shadow) {
-    draw(0, p, "rgba(12,8,6,0.75)");
+  // 외곽선은 uiText가 처리한다. 그림자는 그 아래 한 겹으로만 깐다.
+  if (!outline && shadow) {
+    uiText(ctx, text, x, y + Math.max(1, size * 0.06), size, "rgba(12,8,6,0.75)", {
+      align,
+      weight: 800,
+    });
   }
-  draw(0, 0, color);
+  uiText(ctx, text, x, y, size, color, opts);
 }
 
 /* ------------------------------------------------------------------ */
@@ -203,6 +174,26 @@ function fontOf(size: number, weight: number): string {
   // 12px 미만은 격자에 맞출 여유가 없다. 거기서 반올림하면 읽을 수 없게 커지거나 작아진다.
   const s = size >= 12 ? Math.max(12, Math.round(size / 4) * 4) : Math.round(size);
   return `${w} ${s}px ${STACK}`;
+}
+
+/**
+ * 주어진 폭에 들어가는 글자 크기를 돌려준다.
+ *
+ * `uiText`의 `maxWidth`는 캔버스가 글자를 **가로로 눌러서** 맞추므로 4글자 이름이
+ * 25% 납작해진다. 지도 보스 칸에서 실제로 그랬다 — 원 지름이 110px인데 "무쇠발톱"이
+ * 37px로 148px를 먹어 원 밖으로 넘쳤다. 크기를 줄이면 자형이 안 망가진다.
+ */
+export function fitTextSize(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  size: number,
+  weight = 400,
+): number {
+  if (maxWidth <= 0) return size;
+  ctx.font = fontOf(size, weight);
+  const w = ctx.measureText(text).width;
+  return w <= maxWidth || w === 0 ? size : size * (maxWidth / w);
 }
 
 export function uiText(

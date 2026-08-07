@@ -9,7 +9,8 @@ import {
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { bossHint, nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
+import { bossHint, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
+import { drawFish, drawNodeIcon } from "./icons.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -27,7 +28,10 @@ import {
 } from "./run.ts";
 import {
   bevelPanel,
-  pixelText,
+  fitTextSize,
+  numText,
+  numTextHeight,
+  numTextWidth,
   roundRect,
   T,
   uiText,
@@ -413,7 +417,13 @@ function drawArena(ctx: CanvasRenderingContext2D, L: Layout): void {
 /* 상단 HUD                                                             */
 /* ------------------------------------------------------------------ */
 
-/** 아이콘 대신 픽셀 숫자를 크게 세운 칩. 자원은 글자가 아니라 숫자로 읽힌다. */
+/**
+ * 캡션 위, 숫자 아래. 자원은 글자가 아니라 숫자로 읽힌다.
+ *
+ * `icon`을 주면 숫자 왼쪽에 그림이 붙는다. 생선은 이 게임에서 유일한 자원이고
+ * 카드 비용·리롤 비용·보상까지 전부 같은 단위인데, 화면에서는 그때그때 다른
+ * 파란 숫자로만 나타나 같은 물건인 줄 알기 어려웠다. 그림이 그 셋을 묶는다.
+ */
 function hudChip(
   ctx: CanvasRenderingContext2D,
   box: Rect,
@@ -421,21 +431,35 @@ function hudChip(
   value: string,
   color: string,
   align: "left" | "center" | "right",
+  icon = false,
 ): void {
   const cap = Math.max(9, box.h * 0.24);
   const px = Math.max(2, Math.round(box.h * 0.055));
-  const x =
+  const valueY = box.y + box.h * 0.72;
+  const iconSize = box.h * 0.42;
+  // 그림이 붙으면 숫자와 그림을 합친 덩어리가 정렬 기준을 따라야 한다.
+  // 숫자만 정렬하면 가운데 정렬에서 덩어리가 그림 폭만큼 왼쪽으로 밀린다.
+  const gap = icon ? iconSize * 0.78 : 0;
+  const anchor =
     align === "left"
       ? box.x
       : align === "right"
         ? box.x + box.w
         : box.x + box.w / 2;
+  const x = align === "left" ? anchor + gap : align === "right" ? anchor : anchor + gap / 2;
 
-  uiText(ctx, caption, x, box.y + box.h * 0.26, cap, T.muted, {
+  uiText(ctx, caption, anchor, box.y + box.h * 0.26, cap, T.muted, {
     align,
     weight: 700,
   });
-  pixelText(ctx, value, x, box.y + box.h * 0.72, px, color, align, false);
+  numText(ctx, value, x, valueY, px, color, align, false);
+
+  if (icon) {
+    const numW = numTextWidth(ctx, value, px);
+    // 숫자 덩어리의 왼쪽 끝을 구해 거기서 한 칸 더 왼쪽에 놓는다.
+    const numLeft = align === "left" ? x : align === "right" ? x - numW : x - numW / 2;
+    drawFish(ctx, numLeft - gap * 0.55, valueY, iconSize, color);
+  }
 }
 
 function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
@@ -456,6 +480,7 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     String(s.gold),
     T.fish,
     "center",
+    true,
   );
   hudChip(
     ctx,
@@ -779,7 +804,7 @@ function drawCat(
     ctx.restore();
   }
 
-  // 레벨은 픽셀 숫자로. 스프라이트 무늬에 묻히지 않게 뱃지 위에 얹는다.
+  // 레벨은 스프라이트 무늬에 묻히지 않게 뱃지 위에 얹는다.
   if (cat.level > 1 && size >= 30) {
     const rad = size * 0.2;
     const lx = cx - size * 0.44;
@@ -791,7 +816,7 @@ function drawCat(
     ctx.strokeStyle = T.gold;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    pixelText(
+    numText(
       ctx,
       String(cat.level),
       lx,
@@ -1173,7 +1198,7 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
     } else {
       // 스킬·치명타만 크고 레몬이다. 판 위에서 레몬이 뜨는 경우는 취약 창과
       // 큰 한 방 둘뿐이라 "지금 뭔가 세게 들어갔다"로 뜻이 통한다.
-      pixelText(
+      numText(
         ctx,
         p.text,
         ox,
@@ -1261,7 +1286,7 @@ function drawDivider(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.strokeStyle = "rgba(239,224,198,0.16)";
   ctx.lineWidth = 1;
   ctx.stroke();
-  pixelText(
+  numText(
     ctx,
     "VS",
     cx,
@@ -1330,7 +1355,7 @@ function drawTeamStrip(
       align: "center",
       weight: 700,
     });
-    pixelText(
+    numText(
       ctx,
       String(counts[cls]),
       cx,
@@ -1347,7 +1372,7 @@ function drawTeamStrip(
     align: "center",
     weight: 700,
   });
-  pixelText(
+  numText(
     ctx,
     String(livingCats(s.enemy).length),
     cx,
@@ -1434,7 +1459,16 @@ function drawPortraitWell(
   ctx.stroke();
 }
 
-/** 값은 카드 모서리의 동그란 뱃지로. 어느 카드가 얼마인지 훑어보기 좋다. */
+/**
+ * 값은 카드 모서리의 뱃지로. 어느 카드가 얼마인지 훑어보기 좋다.
+ *
+ * **원이 아니라 알약이다.** 생선 그림을 넣으면서 바꿨다 — 원 안에 그림과 숫자를
+ * 위아래로 쌓아 봤더니 둘 다 절반 크기가 되어 겹쳐 읽혔다(지름이 22px 남짓이라
+ * 애초에 두 물건이 들어갈 자리가 아니었다). 가로로 눕히면 둘 다 제 크기로 선다.
+ *
+ * 오른쪽 끝은 옛 원의 오른쪽 끝에 그대로 둔다. 호출부 셋이 카드 오른쪽 모서리에서
+ * 자리를 잡고 있어서, 기준이 움직이면 그 셋을 다시 맞춰야 한다.
+ */
 function drawCostBadge(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -1443,26 +1477,28 @@ function drawCostBadge(
   cost: number,
   afford: boolean,
 ): void {
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  const hue = afford ? T.fish : T.muted;
+  const fish = r * 1.24;
+  // 숫자 높이를 뱃지 높이에 맞춘다. 두 자리(유물이 9~12생선)도 같은 크기로 선다 —
+  // 옛 원은 자릿수만큼 글자를 줄여야 했지만 알약은 폭이 따라 늘어난다.
+  const px = Math.max(1, (r * 1.0) / 7);
+  const numW = numTextWidth(ctx, String(cost), px);
+  const gap = r * 0.12;
+  const padX = r * 0.44;
+  const h = r * 2;
+  const w = padX * 2 + fish * 0.86 + gap + numW;
+  const right = cx + r;
+  const box = { x: right - w, y: cy - h / 2, w, h };
+
+  roundRect(ctx, box, h / 2);
   ctx.fillStyle = "rgba(18,12,10,0.94)";
   ctx.fill();
   ctx.strokeStyle = afford ? T.fish : "rgba(239,224,198,0.16)";
   ctx.lineWidth = 2;
   ctx.stroke();
-  // 두 자리 비용은 글리프 폭이 두 배가 되어 원 밖으로 넘친다. 자릿수만큼 줄인다.
-  // 유물이 9~12생선이라 두 자리가 실제로 나온다.
-  const digits = String(cost).length;
-  pixelText(
-    ctx,
-    String(cost),
-    cx,
-    cy,
-    Math.max(1, (r * 0.52) / (digits + 1)),
-    afford ? T.fish : T.muted,
-    "center",
-    false,
-  );
+
+  drawFish(ctx, box.x + padX + fish * 0.43, cy, fish, hue);
+  numText(ctx, String(cost), right - padX, cy, px, hue, "right", false);
 }
 
 /**
@@ -1856,12 +1892,22 @@ function drawBottomZone(
         weight: 700,
       },
     );
-    pixelText(
+    // 값 왼쪽에 생선. 카드 뱃지·HUD와 같은 그림이라 "이것도 생선 값"이 붙는다.
+    const rollPx = Math.max(1, rr.h * 0.09);
+    const rollRight = rr.x + rr.w - rr.w * 0.12;
+    drawFish(
+      ctx,
+      rollRight - numTextWidth(ctx, String(REROLL_COST), rollPx) - rr.h * 0.34,
+      rr.y + rr.h / 2,
+      rr.h * 0.5,
+      canRoll ? T.fish : T.muted,
+    );
+    numText(
       ctx,
       String(REROLL_COST),
-      rr.x + rr.w - rr.w * 0.12,
+      rollRight,
       rr.y + rr.h / 2,
-      Math.max(1, rr.h * 0.09),
+      rollPx,
       canRoll ? T.fish : T.muted,
       "right",
       false,
@@ -1933,7 +1979,7 @@ function drawSynergies(
           maxWidth: inner * 0.52,
         },
       );
-      pixelText(
+      numText(
         ctx,
         prog,
         cr.x + padX,
@@ -1984,7 +2030,7 @@ function drawSynergies(
         maxWidth: inner * 0.68,
       },
     );
-    pixelText(
+    numText(
       ctx,
       prog,
       cr.x + cr.w - padX,
@@ -2016,12 +2062,14 @@ function drawSynergies(
  * 이어지는지도 읽힌다. 갈 수 없는 칸은 선 없이 어둡게 둔다 — 지우면 길이
  * 좁아 보이고, 똑같이 그리면 고를 수 있는 줄 알고 누른다.
  */
-const NODE_MARK: Record<NodeKind, string> = {
-  battle: "전투",
-  elite: "정예",
-  shop: "정찰",
-  boss: "보스",
-};
+/*
+ * 칸 안의 표식은 **아이콘**이다(보스만 이름).
+ *
+ * 예전에는 "전투/정예/정찰"을 글자로 찍었다. 셋은 길이가 같고 지름 30px 원
+ * 안에서는 전부 회색 얼룩으로 보여서, 갈림길에서 무엇과 무엇 중에 고르는지가
+ * 한 번에 안 읽혔다. 형태는 작아져도 실루엣이 남는다 — icons.ts 참고.
+ * 이름이 필요한 곳(호버 설명·갈래 요약)은 `nodeInfo`가 그대로 낸다.
+ */
 
 export function mapNodeRects(L: Layout, s: RunState): { rect: Rect; step: number; idx: number }[] {
   const out: { rect: Rect; step: number; idx: number }[] = [];
@@ -2128,25 +2176,37 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     ctx.strokeStyle = hot ? "#FFFFFF" : hue;
     ctx.lineWidth = hot ? Math.max(3, L.scale * 3.4) : pickable ? Math.max(2, L.scale * 2.6) : Math.max(1, L.scale * 1.4);
     ctx.stroke();
-    // 보스 칸은 '보스' 대신 **이름**을 보여준다. 어떤 보스가 오는지가 곧
-    // 무엇을 준비할지를 정하는데, 지금까지 그 정보가 화면에 없었다.
+    // 보스 칸만 **이름**을 보여준다. 어떤 보스가 오는지가 곧 무엇을 준비할지를
+    // 정하는데, 지금까지 그 정보가 화면에 없었다.
     //
     // 신원은 `bossIndexAt`에서만 나온다. 예전에는 현재 걸음 기준으로 "앞으로
     // 만날 보스가 몇 번째인가"를 세어 라벨을 붙였는데, 그러면 **지나간 보스 칸이
     // 다음 보스 이름으로 바뀌어** 한 지도에 같은 이름이 둘 뜬다.
-    const label =
-      node.kind === "boss"
-        ? bossForIndex(bossIndexAt(s, st)).name
-        : NODE_MARK[node.kind];
-    uiText(
-      ctx,
-      label,
-      rect.x + rect.w / 2,
-      rect.y + rect.h / 2,
-      Math.max(10, (rect.w + grow * 2) * 0.34),
-      hot ? T.paper : hue,
-      { align: "center", weight: pickable ? 800 : 400 },
-    );
+    if (node.kind === "boss") {
+      const name = bossForIndex(bossIndexAt(s, st)).name;
+      const weight = pickable ? 800 : 400;
+      // 이름은 세 글자(살금이·서리귀)와 네 글자(무쇠발톱)가 섞여 있다. 고정 크기로
+      // 두면 네 글자가 원 밖으로 새어 나가 옆 칸의 선을 덮는다.
+      const fs = fitTextSize(ctx, name, (rect.w + grow * 2) * 0.84, (rect.w + grow * 2) * 0.34, weight);
+      uiText(
+        ctx,
+        name,
+        rect.x + rect.w / 2,
+        rect.y + rect.h / 2,
+        Math.max(9, fs),
+        hot ? T.paper : hue,
+        { align: "center", weight },
+      );
+    } else {
+      drawNodeIcon(
+        ctx,
+        node.kind,
+        rect.x + rect.w / 2,
+        rect.y + rect.h / 2,
+        (rect.w + grow * 2) * 0.72,
+        hot ? T.paper : hue,
+      );
+    }
     ctx.restore();
 
     // 고를 수 있는 칸은 맥동한다. 여섯 칸 중 어디를 눌러야 하는지가 한눈에 보인다.
@@ -2360,7 +2420,7 @@ function drawBossBanner(
   const left = sniper ? 0 : Math.max(0, BOSS_THRESHOLDS.length - boss.thresholdIdx);
   const rightW = sniper ? pad : h * 1.5;
   if (!sniper) {
-    pixelText(
+    numText(
       ctx,
       `${left}/${BOSS_THRESHOLDS.length}`,
       r.x + r.w - pad * 1.4,
@@ -2416,7 +2476,7 @@ function drawBossBanner(
   }
 
   // 퍼센트는 막대 안 오른쪽 끝에. 숫자를 밖에 두면 자리를 또 뗀다.
-  pixelText(
+  numText(
     ctx,
     `${Math.round(frac * 100)}%`,
     barX + barW - barH * 0.4,
@@ -2504,14 +2564,14 @@ function drawGameOver(
   const num = String(s.wave);
   // 라벨 자리를 숫자의 **실제 높이**에서 뽑는다. 상수로 두면 화면 배율이 바뀔 때
   // "도달"과 "웨이브"가 숫자 위로 올라탄다(1280x800에서 실제로 그랬다).
-  const numH = 7 * px;
+  const numH = numTextHeight(px);
   const gap = L.scale * 12;
 
   uiText(ctx, "도달", L.w / 2, cy - numH / 2 - gap, L.scale * 15, T.muted, {
     align: "center",
     weight: 800,
   });
-  pixelText(ctx, num, L.w / 2, cy, px, T.paper, "center", false);
+  numText(ctx, num, L.w / 2, cy, px, T.paper, "center", false);
   uiText(ctx, "웨이브", L.w / 2, cy + numH / 2 + gap, L.scale * 16, T.muted, {
     align: "center",
     weight: 800,
