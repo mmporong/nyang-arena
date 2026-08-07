@@ -412,6 +412,9 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       lanes: (state.map.steps[state.step] ?? []).map((n) => n.kind),
       nodeKind: state.nodeKind,
       offers: state.offers.map((o) => (o ? { label: o.label, cost: o.cost } : null)),
+      // 유물은 측정에서 가장 깊은 축이라 밖에서 상태를 볼 수 있어야 한다.
+      // 제출용 스크린샷을 "유물을 든 상태"로 잡는 데도 이게 필요했다.
+      relics: state.relics.map((r) => r.name),
       allies: state.ally.filter(Boolean).length,
       dodgeCharges: state.dodgeCharges,
       pending: [...state.pending],
