@@ -59,6 +59,7 @@ src/game/layout.ts     레이아웃 계산 (렌더와 입력이 공유). 판은 
 src/game/render.ts     캔버스 렌더링
 src/game/icons.ts      아이콘(생선·지도 칸). 전부 Canvas 2D 패스 — 외부 요청 0건이라 폰트도 SVG도 못 쓴다
 src/game/sprites.ts    스프라이트 로딩
+src/game/audio.ts      음악. 게임 로직은 이걸 모른다 — main.ts가 상태를 보고 튼다
 src/validate/          LLM 출력 검증기 — 빌드타임과 런타임이 공유
 scripts/               슬라이싱·생성·테스트·시뮬레이션
 ```

@@ -142,7 +142,10 @@ HTTPS로 바꿔야 한다.
 
 ## 기술
 
-TypeScript · Vite · Canvas 2D. 엔진·프레임워크 없음.
+TypeScript · Vite · Canvas 2D · Web Audio. 엔진·프레임워크 없음.
+음악은 준비곡 하나가 지도·상점·배치·일반 전투를 통째로 흐르고, **보스전에만**
+0.8초 크로스페이드로 갈아탄다(일반 전투는 3~4초라 전용 곡을 두면 판이 토막 난다).
+음소거는 HUD 오른쪽 끝 또는 `M`.
 아트는 자체 제작 픽셀 고양이 20종 × 6포즈 시트를 `npm run slice`로 잘라 쓴다
 (T1 빌드는 8종 사용).
 
@@ -151,6 +154,9 @@ TypeScript · Vite · Canvas 2D. 엔진·프레임워크 없음.
 - **고양이 스프라이트·배경·전투 연출**: 자체 제작 (mmporong, 2026)
 - **UI 아이콘 13장**: [GUI Pro - Minimal Game Light](https://assetstore.unity.com/packages/2d/gui/gui-pro-minimal-game-light-355406) (Layer Lab) —
   생선·직업 4종·유물 8종. 흰 실루엣을 게임 색으로 틴트해서 쓴다
+- **음악 4곡**: 생성 AI로 만들었다. 프롬프트는
+  [`docs/audio-prompts.md`](docs/audio-prompts.md)에 그대로 있고, 받은 파일을
+  어떻게 측정·마스터링해서 넣었는지도 같은 문서 §7에 있다
 - 그 외 외부 에셋·오픈소스 사용 없음. 런타임 의존성 0개
 
 어떤 팩을 검토했고 무엇을 왜 안 썼는지는 [`docs/assets.md`](docs/assets.md)에 있다.
