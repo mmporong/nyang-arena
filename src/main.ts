@@ -15,6 +15,7 @@ import {
 import { openLanes } from "./game/map.ts";
 import { loadSprites } from "./game/sprites.ts";
 import { loadIcons } from "./game/icons.ts";
+import { playSting, setBed, toggleMute, unlockAudio } from "./game/audio.ts";
 
 const app = document.getElementById("app");
 const boot = document.getElementById("boot");
@@ -187,8 +188,27 @@ function onPrimaryAction(): void {
     case "gameover":
       clearBattleFx();
       state = newRun();
+      // 새 판의 막이 오른다. 첫 부팅 때는 아직 잠겨 있어 안 울리고,
+      // 여기서부터는 울린다 — 소리는 사용자 입력 없이 못 낸다.
+      playSting("title");
       break;
   }
+}
+
+/**
+ * 지금 깔릴 곡.
+ *
+ * `setBed`는 같은 곡을 다시 부르면 아무 일도 안 하므로 **매 프레임 불러도
+ * 된다.** 그래서 여기에는 "국면이 바뀌었나"를 기억하는 코드가 없다. 그 기억을
+ * 여기에 또 두면 언젠가 `state`와 갈라진다.
+ *
+ * 일반 전투에 전용 곡이 없는 것은 의도다 — 측정해 보니 3~4초다. 3초짜리 곡은
+ * 곡이 아니고, 매 걸음 음악이 바뀌면 판이 토막 난다. 준비곡이 그대로 흐른다.
+ */
+function musicFor(s: RunState): "prepare" | "boss" | "outro" {
+  if (s.phase === "gameover") return "outro";
+  if (s.phase === "battle" && s.nodeKind === "boss") return "boss";
+  return "prepare";
 }
 
 /** 버튼에서 손을 뗀 순간 탭인지 꾹인지 판정한다. */
@@ -203,12 +223,27 @@ function resolveButtonPress(): void {
 
 canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
+  // 브라우저는 사용자 입력 전에 소리를 안 낸다. 이 탭이 그 입력이다.
+  unlockAudio();
   try {
     canvas.setPointerCapture(e.pointerId);
   } catch {
     // 일부 브라우저는 활성 포인터가 아니면 던진다. 캡처는 편의 기능이므로 무시한다.
   }
   const { x, y } = pointerPos(e);
+
+  /**
+   * 음소거는 페이즈 잠금보다 먼저 본다.
+   *
+   * 아래 잠금은 "국면이 방금 바뀌었으니 이 탭은 이전 화면을 향한 것"이라는
+   * 판단인데, 음소거에는 그 논리가 안 맞는다. 소리를 끄려는 손은 화면이
+   * 무엇으로 바뀌었든 소리를 끄려는 손이다. 시끄러워서 누른 버튼이
+   * 안 먹으면 그다음은 탭이 닫힌다.
+   */
+  if (rectHas(layout.mute, x, y)) {
+    toggleMute();
+    return;
+  }
 
   // 페이즈가 막 바뀌었으면 이 탭은 이전 화면을 향한 것이다. 버린다.
   if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
@@ -349,6 +384,13 @@ function pushIntent(kind: "dodge" | "gather"): void {
 
 window.addEventListener("keydown", (e) => {
   if (e.repeat && e.code !== "Space") return;
+  unlockAudio();
+
+  // 음소거는 페이즈 잠금 위에 있다. 탭 쪽과 같은 이유다.
+  if (e.code === "KeyM") {
+    toggleMute();
+    return;
+  }
   if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
 
   switch (e.code) {
@@ -454,6 +496,7 @@ function frame(now: number): void {
   const dt = last === 0 ? 16 : Math.min(100, now - last);
   last = now;
   stepBattle(state, dt);
+  setBed(musicFor(state));
   render(ctx!, layout, state, drag, hoverCell);
   requestAnimationFrame(frame);
 }
