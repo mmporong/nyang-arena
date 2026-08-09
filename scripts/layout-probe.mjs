@@ -43,7 +43,7 @@ function overlapArea(a, b) {
 }
 
 let failed = 0;
-console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  전투셀  구성    판정");
+console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  전투셀  음소거  구성    판정");
 for (const [name, w, h] of DEVICES) {
   const L = computeLayout(w, h);
   /**
@@ -83,6 +83,19 @@ for (const [name, w, h] of DEVICES) {
     : Math.max(B.allyBoard.y + B.allyBoard.h, B.enemyBoard.y + B.enemyBoard.h) <=
         B.synergyBar.y + 1 && B.cell >= L.cell;
 
+  /**
+   * 음소거 버튼은 HUD 칩과 겹치지 않고 화면 안에 있어야 한다.
+   *
+   * HUD에서 자리를 떼는 방식이라 `hud.w`를 줄이는 걸 빼먹으면 조용히
+   * "최고 기록" 위에 올라탄다 — 그런 종류의 실수는 화면을 봐야 보이고,
+   * 기기 열 종을 매번 눈으로 보지는 않는다. 32px는 손가락 최소치다.
+   */
+  const muteClear =
+    L.mute.x >= L.hud.x + L.hud.w &&
+    L.mute.x + L.mute.w <= w &&
+    L.mute.y >= 0 &&
+    L.mute.w >= 32;
+
   // roomy=false는 준비 단계 띠까지 보드를 덮는 좁은 화면이다. 그때도 입력은 안 샌다.
   // 5x5는 세로로 10줄이 필요해 3x3보다 셀이 작다. 판정 영역을 셀 간격의 절반만큼
   // 넓혀 두었으므로 시각 셀 24px면 손가락으로 집을 수 있다.
@@ -92,6 +105,7 @@ for (const [name, w, h] of DEVICES) {
     cardsOnScreen &&
     L.cell >= 24 &&
     L.button.h >= 40 &&
+    muteClear &&
     battleClear;
   if (!ok) failed++;
   console.log(
@@ -99,6 +113,7 @@ for (const [name, w, h] of DEVICES) {
       `${shape} ${String(Math.round(L.offerCards.w / 3)).padStart(3)}x${String(Math.round(L.offerCards.h)).padEnd(4)}` +
       `${String(Math.round(headroom)).padStart(8)}  ${String(Math.round(L.cell)).padStart(5)}  ` +
       `${String(Math.round(L.button.h)).padStart(4)}  ${String(Math.round(B.cell)).padStart(5)}  ` +
+      `${String(Math.round(L.mute.w)).padStart(5)}  ` +
       `${(L.columns ? "세로줄" : L.stacked ? "쌓음" : "눕힘").padEnd(6)}` +
       (ok ? "OK" : "실패"),
   );

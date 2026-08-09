@@ -42,6 +42,14 @@ export interface Layout {
   stacked: boolean;
   scale: number;
   hud: Rect;
+  /**
+   * 음소거 토글. HUD 오른쪽 끝에서 자리를 뗀다.
+   *
+   * 캔버스 위에 떠 있게 두지 않고 레이아웃이 자리를 갖는 이유는, 떠 있는
+   * 물건은 화면 비율이 바뀔 때마다 무언가를 덮기 때문이다. 여기 있으면
+   * HUD 칩 셋이 그만큼 좁아질 뿐 겹칠 일이 없다.
+   */
+  mute: Rect;
   /** 안내 문구 전용 띠. 보드와 겹치지 않도록 레이아웃에서 자리를 뗀다. */
   notice: Rect;
   allyBoard: Rect;
@@ -106,7 +114,16 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
   const barH = Math.round(Math.max(barFloor, Math.min(w, h) * 0.07));
   const btnH = Math.round(Math.max(tight ? 42 : 46, Math.min(w, h) * 0.09));
 
-  const hud: Rect = { x: pad, y: pad, w: w - pad * 2, h: hudH };
+  // 음소거는 손가락으로 눌러야 하므로 HUD가 얇아져도 32px 아래로는 안 간다.
+  const muteS = Math.round(Math.max(32, Math.min(hudH, 40)));
+  const muteGap = Math.round(pad * 0.5);
+  const hud: Rect = { x: pad, y: pad, w: w - pad * 2 - muteS - muteGap, h: hudH };
+  const mute: Rect = {
+    x: w - pad - muteS,
+    y: pad + Math.round((hudH - muteS) / 2),
+    w: muteS,
+    h: muteS,
+  };
   const bottomY = h - pad - btnH;
 
   /**
@@ -305,6 +322,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
     stacked,
     scale,
     hud,
+    mute,
     notice,
     allyBoard,
     enemyBoard,

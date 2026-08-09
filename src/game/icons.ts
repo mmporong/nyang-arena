@@ -257,6 +257,67 @@ function drawEye(
   ctx.restore();
 }
 
+/**
+ * 스피커 — 음소거 토글.
+ *
+ * 켜짐과 꺼짐이 **같은 자리에서 다른 형태**여야 한다. 색만 바꾸면 어두운
+ * 화면에서 둘이 구분되지 않고, 특히 소리를 안 켠 사람은 비교 대상이 없어
+ * 지금 상태가 뭔지 알 수 없다. 꺼짐에는 사선을 긋는다 — 세계 공통이고,
+ * 형태가 달라지므로 흘긋 봐도 갈린다.
+ */
+export function drawSpeaker(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+  on: boolean,
+): void {
+  const u = size * 0.5;
+  ctx.save();
+  // 꺼짐은 **색이 아니라 투명도**로 낮춘다. 흐린 색으로 칠했더니 어두운 바탕에서
+  // 형태가 통째로 사라져, 무엇이 꺼졌는지도 안 보였다.
+  if (!on) ctx.globalAlpha = 0.62;
+  ctx.fillStyle = color;
+
+  // 몸통 — 작은 사각형에 붙은 나팔
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 0.62, cy - u * 0.24);
+  ctx.lineTo(cx - u * 0.3, cy - u * 0.24);
+  ctx.lineTo(cx + u * 0.06, cy - u * 0.62);
+  ctx.lineTo(cx + u * 0.06, cy + u * 0.62);
+  ctx.lineTo(cx - u * 0.3, cy + u * 0.24);
+  ctx.lineTo(cx - u * 0.62, cy + u * 0.24);
+  ctx.closePath();
+  ctx.fill();
+
+  if (on) {
+    // 음파 두 줄. 하나면 먼지처럼 보이고 셋이면 이 크기에서 뭉친다.
+    stroke(ctx, size, color, 0.09);
+    for (const r of [u * 0.42, u * 0.72]) {
+      ctx.beginPath();
+      ctx.arc(cx + u * 0.14, cy, r, -Math.PI / 3, Math.PI / 3);
+      ctx.stroke();
+    }
+  } else {
+    /**
+     * 사선은 **아이콘을 가로질러야** 한다. 옆에 그으면 음소거가 아니라
+     * 스피커 옆의 흠집으로 보인다(실제로 그렇게 나왔다).
+     *
+     * 몸통과 같은 색이라 겹치는 구간이 사라지므로 아래에 잉크를 한 번 깔아
+     * 홈을 판다. 어떤 바탕에 올려도 선이 끊기지 않는다 — 눈을 뚫는 방식과 같다.
+     */
+    ctx.beginPath();
+    ctx.moveTo(cx - u * 0.66, cy - u * 0.66);
+    ctx.lineTo(cx + u * 0.74, cy + u * 0.74);
+    stroke(ctx, size, "#17110E", 0.17);
+    ctx.stroke();
+    stroke(ctx, size, color, 0.085);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /** 지도 칸 종류별 아이콘. 보스는 이름을 쓰므로 여기에 없다. */
 export function drawNodeIcon(
   ctx: CanvasRenderingContext2D,

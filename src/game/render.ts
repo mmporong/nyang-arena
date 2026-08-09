@@ -10,7 +10,8 @@ import {
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
 import { bossHint, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
-import { drawFish, drawIcon, drawNodeIcon, type IconName } from "./icons.ts";
+import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
+import { isMuted } from "./audio.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -483,6 +484,25 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     T.paperDim,
     "right",
   );
+}
+
+/**
+ * 음소거 토글.
+ *
+ * HUD 칩들과 같은 언어로 그린다 — 따로 튀는 위젯을 만들면 게임 화면에
+ * 브라우저 UI가 하나 얹힌 것처럼 보인다. 꺼져 있을 때 더 흐리게 두는 이유는
+ * **꺼진 상태가 기본으로 보이면 안 되기** 때문이다. 소리가 있다는 걸 모르는
+ * 사람이 대부분이므로, 켜져 있을 때 눈에 띄어야 한다.
+ */
+function drawMute(ctx: CanvasRenderingContext2D, L: Layout, muted: boolean): void {
+  const r = L.mute;
+  roundRect(ctx, r, r.w * 0.28);
+  ctx.fillStyle = "rgba(239,224,198,0.05)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(239,224,198,0.10)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  drawSpeaker(ctx, r.x + r.w / 2, r.y + r.h / 2, r.w * 0.62, T.text, !muted);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2988,6 +3008,7 @@ export function render(
   drawBackground(ctx, L, s);
   drawArena(ctx, L);
   drawHud(ctx, L, s);
+  drawMute(ctx, L, isMuted());
 
   drawDivider(ctx, L);
   drawSideLabels(ctx, L);
