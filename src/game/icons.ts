@@ -165,97 +165,8 @@ export function drawFish(
   ctx.restore();
 }
 
-/**
- * 발톱 자국 — 평범한 전투.
- *
- * 칼이나 방패를 쓰지 않은 이유는 고양이가 칼을 안 들기 때문이다. 세 줄이
- * 나란히 그어진 형태는 작아져도 "긁혔다"로 읽힌다.
- */
-function drawClaw(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  size: number,
-  color: string,
-): void {
-  ctx.save();
-  stroke(ctx, size, color, 0.11);
-  const len = size * 0.62;
-  for (const dx of [-size * 0.22, 0, size * 0.22]) {
-    // 가운데 줄만 길다. 셋이 같은 길이면 빗살이 되어 발톱으로 안 읽힌다.
-    const l = dx === 0 ? len : len * 0.78;
-    ctx.beginPath();
-    ctx.moveTo(cx + dx - size * 0.09, cy - l / 2);
-    ctx.quadraticCurveTo(cx + dx, cy, cx + dx + size * 0.09, cy + l / 2);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
 
-/**
- * 별 — 정예.
- *
- * 로그라이크가 정예를 별로 쓰는 관습을 그대로 따른다. 새 기호를 발명하면
- * 처음 보는 사람이 무엇인지 배워야 하는데, 지도는 배우는 자리가 아니다.
- */
-function drawStar(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  size: number,
-  color: string,
-): void {
-  const outer = size * 0.42;
-  const inner = outer * 0.44;
-  ctx.save();
-  ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const r = i % 2 === 0 ? outer : inner;
-    // 꼭짓점 하나가 위를 보게 -90도에서 시작한다.
-    const a = -Math.PI / 2 + (i * Math.PI) / 5;
-    const x = cx + Math.cos(a) * r;
-    const y = cy + Math.sin(a) * r;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.restore();
-}
 
-/**
- * 눈 — 정찰.
- *
- * 이 칸의 이름은 `shop`이지만 하는 일은 정찰이다(안 싸우고 다음 보스전 회피를
- * 얻는다). 그래서 상점 아이콘이 아니라 **본다**는 뜻의 그림이어야 한다.
- * 가방이나 동전을 그리면 "여기서 산다"로 잘못 읽힌다 — 카드는 어차피 매 걸음
- * 나온다.
- */
-function drawEye(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  size: number,
-  color: string,
-): void {
-  const w = size * 0.44;
-  const h = size * 0.26;
-  ctx.save();
-  stroke(ctx, size, color, 0.1);
-  ctx.beginPath();
-  ctx.moveTo(cx - w, cy);
-  ctx.quadraticCurveTo(cx, cy - h * 1.6, cx + w, cy);
-  ctx.quadraticCurveTo(cx, cy + h * 1.6, cx - w, cy);
-  ctx.closePath();
-  ctx.stroke();
-  // 동공은 세로로 긴 고양이 눈이다. 원으로 두면 사람 눈이 된다.
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, Math.max(0.9, size * 0.06), h * 0.72, 0, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.restore();
-}
 
 /**
  * 스피커 — 음소거 토글.
@@ -319,15 +230,136 @@ export function drawSpeaker(
 }
 
 /** 지도 칸 종류별 아이콘. 보스는 이름을 쓰므로 여기에 없다. */
-export function drawNodeIcon(
+/**
+ * 고양이 발바닥. 지도 아이콘 계열의 뿌리다.
+ *
+ * @param claws 발톱을 세울지. 같은 발바닥의 '더 센 것'을 뜻한다.
+ */
+function drawPaw(
   ctx: CanvasRenderingContext2D,
-  kind: "battle" | "elite" | "shop",
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+  claws = false,
+): void {
+  const u = size / 20;
+  ctx.fillStyle = color;
+  // 손바닥 — 아래쪽이 넓은 물방울
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + u * 3.2, u * 5.6, u * 4.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // 발가락 넷. 가운데 둘이 높고 바깥 둘이 낮다.
+  const toes: [number, number, number][] = [
+    [-6.0, -2.2, 2.0],
+    [-2.2, -5.2, 2.2],
+    [2.2, -5.2, 2.2],
+    [6.0, -2.2, 2.0],
+  ];
+  for (const [tx, ty, tr] of toes) {
+    ctx.beginPath();
+    ctx.ellipse(cx + tx * u, cy + ty * u, tr * u, tr * 1.15 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (!claws) return;
+  // 발톱 — 발가락 위로 뻗는 삼각. 같은 기호의 위계를 형태로 만든다.
+  for (const [tx, ty, tr] of toes) {
+    const x = cx + tx * u;
+    const y = cy + ty * u - tr * 1.15 * u;
+    ctx.beginPath();
+    ctx.moveTo(x - tr * 0.5 * u, y + u * 0.4);
+    ctx.lineTo(x, y - u * 3.4);
+    ctx.lineTo(x + tr * 0.5 * u, y + u * 0.4);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/** 생선뼈 — 쉼터. 먹고 쉬는 자리라는 뜻이다. */
+function drawBone(
+  ctx: CanvasRenderingContext2D,
   cx: number,
   cy: number,
   size: number,
   color: string,
 ): void {
-  if (kind === "elite") drawStar(ctx, cx, cy, size, color);
-  else if (kind === "shop") drawEye(ctx, cx, cy, size, color);
-  else drawClaw(ctx, cx, cy, size, color);
+  const u = size / 20;
+  ctx.strokeStyle = color;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(1.4, u * 1.5);
+  // 등뼈
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 7, cy);
+  ctx.lineTo(cx + u * 5.5, cy);
+  ctx.stroke();
+  // 갈비 셋
+  for (const gx of [-3.6, -0.6, 2.4]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + gx * u, cy - u * 3.4);
+    ctx.lineTo(cx + gx * u, cy + u * 3.4);
+    ctx.stroke();
+  }
+  // 꼬리
+  ctx.beginPath();
+  ctx.moveTo(cx + u * 5.5, cy);
+  ctx.lineTo(cx + u * 8.2, cy - u * 3.4);
+  ctx.moveTo(cx + u * 5.5, cy);
+  ctx.lineTo(cx + u * 8.2, cy + u * 3.4);
+  ctx.stroke();
+  // 머리
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx - u * 7.6, cy, u * 1.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** 왕관 — 보스. 발바닥 위에 얹힌다. */
+function drawCrown(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  const u = size / 20;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 6, cy + u * 2.6);
+  ctx.lineTo(cx - u * 7, cy - u * 3.4);
+  ctx.lineTo(cx - u * 3, cy + u * 0.2);
+  ctx.lineTo(cx, cy - u * 4.6);
+  ctx.lineTo(cx + u * 3, cy + u * 0.2);
+  ctx.lineTo(cx + u * 7, cy - u * 3.4);
+  ctx.lineTo(cx + u * 6, cy + u * 2.6);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * 지도 칸 아이콘.
+ *
+ * **발바닥 하나로 위계를 만든다.** 길목은 맨발바닥, 텃세는 발톱을 세운 같은
+ * 발바닥, 보스는 왕관을 얹은 발바닥. 색이나 글자를 안 읽어도 **형태만으로**
+ * 어디가 험한지 알 수 있다 — 지도를 훑는 3초 동안 필요한 건 그것뿐이다.
+ *
+ * 쉼터만 계열 밖의 생선뼈다. 싸우지 않는 유일한 칸이라 **다른 종류의 일**이고,
+ * 그것이 형태에서도 갈려야 한다.
+ *
+ * 예전에는 세로선 셋(전투)·눈(쉼터)·별(정예)이었다. 셋이 서로 무관한 기호라
+ * 무엇이 더 센지 형태로 알 수 없었고, 세로선 셋은 아예 뜻이 없었다.
+ */
+export function drawNodeIcon(
+  ctx: CanvasRenderingContext2D,
+  kind: "battle" | "elite" | "shop" | "boss",
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  if (kind === "shop") drawBone(ctx, cx, cy, size, color);
+  else if (kind === "boss") {
+    drawPaw(ctx, cx, cy + size * 0.1, size * 0.82, color, true);
+    drawCrown(ctx, cx, cy - size * 0.42, size * 0.72, color);
+  } else drawPaw(ctx, cx, cy, size, color, kind === "elite");
 }

@@ -34,7 +34,6 @@ import { RELICS } from "./relics.ts";
 const RELIC_TOTAL = RELICS.length;
 import {
   bevelPanel,
-  fitTextSize,
   numText,
   numTextHeight,
   numTextWidth,
@@ -2376,33 +2375,58 @@ function drawSynergies(
 export function mapNodeRects(L: Layout, s: RunState): { rect: Rect; step: number; idx: number }[] {
   const out: { rect: Rect; step: number; idx: number }[] = [];
   const box = mapBox(L);
-  const cols = STAGE_STEPS;
-  const cw = box.w / cols;
-  const r = Math.min(cw * 0.3, box.h * 0.11);
-  for (let step = 0; step < cols; step++) {
+  const rows = STAGE_STEPS;
+  const rh = box.h / rows;
+  const r = Math.min(rh * 0.34, box.w * 0.1);
+  for (let step = 0; step < rows; step++) {
     const row = s.map.steps[step] ?? [];
     for (let i = 0; i < row.length; i++) {
       const node = row[i]!;
-      const cx = box.x + cw * (step + 0.5);
+      /**
+       * **아래에서 위로 간다.** 0걸음이 맨 아래, 마지막 걸음이 맨 위다.
+       *
+       * 좌→우였을 때는 여섯 걸음이 화면 폭을 다 먹어 칸이 붙었고, 무엇보다
+       * "올라간다"는 감각이 없었다. 이 게임의 한 스테이지는 골목 하나를
+       * 거슬러 올라가 끝에 있는 주인을 만나는 일이다. 세로로 세우면 남은
+       * 거리가 곧 눈에 남은 높이가 된다.
+       */
+      const cy = box.y + box.h - rh * (step + 0.5);
       // lane은 격자 줄 번호다. 버려진 칸이 있어도 자리가 유지돼 길이 흔들리지 않는다.
-      const cy = box.y + box.h * ((node.lane + 0.5) / 4);
+      const cx = box.x + box.w * ((node.lane + 0.5) / 4);
       out.push({ rect: { x: cx - r, y: cy - r, w: r * 2, h: r * 2 }, step, idx: i });
     }
   }
   return out;
 }
 
+/**
+ * 지도가 서는 자리.
+ *
+ * 세로로 세우면서 폭이 필요 없어졌다 — 갈래는 최대 넷이라 좁은 기둥으로 충분하다.
+ * **판 가운데**에 세워서 다른 국면의 보드와 같은 자리를 쓴다. 화면이 바뀌어도
+ * 눈이 같은 곳을 본다.
+ */
 function mapBox(L: Layout): Rect {
-  const top = L.notice.y + L.notice.h + L.scale * 8;
-  const bottom = L.synergyBar.y - L.scale * 10;
-  return { x: L.w * 0.06, y: top, w: L.w * 0.88, h: Math.max(L.scale * 120, bottom - top) };
+  const top = L.notice.y + L.notice.h + L.scale * 10;
+  const bottom = L.button.y - L.scale * 12;
+  const h = Math.max(L.scale * 160, bottom - top);
+  const w = Math.min(L.w * 0.5, Math.max(L.scale * 260, 320));
+  return { x: L.w / 2 - w / 2, y: top, w, h };
 }
 
 function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: DragState): void {
   if (s.phase !== "map") return;
-  // 지도는 화면을 통째로 가진다. 판 위에 겹쳐 그렸더니 고양이·시너지 바와
-  // 선이 뒤엉켜서 어느 원이 고를 수 있는 칸인지 읽히지 않았다.
-  ctx.fillStyle = "rgba(12,8,6,0.88)";
+  /**
+   * 지도는 화면을 통째로 가진다.
+   *
+   * 0.88이었을 때 아래 UI가 비쳐서 직업 카운터·목표 칩·유물 패널의 글자가
+   * 지도 선과 겹쳐 읽혔다. 반투명은 "뒤에 뭔가 있다"를 알려 주려던 것인데,
+   * 지도를 보는 동안 뒤엣것은 **읽을 필요가 없을 뿐 아니라 읽히면 안 된다**.
+   */
+  // **알파를 먼저 되돌린다.** 앞 단계가 남긴 globalAlpha가 곱해지면 막이
+  // 0.975가 아니라 그 곱만큼만 덮여 아래 UI가 그대로 비친다.
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = "rgba(10,7,5,0.98)";
   ctx.fillRect(0, 0, L.w, L.h);
   const step = mapStep(s);
   const open = new Set(openLanes(s.map, step));
@@ -2423,9 +2447,22 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
         const live = st === step - 1 ? past : st < step;
         ctx.strokeStyle = live ? "rgba(244,227,193,0.5)" : "rgba(239,224,198,0.14)";
         ctx.lineWidth = live ? Math.max(2, L.scale * 2.4) : Math.max(1, L.scale * 1.4);
+        /**
+         * 아래 칸의 위쪽에서 위 칸의 아래쪽으로. 직선이 아니라 **완만한 곡선**이다.
+         *
+         * 직선으로 이으면 배선도처럼 보인다. 골목길은 꺾이지 곧지 않다.
+         * 제어점을 중간 높이에 두고 x는 각 끝의 x를 쓰면, 갈래가 벌어질 때
+         * 자연스럽게 휘고 나란한 선끼리도 서로 다른 곡률을 갖는다.
+         */
+        const ax = a.x + a.w / 2;
+        const ay = a.y;
+        const bx = b.x + b.w / 2;
+        const by = b.y + b.h;
+        const my = (ay + by) / 2;
+        ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(a.x + a.w, a.y + a.h / 2);
-        ctx.lineTo(b.x, b.y + b.h / 2);
+        ctx.moveTo(ax, ay);
+        ctx.bezierCurveTo(ax, my, bx, my, bx, by);
         ctx.stroke();
       }
     }
@@ -2465,7 +2502,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
       : node.kind === "shop" ? T.fish
       : T.ally;
     // 고를 수 있는 칸만 살아 있다. 나머지는 지도의 배경이다.
-    const alpha = pickable ? 1 : taken ? 0.55 : done ? 0.2 : 0.3;
+    const alpha = pickable ? 1 : taken ? 0.62 : done ? 0.26 : 0.46;
 
     // 올라간 칸은 조금 커진다. 크기 변화가 색 변화보다 먼저 눈에 띈다.
     const grow = hot ? rect.w * 0.09 : 0;
@@ -2487,17 +2524,31 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     if (node.kind === "boss") {
       const name = bossForIndex(bossIndexAt(s, st)).name;
       const weight = pickable ? 800 : 400;
-      // 이름은 세 글자(살금이·서리귀)와 네 글자(무쇠발톱)가 섞여 있다. 고정 크기로
-      // 두면 네 글자가 원 밖으로 새어 나가 옆 칸의 선을 덮는다.
-      const fs = fitTextSize(ctx, name, (rect.w + grow * 2) * 0.84, (rect.w + grow * 2) * 0.34, weight);
+      /**
+       * 아이콘은 원 **안**, 이름은 원 **아래**.
+       *
+       * 예전에는 이름을 원 안에 넣었다. 세 글자(살금이)와 네 글자(무쇠발톱)가
+       * 섞여 있어 네 글자는 원에 맞추느라 작아졌고, 그러면서 보스 칸만 아이콘이
+       * 없어 다른 칸들과 다른 언어를 썼다. 이름을 밖으로 내면 둘 다 풀린다 —
+       * 아이콘이 계열을 지키고, 이름은 원 크기와 무관하게 읽힌다.
+       */
+      drawNodeIcon(
+        ctx,
+        "boss",
+        rect.x + rect.w / 2,
+        rect.y + rect.h / 2,
+        (rect.w + grow * 2) * 0.68,
+        hot ? T.paper : hue,
+      );
+      const fs = Math.max(10, rect.w * 0.3);
       uiText(
         ctx,
         name,
         rect.x + rect.w / 2,
-        rect.y + rect.h / 2,
-        Math.max(9, fs),
+        rect.y + rect.h + fs * 0.95,
+        fs,
         hot ? T.paper : hue,
-        { align: "center", weight },
+        { align: "center", weight, outline: true },
       );
     } else {
       drawNodeIcon(
