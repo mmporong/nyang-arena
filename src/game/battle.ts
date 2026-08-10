@@ -533,13 +533,55 @@ function doGather(state: RunState): boolean {
     const dy = target.fy - c.fy;
     const d = Math.hypot(dx, dy) || 1;
     const pull = Math.max(0, d - target.arg * 0.6);
-    c.fx += (dx / d) * pull;
-    c.fy += (dy / d) * pull;
-    c.moveLock = DODGE_LOCK_MS;
+    startDash(c, c.fx + (dx / d) * pull, c.fy + (dy / d) * pull, "#6E97C4");
     moved = true;
-    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color: "#6E97C4" });
   }
   return moved;
+}
+
+/**
+ * 개입 이동 속도(필드 단위/초).
+ *
+ * 걸음(1.0~2.4)의 네 배쯤이다. 이보다 느리면 예고가 터지기 전에 못 빠져나가고,
+ * 이보다 빠르면 다시 순간이동으로 보인다. 가장 먼 안전지대가 2.5칸쯤이라
+ * 최악이 280ms — 예고 도화선 1200ms 안에 넉넉히 끝난다.
+ */
+const DASH_SPEED = 9;
+
+/** 목표만 적어 둔다. 실제 이동은 `tickDashes`가 스텝마다 나눠서 한다. */
+function startDash(c: Cat, tx: number, ty: number, color: string): void {
+  c.dash = { tx, ty };
+  c.moveLock = DODGE_LOCK_MS;
+  c.pose = "run";
+  c.poseTimer = 0;
+  // 출발 자리에 잔상을 남긴다. 어디서 어디로 갔는지가 한 컷에 읽힌다.
+  pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color });
+}
+
+/**
+ * 달리는 중인 고양이를 목표 쪽으로 옮긴다.
+ *
+ * 도착하면 목표를 정확히 찍고 끝낸다 — 남은 거리를 반복해서 좁히면 영영
+ * 도달하지 못하고 예고 가장자리에서 떨리게 된다.
+ */
+function tickDashes(cats: Cat[], dt: number): void {
+  const travel = DASH_SPEED * (dt / 1000);
+  for (const c of cats) {
+    if (!c.dash) continue;
+    const dx = c.dash.tx - c.fx;
+    const dy = c.dash.ty - c.fy;
+    const d = Math.hypot(dx, dy);
+    if (d <= travel || d <= 1e-6) {
+      c.fx = c.dash.tx;
+      c.fy = c.dash.ty;
+      c.dash = null;
+    } else {
+      c.fx += (dx / d) * travel;
+      c.fy += (dy / d) * travel;
+      c.pose = "run";
+      c.poseTimer = 0;
+    }
+  }
 }
 
 /** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
@@ -552,11 +594,8 @@ function doDodge(state: RunState): boolean {
   for (const c of livingCats(state.ally)) {
     const spot = safeSpot(c, zones);
     if (!spot) continue;
-    c.fx = spot.fx;
-    c.fy = spot.fy;
-    c.moveLock = DODGE_LOCK_MS;
+    startDash(c, spot.fx, spot.fy, "#F3E8D6");
     moved = true;
-    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color: "#F3E8D6" });
   }
   return moved;
 }
@@ -589,6 +628,9 @@ function separate(cats: Cat[]): void {
       const a = cats[i];
       const b = cats[j];
       if (!a || !b) continue;
+      // 달리는 중에는 밀어내지 않는다. 겹침 방지가 경로를 휘면 개입으로 지시한
+      // 자리에 못 서고, 위험 구간 가장자리에 걸친 채로 끝난다.
+      if (a.dash || b.dash) continue;
       const dx = b.fx - a.fx;
       const dy = b.fy - a.fy;
       const d = Math.hypot(dx, dy);
@@ -1013,6 +1055,9 @@ export function stepBattle(state: RunState, dtMs: number): void {
     }
 
     const allies = livingCats(state.ally);
+    // 달리기는 타겟팅·공격보다 먼저 처리한다. 이번 스텝의 사거리 판정이
+    // **도착한 자리** 기준이라야, 위험 구간을 빠져나온 것이 그 스텝에 반영된다.
+    tickDashes(allies, step);
     for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state);
     const foes = livingCats(state.enemy);
 

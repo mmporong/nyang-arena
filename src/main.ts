@@ -459,6 +459,16 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       // 제출용 스크린샷을 "유물을 든 상태"로 잡는 데도 이게 필요했다.
       relics: state.relics.map((r) => r.name),
       allies: state.ally.filter(Boolean).length,
+      /**
+       * 아군의 전장 좌표와 달리는 중인지 여부.
+       *
+       * 개입이 순간이동인지 달리기인지는 **스크린샷으로 판정할 수 없다.**
+       * CDP 캡처 한 장에 200ms쯤 걸려서, 40ms 간격으로 찍어 달라고 해도
+       * 실제로는 대시가 끝난 뒤의 장면만 남는다. 숫자로 재야 한다.
+       */
+      allyPos: state.ally
+        .filter((c): c is NonNullable<typeof c> => c !== null && c.alive)
+        .map((c) => ({ x: Math.round(c.fx * 100) / 100, y: Math.round(c.fy * 100) / 100, dash: c.dash !== null })),
       dodgeCharges: state.dodgeCharges,
       pending: [...state.pending],
       telegraphs: state.enemy.filter((c) => c?.telegraph).map((c) => c!.telegraph!.mode),

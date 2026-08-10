@@ -90,11 +90,23 @@ console.log("회피 동작 검사\n");
     check("위험 구간 안에 아군이 있는 순간을 잡는다", inside.length > 0, `${tg.shape}, 안에 ${inside.length}마리`);
 
     s.pending.push({ kind: "dodge" });
+    const fuseAtPress = tg.fuse;
     stepBattle(s, 100);
 
+    // 개입은 순간이동이 아니라 **달리기**다. 그래서 계약은 "한 스텝 만에
+    // 나온다"가 아니라 "예고가 터지기 전에 나온다"여야 한다. 여기서 한 스텝을
+    // 요구하면 순간이동으로만 통과하는 검사가 되고, 그건 우리가 방금 없앤 것이다.
+    let ms = 100;
+    while (inside.some((c) => c.alive && inTelegraph(tg, c.fx, c.fy)) && ms < fuseAtPress) {
+      stepBattle(s, 100);
+      ms += 100;
+    }
     const stillInside = inside.filter((c) => c.alive && inTelegraph(tg, c.fx, c.fy));
-    check("구간 안의 고양이가 빠져나온다", stillInside.length < inside.length,
-      `${inside.length} → ${stillInside.length}`);
+    check("구간 안의 고양이가 예고가 터지기 전에 빠져나온다", stillInside.length === 0,
+      `${inside.length} → ${stillInside.length}, ${ms}ms 걸림 (도화선 ${fuseAtPress}ms)`);
+    // 도화선을 거의 다 쓰면 사람이 조금만 늦게 눌러도 못 빠져나온다.
+    check("빠져나오는 데 도화선의 절반을 넘기지 않는다", ms <= fuseAtPress / 2,
+      `${ms}ms / ${fuseAtPress}ms`);
 
     // 위치로 비교하면 안 된다. 같은 스텝에 평범한 걸음도 일어나므로 회피가
     // 옮긴 것과 걸어간 것을 구분할 수 없다. moveLock은 회피만 남기는 흔적이다.
