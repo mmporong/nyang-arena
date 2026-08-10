@@ -155,7 +155,7 @@
 | NAN | 웹 빌드 + 소스(커밋 히스토리 포함) | ✅ |
 | NAN | 소개 PDF | ✅ `docs/intro.pdf` (4쪽) |
 | NAN | AI 기술문서 PDF | ✅ `docs/ai-tech.pdf` (6쪽) |
-| NAN | 30~60초 게임플레이 영상 | ✅ `docs/gameplay.mp4` (53초 · 1280×720 · **소리 있음**) |
+| NAN | 30~60초 게임플레이 영상 | ✅ `docs/gameplay.mp4` (53.5초 · 1280×720 · **소리 있음**) |
 | OpenAI | 브라우저 플레이 링크 | ✅ `mmporong.github.io/nyang-arena` |
 | OpenAI | 16:9 썸네일 | ✅ `docs/thumbnail.png` (1280×720) |
 | OpenAI | Codex를 개발 과정에 사용 | ⬜ |
