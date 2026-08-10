@@ -95,6 +95,17 @@ export interface RunState {
   pending: Intervention[];
   /** 남은 회피 횟수. 전투마다 초기화된다. */
   dodgeCharges: number;
+  /**
+   * 개입 버튼이 다시 살아나기까지 남은 시간(ms).
+   *
+   * 연타로 자원이 새지는 않지만(달리는 중인 고양이는 다시 세지 않는다) 버튼이
+   * 무한히 눌리면 무엇을 눌렀는지가 손에 안 남는다. 한 번 누르면 잠깐 잠긴다.
+   *
+   * **약점 공격에는 안 걸린다.** 취약 창은 연타가 곧 화력이라(창 3초에 최대
+   * 30타) 1초를 걸면 3타가 되어 창 자체가 무의미해진다. 잠기는 것은 차지를
+   * 쓰는 회피·뭉침뿐이다.
+   */
+  actCooldown: number;
   /** 이번 런에서 모은 유물. 조건을 채운 것만 보너스가 붙고 대가는 항상 붙는다. */
   relics: Relic[];
 
@@ -541,6 +552,7 @@ export function newRun(seed?: number): RunState {
     seed: runSeed,
     pending: [],
     dodgeCharges: 0,
+    actCooldown: 0,
     relics: [],
   };
 
@@ -1032,6 +1044,7 @@ export function startBattle(state: RunState): void {
   }
   // 개입 상태는 전투마다 초기화한다. 남아 있으면 다음 전투 첫 틱에 한꺼번에 터진다.
   state.pending.length = 0;
+  state.actCooldown = 0;
   const wk = currentKind(state);
   state.dodgeCharges =
     wk === "boss" ? BALANCE.dodgeCharges : wk === "snipe" ? BALANCE.sniperDodgeCharges : 0;
