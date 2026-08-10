@@ -18,10 +18,11 @@
  *
  * 실행: npm run probe
  */
-import { cellRect, computeLayout } from "../src/game/layout.ts";
+import { cellRect, computeLayout, fieldToScreen } from "../src/game/layout.ts";
 import { wrapLines } from "../src/game/theme.ts";
-import { rerollRect } from "../src/game/render.ts";
-import { BOARD_SIZE } from "../src/game/types.ts";
+import { rerollRect, healthBarGeom } from "../src/game/render.ts";
+import { BOARD_SIZE, BOARD_COLS, cellToField } from "../src/game/types.ts";
+import { BOSS_RADIUS, SNIPER_RADIUS } from "../src/game/bosses.ts";
 
 const DEVICES = [
   ["iPhone SE 세로", 375, 553],
@@ -163,3 +164,43 @@ if (wrapFailed > 0) {
   process.exit(1);
 }
 console.log("전부 통과 — 설명은 정해진 줄 수 안에서 폭을 지킨다");
+
+/**
+ * 체력 바가 보드를 넘어 HUD 위로 올라가는가.
+ *
+ * 바를 머리 위로 올린 커밋에서 "셀 안에 들어온다"고 적고 근거로 이 프로브를
+ * 들었는데, 그때 프로브는 카드와 줄바꿈만 볼 뿐 고양이 기하를 아예 안 봤다.
+ * 실제로는 반경 있는 유닛(보스 1.5 · 저격수 0.85)이 몸을 셀 밖까지 키워서,
+ * 적 보드 맨 윗줄에 서는 저격수가 세로 배치 일곱 기기에서 안내 문구를 덮었다.
+ *
+ * 이제 `healthBarGeom`을 렌더러와 **같은 함수로** 불러서 잰다. 주장과 근거가
+ * 같은 코드를 가리켜야 근거다.
+ */
+const BAR_CASES = [
+  // [이름, 진영, 반경, 셀]  — 저격수는 적 col 4(세로 배치에서 맨 윗줄), 보스는 중앙
+  ["일반 고양이", "enemy", 0, 2 * BOARD_COLS + (BOARD_COLS - 1)],
+  ["저격수", "enemy", SNIPER_RADIUS, 2 * BOARD_COLS + (BOARD_COLS - 1)],
+  ["보스", "enemy", BOSS_RADIUS, 2 * BOARD_COLS + 2],
+  ["아군 앞줄", "ally", 0, 2 * BOARD_COLS],
+];
+
+console.log("\n체력 바가 보드 안에 있는가");
+let barFailed = 0;
+for (const [name, w, h] of DEVICES) {
+  const L = computeLayout(w, h);
+  const bad = [];
+  for (const [label, side, radius, cell] of BAR_CASES) {
+    const { fx, fy } = cellToField(side, cell);
+    const { y: cy } = fieldToScreen(L, fx, fy);
+    const { by } = healthBarGeom(L, side, radius, cy);
+    const top = side === "ally" ? L.allyBoard.y : L.enemyBoard.y;
+    if (by < top) bad.push(`${label} ${(top - by).toFixed(1)}px 넘침`);
+  }
+  if (bad.length > 0) barFailed++;
+  console.log(`  ${bad.length === 0 ? "OK  " : "실패"} ${name.padEnd(16)} ${bad.join(" · ") || "네 경우 모두 보드 안"}`);
+}
+if (barFailed > 0) {
+  console.log(`\n체력 바 ${barFailed}기기 실패 — 바가 보드를 넘어 HUD 위에 그려진다`);
+  process.exit(1);
+}
+console.log("전부 통과 — 반경 있는 유닛도 바가 보드 안에 머문다");

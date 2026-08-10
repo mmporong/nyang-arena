@@ -628,6 +628,40 @@ function drawVulnerableRing(
   ctx.restore();
 }
 
+/** 고양이 몸 크기. 반경 있는 것(보스·저격수)은 셀 격자를 벗어나 크게 그린다. */
+export function catBodySize(L: Layout, radius: number): number {
+  return radius > 0 ? L.cell * radius * 2.1 : L.cell * CAT_SCALE;
+}
+
+/**
+ * 체력 바의 두께와 윗변. **`drawCat`과 프로브가 같은 식을 쓰게** 따로 뺐다.
+ *
+ * 바를 머리 위로 올렸을 때 "CAT_SCALE이 0.66이라 셀 안에 들어온다"고 적었는데,
+ * 그건 `radius === 0`인 일반 고양이에만 해당한다. 반경 있는 유닛은 몸이
+ * `cell * radius * 2.1`이라 훨씬 위로 뜬다 — 저격수(반경 0.85)는 중심에서
+ * 1.27칸 위였고, 하필 자리가 적 보드 맨 윗줄이라 세로 배치 일곱 기기 전부에서
+ * 보드를 넘어 **안내 문구 띠 위에** 그려졌다. 고양이는 HUD보다 나중에
+ * 그려지므로 글자를 덮는다. 그때 근거로 든 `npm run probe`는 카드와 줄바꿈만
+ * 볼 뿐 이 기하를 아예 안 봤다 — 주장을 뒷받침하지 않는 근거였다.
+ *
+ * 그래서 둘을 고친다. 띄우는 거리를 **셀 기준으로 고정**하고, 마지막에 보드
+ * 위끝으로 한 번 더 자른다. 그리고 이 함수를 `layout-probe`가 직접 불러
+ * 기기별로 넘치는지 잰다 — 이제 주장과 근거가 같은 코드를 가리킨다.
+ */
+export function healthBarGeom(
+  L: Layout,
+  side: Side,
+  radius: number,
+  cy: number,
+): { bh: number; by: number } {
+  const size = catBodySize(L, radius);
+  const bh = Math.max(4, size * 0.15);
+  const lift = Math.min(size, L.cell * CAT_SCALE);
+  const board = side === "ally" ? L.allyBoard : L.enemyBoard;
+  const by = Math.max(board.y + 1, cy - size * 0.5 - bh - Math.max(2, lift * 0.06));
+  return { bh, by };
+}
+
 function drawCat(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -642,7 +676,7 @@ function drawCat(
   );
 
   // 보스는 반경만큼 크게 그린다. 셀 격자에 얽매이지 않고 3x3을 덮는다.
-  const size = cat.radius > 0 ? L.cell * cat.radius * 2.1 : L.cell * CAT_SCALE;
+  const size = catBodySize(L, cat.radius);
   const x = cx - size / 2;
   const y = cy - size / 2 - L.cell * 0.03;
 
@@ -733,9 +767,8 @@ function drawCat(
    * 색을 읽기 전에 형체부터 안 보인다.
    */
   const bw = size * 0.88;
-  const bh = Math.max(4, size * 0.15);
+  const { bh, by } = healthBarGeom(L, cat.side, cat.radius, cy);
   const bx = cx - bw / 2;
-  const by = cy - size * 0.5 - bh - Math.max(2, size * 0.06);
   const frac = Math.max(0, Math.min(1, cat.hp / cat.maxHp));
 
   roundRect(ctx, { x: bx - 1, y: by - 1, w: bw + 2, h: bh + 2 }, (bh + 2) / 2);
