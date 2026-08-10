@@ -217,29 +217,23 @@ export function uiText(
    * 좁은 화면 상점 카드에서 이름이 세로 막대처럼 뭉개진 것이 이것 때문이었다
    * (폭 70px에 34px 글자를 넣고 있었다).
    *
-   * 그래서 두 단계로 처리한다.
-   *   1. 들어갈 때까지 **글자 크기를 줄인다** (원래 크기의 62%까지)
-   *   2. 그래도 넘치면 **끝을 …으로 자른다**
+   * 그래서 **들어갈 때까지 글자 크기를 줄인다.** 압축도 생략도 하지 않는다 —
+   * 눌린 글자는 못 읽고, 잘린 글자는 무슨 능력인지 알 수 없다. 카드에 적힌
+   * 내용이 곧 살지 말지의 근거이므로 끝까지 보여야 한다.
    *
-   * 압축은 절대 하지 않는다. 작아지거나 잘리는 건 읽을 수 있지만 눌린 글자는
-   * 읽을 수 없다.
+   * 그래도 안 들어가면 그건 글자 문제가 아니라 **자리 문제**다. 그때는
+   * layout.ts가 칸을 넓혀야 하지 여기서 글을 버릴 일이 아니다.
    */
-  let shown = text;
+  const shown = text;
   let fs = size;
   if (maxWidth !== undefined && maxWidth > 0) {
     ctx.font = fontOf(fs, weight);
     if (ctx.measureText(shown).width > maxWidth) {
-      const floor = Math.max(9, size * 0.62);
+      const floor = Math.max(8, size * 0.45);
       while (fs > floor) {
         fs -= 1;
         ctx.font = fontOf(fs, weight);
         if (ctx.measureText(shown).width <= maxWidth) break;
-      }
-      if (ctx.measureText(shown).width > maxWidth) {
-        while (shown.length > 1 && ctx.measureText(`${shown}…`).width > maxWidth) {
-          shown = shown.slice(0, -1);
-        }
-        shown = `${shown}…`;
       }
     }
   }

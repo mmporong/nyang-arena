@@ -1743,7 +1743,7 @@ function drawOffers(
         x: cr.x + pad,
         y: cr.y + pad,
         w: cr.w - pad * 2,
-        h: cr.h * 0.42,
+        h: cr.h * 0.34,
       };
       drawPortraitWell(
         ctx,
@@ -1809,7 +1809,7 @@ function drawOffers(
      * 글자 자리가 70px밖에 안 남아 이름이 세로 막대로 눌렸다.
      * 폭에도 상한을 둬서 글이 최소한의 자리를 갖게 한다.
      */
-    const side = Math.min(cr.h - pad * 2, cr.w * 0.3);
+    const side = Math.min(cr.h - pad * 2, cr.w * 0.22);
     const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: side, h: side };
     drawPortraitWell(
       ctx,

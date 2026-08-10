@@ -307,6 +307,32 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
     const cx = fieldLeft + fieldW / 2 - bw / 2;
     enemyBoard = { x: cx, y: fieldTop, w: bw, h: bh };
     allyBoard = { x: cx, y: fieldBottom - bh, w: bw, h: bh };
+
+    /**
+     * **세로줄을 판에 붙인다. 세로줄 구성일 때만이다.**
+     *
+     * `stacked`는 세로 화면에서도 참이고, 거기서 이 사각형들은 화면 폭을 다
+     * 쓰는 **아래 띠**다. 구분 없이 옮겼더니 프로브가 다섯 기기에서 실패했다 —
+     * 폭 전체를 쓰던 띠가 세로줄 폭으로 줄어 카드가 판을 덮었다.
+     *
+     * 두 줄은 화면 가장자리(`pad`)에 고정돼 있었고 판은 남은 폭 가운데에 섰다.
+     * 판이 대개 그 폭보다 훨씬 좁아서 1280px 화면에서 왼쪽 줄과 판 사이가
+     * 170px 비었다 — 화면에서 가장 넓은 것이 아무것도 없는 자리였다.
+     *
+     * 판을 기준으로 양옆에 붙이면 셋이 한 덩어리로 읽히고, 남는 폭은 바깥으로
+     * 밀려 여백이 된다. 여백은 가운데가 아니라 가장자리에 있어야 한다.
+     *
+     * 화면 밖으로는 안 나간다. 판이 넓은 화면에서는 원래 자리(`pad`)로 되돌아온다.
+     */
+    if (columns) {
+      const hug = Math.round(colGap * 1.1);
+      const leftX = Math.max(pad, Math.round(cx - hug - colW));
+      const rightX2 = Math.min(w - pad - colW, Math.round(cx + bw + hug));
+      offers = { ...offers, x: leftX };
+      synergyBar = { ...synergyBar, x: leftX };
+      offerCards = { ...offerCards, x: rightX2 };
+      offersPanel = { ...offersPanel, x: rightX2 - pad * 0.5 };
+    }
   } else {
     const cy = fieldTop + fieldH / 2 - bh / 2;
     const mid = fieldLeft + fieldW / 2;
