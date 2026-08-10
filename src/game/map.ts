@@ -128,9 +128,30 @@ function drawPath(startLane: number, edges: Set<string>[]): number[] {
   return lanes;
 }
 
-/** 평범한 전투가 낼 성격. 보스·정예는 자기 성격이 정해져 있다. */
-function battleWave(): WaveKind {
-  return rng() < 0.45 ? "rush" : "mixed";
+/**
+ * 한 걸음 안의 전투 칸들에 **서로 다른 성격**을 나눠 준다.
+ *
+ * 예전에는 칸마다 따로 굴렸다(`rng() < 0.45 ? rush : mixed`). 그러면 한 줄의
+ * 세 칸이 전부 같은 성격이 되는 일이 흔했고, 그때 지도는 **고를 것이 없는
+ * 갈림길**이 된다 — 어느 발바닥을 눌러도 같은 적이 나온다.
+ *
+ * 정예는 이미 `snipe`로 고정이므로, 전투 칸은 그것과도 겹치지 않게 `mixed`와
+ * `rush`를 먼저 쓰고 모자랄 때만 `snipe`를 꺼낸다. 순서를 시드로 섞어야 판마다
+ * 어느 줄이 어느 성격인지가 달라진다.
+ */
+function battleWaves(count: number, hasElite: boolean): WaveKind[] {
+  // 앞의 둘은 섞고 `snipe`는 뒤에 붙인다. 정예가 이미 `snipe`이므로 전투 칸이
+  // 셋 이상일 때만 꺼내 쓴다 — 겹치더라도 **같은 전투 칸끼리 겹치는 것보다
+  // 정예와 겹치는 편이 낫다.** 전자는 고를 것이 없어지고 후자는 난이도만 겹친다.
+  const head: WaveKind[] = ["mixed", "rush"];
+  for (let i = head.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [head[i], head[j]] = [head[j]!, head[i]!];
+  }
+  const pool: WaveKind[] = hasElite ? [...head, "snipe"] : (rng() < 0.5 ? [...head, "snipe"] : ["snipe", ...head]);
+  const out: WaveKind[] = [];
+  for (let i = 0; i < count; i++) out.push(pool[i % pool.length]!);
+  return out;
 }
 
 /**
@@ -237,6 +258,13 @@ export function makeStage(stage: number): StageMap {
   for (let step = 0; step < STAGE_STEPS; step++) {
     const lanes = used[step]!;
     const nextLanes = used[step + 1] ?? [];
+    // 이 걸음의 전투 칸들이 쓸 성격을 미리 나눠 둔다. 칸마다 따로 굴리면 겹친다.
+    const rowKinds = lanes.map((_, i) => kinds[step]![i] ?? "battle");
+    const battleWaveQueue = battleWaves(
+      rowKinds.filter((k) => k === "battle").length,
+      rowKinds.some((k) => k === "elite"),
+    );
+    let battleAt = 0;
     const row: MapNode[] = lanes.map((lane, i) => {
       // 이 칸에서 실제로 그어진 간선만 다음 걸음의 **인덱스**로 옮긴다.
       const outs = new Set<number>();
@@ -251,7 +279,16 @@ export function makeStage(stage: number): StageMap {
       const kind = kinds[step]![i] ?? "battle";
       return {
         kind,
-        wave: kind === "boss" ? "boss" : kind === "elite" ? "snipe" : battleWave(),
+        /**
+         * 큐는 **전투 칸만** 먹는다. 상점 칸까지 소비하면 `battle | shop | battle`
+         * 줄에서 상점이 가운데 값을 가져가 두 전투가 같은 성격이 된다
+         * (상점은 이 값을 쓰지도 않는다).
+         */
+        wave:
+          kind === "boss" ? "boss"
+          : kind === "elite" ? "snipe"
+          : kind === "battle" ? (battleWaveQueue[battleAt++] ?? "mixed")
+          : "mixed",
         lane,
         next: [...outs].sort((a, b) => a - b),
       };

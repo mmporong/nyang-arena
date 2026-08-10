@@ -278,7 +278,12 @@ export function bossIndexAt(state: RunState, step: number = state.step): number 
 /** 이 런에서 지금까지 만난 보스 수. 난이도 램프가 이걸 본다. */
 export function bossesSeen(state: RunState): number {
   const perStage = 2;
-  const done = state.step >= 5 ? 2 : state.step >= 2 ? 1 : 0;
+  /**
+   * **넘은 것만 센다.** 보스는 2·5걸음인데 `>=`로 세면 그 칸에 **도착한 순간**
+   * 넘은 것으로 계산돼, 싸우기도 전에 "악몽을 밀어냈어요" 막이 올라갔다.
+   * 걸음은 칸을 고를 때 오르므로, 지나간 것은 `> 보스 걸음`이다.
+   */
+  const done = state.step > 5 ? 2 : state.step > 2 ? 1 : 0;
   return (state.map.stage - 1) * perStage + done;
 }
 
