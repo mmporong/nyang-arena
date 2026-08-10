@@ -1,5 +1,11 @@
 # 냥 아레나 (Nyang Arena)
 
+### ▶ [지금 해보기 — mmporong.github.io/nyang-arena](https://mmporong.github.io/nyang-arena/)
+
+설치도 로그인도 없다. 링크를 열면 바로 시작한다.
+`?debug=1`을 붙이면 `window.nyang`으로 내부 상태를, `window.nyangTelemetry()`로
+실제 플레이 시간을 꺼내 볼 수 있다(둘 다 네트워크를 쓰지 않는다).
+
 브라우저에서 바로 돌아가는 **픽셀 고양이 오토배틀러**.
 5×5 보드에 고양이를 배치하고, 자동 전투를 관전하고, 몇 웨이브까지 버티는지 겨룬다.
 
