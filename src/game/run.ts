@@ -362,13 +362,13 @@ export function syncStage(state: RunState): void {
 export function waveKindInfo(k: WaveKind): { name: string; hint: string } {
   switch (k) {
     case "rush":
-      return { name: "달려드는 무리", hint: "전부 발로 달려들어요" };
+      return { name: "달려드는 것들", hint: "전부 발로 달려들어요" };
     case "snipe":
-      return { name: "던지는 무리", hint: "멀리서 던져요. 빨리 붙는 게 좋아요" };
+      return { name: "멀리서 노리는 것들", hint: "떨어져서 노려요. 빨리 붙는 게 좋아요" };
     case "boss":
       return { name: "대장묘", hint: "수는 적지만 하나가 아주 무서워요" };
     case "mixed":
-      return { name: "뒤섞인 무리", hint: "앞뒤가 고루 섞여 있어요" };
+      return { name: "뒤섞인 것들", hint: "앞뒤가 고루 섞여 있어요" };
   }
 }
 

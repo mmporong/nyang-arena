@@ -1956,7 +1956,7 @@ function offerHeadline(s: RunState): string {
   const team = `우리 편 ${owned}/${cap}`;
 
   if (s.offers.every((o) => o === null)) {
-    return `${team} · 다 샀어요 — 자리를 다듬고 ${s.wave === 1 ? "가볼까요" : "다음 골목으로"}`;
+    return `${team} · 다 샀어요 — 자리를 다듬고 ${s.wave === 1 ? "가볼까요" : "다음 걸음으로"}`;
   }
   if (owned >= cap) return `${team} · 자리가 다 찼어요. 강화하거나 바꿔 넣어요`;
   if (s.wave === 1) return `${team} · 쓰고 가도, 그냥 가도 괜찮아요`;
@@ -2008,7 +2008,7 @@ function drawRelicColumn(
     });
     uiText(
       ctx,
-      "텃세를 넘으면 하나 남기고 가요",
+      "가위눌림을 밀어내면 하나 떨어져요",
       r.x + r.w / 2,
       r.y + r.h * 0.4 + Math.max(16, r.w * 0.1),
       Math.max(10, r.w * 0.058),
@@ -2595,7 +2595,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
       ? bossLine
       : info
       ? `${info.name} — ${info.hint}`
-      : `${s.map.stage}번째 골목 · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
+      : `${s.map.stage}번째 밤 · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,
     mapBox(L).y - L.scale * 6,
     L.scale * 13,
@@ -2761,7 +2761,7 @@ function drawBossBanner(
   });
   uiText(
     ctx,
-    sniper ? "골목 파수꾼" : "이 구역 주인",
+    sniper ? "설핏 든 것" : "되풀이되는 것",
     r.x + pad * 1.4,
     y + h * 0.72,
     nameSize * 0.72,
@@ -3058,7 +3058,7 @@ function watchTransitions(s: RunState): void {
     seenSeed = s.seed;
     seenStage = s.map.stage;
     seenBosses = bosses;
-    raise("냥 아레나", "집사님, 골목을 지켜주세요");
+    raise("냥 아레나", "집사님, 오늘 밤도 잘 부탁해요");
     return;
   }
   // 보스를 넘은 것이 먼저다. 넘는 순간 여정도 함께 바뀌는 경우가 있는데,
@@ -3066,12 +3066,12 @@ function watchTransitions(s: RunState): void {
   if (bosses > seenBosses) {
     seenBosses = bosses;
     seenStage = s.map.stage;
-    raise("보스를 넘었어요", `${s.wave - 1}웨이브까지 잘 버텼어요`);
+    raise("악몽을 밀어냈어요", `${s.wave - 1}웨이브까지 잘 버텼어요`);
     return;
   }
   if (s.map.stage !== seenStage) {
     seenStage = s.map.stage;
-    raise(`${s.map.stage}번째 골목`, "여섯 걸음 안에 보스가 둘 있어요");
+    raise(`${s.map.stage}번째 밤`, "여섯 걸음 안에 악몽이 둘 있어요");
   }
 }
 

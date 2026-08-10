@@ -292,11 +292,11 @@ export function openLanes(map: StageMap, step: number): number[] {
 export function bossHint(breedId: number): string {
   switch (breedId) {
     case 10:
-      return "살금이 — 사라졌다 나타나요. 붙어 있던 발이 자꾸 헛돌아요";
+      return "살금이 — 사라졌다 나타나요. 떨어져 있으면 하나씩 데려가니 붙어 있어야 해요";
     case 11:
-      return "서리귀 — 제자리에서 넓게 뿌려요. 뭉쳐 있으면 다 맞아요";
+      return "서리귀 — 제자리에서 넓게 뿌려요. 평소엔 흩어지고, 얼기 시작하면 붙어서 녹여야 해요";
     default:
-      return "무쇠발톱 — 곧장 걸어와요. 앞이 버텨줘야 해요";
+      return "무쇠발톱 — 곧장 걸어와요. 앞이 버티고, 부를 땐 그 앞으로 모여야 해요";
   }
 }
 
@@ -304,15 +304,15 @@ export function bossHint(breedId: number): string {
 export function nodeInfo(kind: NodeKind): { name: string; hint: string } {
   switch (kind) {
     case "elite":
-      return { name: "텃세", hint: "만만치 않아요. 이기면 유물을 남기고 가요" };
+      return { name: "가위눌림", hint: "무거워요. 밀어내면 뭔가 하나 떨어뜨리고 가요" };
     case "shop":
       // 종류 id는 shop이지만 하는 일은 정찰이다. 다음 보스를 대비하는 자리다.
-      return { name: "쉼터", hint: "싸우지 않아요. 생선과 다시 뽑기, 다음 보스전 회피까지 챙겨요" };
+      return { name: "숨 돌리기", hint: "아무것도 안 와요. 생선과 다시 뽑기, 다음 악몽에 쓸 회피까지 챙겨요" };
     case "boss":
-      return { name: "보스", hint: "예고를 잘 보고 움직이세요" };
+      return { name: "악몽", hint: "되풀이되는 거예요. 예고를 잘 보고 움직이세요" };
     // 보스별 안내는 bossHint가 따로 만든다 — 어느 보스가 오는지 알아야 해서다.
     case "battle":
-      return { name: "길목", hint: "흔한 무리예요. 몸 풀기 좋아요" };
+      return { name: "얕은 잠", hint: "자잘한 것들이에요. 밀어내기 어렵지 않아요" };
   }
 }
 

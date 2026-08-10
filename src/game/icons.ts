@@ -275,7 +275,7 @@ function drawPaw(
   }
 }
 
-/** 생선뼈 — 쉼터. 먹고 쉬는 자리라는 뜻이다. */
+/** 생선뼈 — 숨 돌리기. 아무것도 안 오는 자리라는 뜻이다. */
 function drawBone(
   ctx: CanvasRenderingContext2D,
   cx: number,
