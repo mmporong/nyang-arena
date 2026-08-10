@@ -193,7 +193,7 @@ export interface Cat {
    * 모션이 되고, 헤드리스 시뮬은 100ms 스텝이라 한두 번에 끝난다 — 판정은
    * 양쪽이 같다.
    */
-  dash: { tx: number; ty: number } | null;
+  dash: { tx: number; ty: number; speed: number } | null;
   side: Side;
   /** 보드 셀 인덱스 0..8, 보드 밖(벤치)이면 -1 */
   cell: number;

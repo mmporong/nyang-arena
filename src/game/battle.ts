@@ -568,14 +568,28 @@ function dashMs(c: Cat, tx: number, ty: number): number {
  * 도착 여부는 여기서 안 본다 — 부르는 쪽이 도화선과 견줘서 정하고, 이 함수는
  * 시키는 대로 출발시킨다. 못 갈 거리라도 달리기는 시작하는 편이 낫다. 눌렀는데
  * 아무도 안 움직이면 입력이 먹었는지조차 알 수 없다.
+ *
+ * `speed`와 `lock`을 부르는 쪽이 정하는 이유는 두 쓰임의 성격이 다르기
+ * 때문이다. 개입은 **짧게 옮기고 그 자리를 지켜야** 하고(안 그러면 곧장
+ * 위험 구간으로 걸어 돌아간다), 도적 도약은 **멀리 건너가 곧바로 싸워야**
+ * 한다. 같은 값을 쓰면 둘 중 하나가 반드시 망가진다.
  */
-function startDash(c: Cat, tx: number, ty: number, color: string): void {
-  c.dash = { tx, ty };
-  c.moveLock = DODGE_LOCK_MS;
+function startDash(
+  c: Cat,
+  tx: number,
+  ty: number,
+  color: string,
+  speed: number = DASH_SPEED,
+  lock: number = DODGE_LOCK_MS,
+): void {
+  c.dash = { tx, ty, speed };
+  c.moveLock = lock;
   c.pose = "run";
   c.poseTimer = 0;
   // 출발 자리에 잔상을 남긴다. 어디서 어디로 갔는지가 한 컷에 읽힌다.
-  pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color });
+  if (color) {
+    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color });
+  }
 }
 
 /**
@@ -585,9 +599,9 @@ function startDash(c: Cat, tx: number, ty: number, color: string): void {
  * 도달하지 못하고 예고 가장자리에서 떨리게 된다.
  */
 function tickDashes(cats: Cat[], dt: number): void {
-  const travel = DASH_SPEED * (dt / 1000);
   for (const c of cats) {
     if (!c.dash) continue;
+    const travel = c.dash.speed * (dt / 1000);
     const dx = c.dash.tx - c.fx;
     const dy = c.dash.ty - c.fy;
     const d = Math.hypot(dx, dy);
@@ -629,6 +643,9 @@ function doDodge(state: RunState): boolean {
 /** 목표 쪽으로 이동. 사거리 바로 안쪽까지만 간다. */
 function stepToward(cat: Cat, target: Cat, stepMs: number): void {
   if (cat.moveLock > 0) return; // 회피 직후에는 제자리를 지킨다
+  // 달리는 중이면 걸음은 쉰다. 도적 도약은 moveLock을 안 걸므로(착지 즉시
+  // 싸워야 한다) 여기서 막지 않으면 같은 스텝에 두 이동원이 좌표를 민다.
+  if (cat.dash) return;
   const dx = target.fx - cat.fx;
   const dy = target.fy - cat.fy;
   const d = Math.hypot(dx, dy);
@@ -723,6 +740,14 @@ function tickEffects(cats: (Cat | null)[], dt: number): void {
  * 착지 뒤에는 평소와 같이 가장 가까운 적을 노린다.
  * 양쪽 모두에 적용한다 — 우리만 뛰어들면 도적이 지나치게 강해진다.
  */
+/**
+ * 도약이 걸리는 시간(ms). 거리와 무관하게 이 시간에 맞춰 속도를 정한다.
+ *
+ * 이미 있던 연출에서 가져온 값이다 — 궤적이 340ms, `run` 포즈가 320ms였다.
+ * 몸이 그보다 오래 걸리면 궤적이 먼저 사라지고 고양이만 허공에 남는다.
+ */
+const LEAP_MS = 300;
+
 function findLanding(taken: Set<number>, wantRow: number, landSide: Side): number {
   // "뒷줄"은 진영마다 반대편이다. 적 보드는 col이 클수록, 아군 보드는 col이
   // 작을수록 상대에게서 멀다. 이걸 뭉뚱그리면 적 도적이 우리 앞줄로 뛰어든다.
@@ -756,9 +781,24 @@ function assassinLeap(state: RunState): void {
 
       const from = { fx: c.fx, fy: c.fy };
       const to = cellToField(foeSide, landing);
-      c.fx = to.fx;
-      c.fy = to.fy;
-      c.pose = "run";
+      /**
+       * 뛰어드는 것도 **달려서** 간다.
+       *
+       * 전에는 `c.fx = to.fx`로 여덟 칸을 한 프레임에 건너뛰었다. 이 게임에서
+       * 가장 큰 순간이동이었고, 궤적(streak)을 함께 그려 두긴 했지만 몸은
+       * 사라졌다 나타났다.
+       *
+       * 속도를 개입과 공유하지 않고 **거리로 나눠** 정한다. 초당 9칸이면 여덟
+       * 칸에 890ms가 걸려 오는 내내 얻어맞고, 그건 도적을 다른 것으로 만든다.
+       * `LEAP_MS`는 이미 여기 있던 연출이 정해 둔 값이다 — 궤적이 340ms 살고
+       * `run` 포즈를 320ms 잡고 있었다. 몸이 그 시간에 맞춰 건너가면 연출과
+       * 실제가 처음으로 같은 것을 말한다.
+       *
+       * `moveLock`은 0이다. 개입은 옮긴 자리를 지켜야 하지만 도약은 착지하는
+       * 즉시 싸워야 한다 — 1.4초를 묶으면 뛰어든 의미가 없다.
+       */
+      const dist = Math.hypot(to.fx - from.fx, to.fy - from.fy);
+      startDash(c, to.fx, to.fy, "", (dist / LEAP_MS) * 1000, 0);
       c.poseTimer = 320;
 
       pushFx({
@@ -1083,7 +1123,11 @@ export function stepBattle(state: RunState, dtMs: number): void {
     const allies = livingCats(state.ally);
     // 달리기는 타겟팅·공격보다 먼저 처리한다. 이번 스텝의 사거리 판정이
     // **도착한 자리** 기준이라야, 위험 구간을 빠져나온 것이 그 스텝에 반영된다.
+    //
+    // 양쪽 다 돈다. 개입은 아군만 쓰지만 도적 도약은 적도 하므로, 여기서 적을
+    // 빠뜨리면 적 도적이 허공에 멈춘 채로 전투가 끝난다.
     tickDashes(allies, step);
+    tickDashes(livingCats(state.enemy), step);
     for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state);
     const foes = livingCats(state.enemy);
 

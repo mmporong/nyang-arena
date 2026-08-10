@@ -246,5 +246,58 @@ console.log("회피 동작 검사\n");
   }
 }
 
+// ── 7. 도적 도약도 순간이동이 아니다 ──────────────────────────
+/**
+ * 이 게임에서 가장 큰 이동이다 — 개전 순간 여덟 칸을 건너 상대 뒷줄로 뛰어든다.
+ * 회피를 달리기로 바꾸고도 여기만 `c.fx = to.fx`로 남아 있었다.
+ *
+ * 양쪽 도적을 다 본다. `tickDashes`에서 적을 빠뜨리면 적 도적이 허공에 멈춘다.
+ */
+{
+  const s = newRun(11);
+  [10, 11, 12, 16, 6].forEach((cell, i) => {
+    s.ally[cell] = makeCat(breedById((i % 8) + 1), "ally", cell);
+  });
+  s.step = 0;
+  s.wave = 4;
+  s.nodeWave = "mixed";
+  buildEnemyWave(s);
+  startBattle(s);
+
+  const rogues = [...s.ally, ...s.enemy].filter((c) => c?.alive && c.breed.cls === "rogue");
+  const before = new Map(rogues.map((c) => [c.uid, { x: c.fx, y: c.fy }]));
+
+  let frames = 0;
+  let biggest = 0;
+  const prev = new Map([...before].map(([k, v]) => [k, { ...v }]));
+  for (let i = 0; i < 60; i++) {
+    stepBattle(s, 16);
+    if (s.phase !== "battle") break;
+    frames += 1;
+    let flying = false;
+    for (const c of rogues) {
+      if (!c.alive) continue;
+      const p = prev.get(c.uid);
+      if (!p) continue;
+      biggest = Math.max(biggest, Math.hypot(c.fx - p.x, c.fy - p.y));
+      prev.set(c.uid, { x: c.fx, y: c.fy });
+      if (c.dash) flying = true;
+    }
+    if (!flying) break;
+  }
+  let total = 0;
+  for (const c of rogues) {
+    const p = before.get(c.uid);
+    if (p && c.alive) total = Math.max(total, Math.hypot(c.fx - p.x, c.fy - p.y));
+  }
+  const stuck = rogues.filter((c) => c.alive && c.dash);
+
+  check("도적이 있는 판을 잡는다", rogues.length > 0, `${rogues.length}마리`);
+  check("도약이 여러 프레임에 나뉜다", frames >= 3, `${frames}프레임 · 총 ${total.toFixed(2)}칸`);
+  check("한 프레임에 통째로 건너뛰지 않는다", total < 0.05 || biggest < total * 0.5,
+    `한 프레임 최대 ${biggest.toFixed(3)}칸`);
+  check("허공에 멈춘 도적이 없다 (양쪽 다 처리된다)", stuck.length === 0, `${stuck.length}마리 멈춤`);
+}
+
 console.log(failed === 0 ? "\n전부 통과 — 회피는 위험 구간만 비우고, 비운 채로 유지된다" : `\n${failed}건 실패`);
 process.exit(failed === 0 ? 0 : 1);
