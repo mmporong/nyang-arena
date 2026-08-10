@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "e4a87ab",
-    "dirty": true,
-    "reproducible": false,
+    "commit": "09b29e3",
+    "dirty": false,
+    "reproducible": true,
     "node": "v22.23.2",
     "seeds": {
       "from": 1,
@@ -23,50 +23,50 @@
   "distribution": {
     "min": 2,
     "p25": 8,
-    "median": 11,
-    "p75": 16,
-    "max": 32,
-    "mean": 12.31,
+    "median": 12,
+    "p75": 15,
+    "max": 24,
+    "mean": 11.9,
     "hitMaxWave": 0
   },
   "waveKinds": {
     "mixed": {
-      "tried": 672,
-      "passPct": 99.4,
-      "p50Sec": 3.3,
-      "p90Sec": 4.8
+      "tried": 667,
+      "passPct": 88.6,
+      "p50Sec": 3.8,
+      "p90Sec": 5.9
     },
     "rush": {
-      "tried": 660,
-      "passPct": 99.8,
-      "p50Sec": 3.5,
-      "p90Sec": 5.1
+      "tried": 665,
+      "passPct": 97.9,
+      "p50Sec": 3.9,
+      "p90Sec": 6.2
     },
     "snipe": {
-      "tried": 1012,
-      "passPct": 97.1,
-      "p50Sec": 3.9,
-      "p90Sec": 6.8
+      "tried": 1021,
+      "passPct": 89.6,
+      "p50Sec": 5.3,
+      "p90Sec": 9.3
     },
     "boss": {
-      "tried": 1348,
-      "passPct": 80.3,
-      "p50Sec": 18,
-      "p90Sec": 31.8
+      "tried": 1218,
+      "passPct": 91.5,
+      "p50Sec": 22.7,
+      "p90Sec": 37.7
     }
   },
   "balance": {
-    "enemyScale": 1.24,
+    "enemyScale": 1.28,
     "levelScale": 1.4,
     "upgradeCostBase": 4,
     "upgradeCostGrowth": 1.32,
     "goldBase": 5,
     "goldPerWave": 1.5,
     "telegraphDmg": 1.277,
-    "dodgeCharges": 6
+    "dodgeCharges": 2
   },
   "build": {
-    "bundleBytes": 102907
+    "bundleBytes": 103562
   },
   "openIssues": [
     {
