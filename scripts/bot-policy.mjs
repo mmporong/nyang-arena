@@ -9,7 +9,7 @@
  * 그래서 **모든 측정 봇이 같은 기준선 위에서** 보스를 넘고, 그 위에서 재려는
  * 축만 바꾼다.
  */
-import { chooseNode, mapStep, relicActive, syncStage } from "../src/game/run.ts";
+import { buyOffer, chooseNode, mapStep, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
 import { openLanes } from "../src/game/map.ts";
 import { rng } from "../src/game/rng.ts";
 import { livingCats } from "../src/game/types.ts";
@@ -53,6 +53,53 @@ export function affordable(s) {
   return s.offers
     .filter((o) => o && o.cost <= s.gold)
     .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false));
+}
+
+/**
+ * 상점에서 한 번 행동한다. **기준 봇의 구매 정책은 여기 한 곳에만 있다.**
+ *
+ * 전에는 `balance-sim`과 `metrics-gen`이 각자 이 로직을 갖고 있었고, 그래서
+ * 조용히 갈라졌다 — 재추첨 예산을 sim은 **웨이브마다**, metrics는 **상점을
+ * 밟을 때마다** 0으로 돌렸다. 상점 칸은 걸음만 먹고 웨이브는 안 먹으므로 둘은
+ * 반드시 어긋나고, 실제로 같은 코드에서 p25가 8과 9로 갈렸다.
+ *
+ * 하필 `metrics-gen`은 "balance-sim과 한 글자도 다르면 안 된다"고 주석에
+ * 적어 둔 파일이고, 그 파일이 내는 수치를 문서가 인용한다. 복사해 놓고
+ * 같기를 바라는 대신 **부를 수 있는 것 하나로** 만든다.
+ *
+ * @param st 런 하나 동안 유지되는 상태. `{ rerolls: 0, lastWave: 0 }`로 시작한다.
+ * @returns "bought" 샀다 · "rerolled" 다시 뽑았다 · "leave" 더 할 일이 없다
+ */
+export function shopStep(s, st) {
+  const byCost = (a, b) =>
+    (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
+
+  const pick = [...affordable(s)].sort(byCost)[0];
+  if (pick) {
+    const before = s.offers.length;
+    // 구매 실패한 카드가 목록에 남으면 같은 카드를 무한히 재시도하게 된다.
+    if (!buyOffer(s, pick) && s.offers.length === before) {
+      s.offers = s.offers.map((o) => (o === pick ? null : o));
+    }
+    return "bought";
+  }
+
+  // 무료 재추첨은 **조건 없이 다 쓴다.** 상점 칸이 "카드를 더 보라"고 준
+  // 것이라 안 쓰면 그 보상이 사라진 것과 같고, 생선 예산과 섞어 세면 상점
+  // 칸의 값을 재는 지도 축이 오염된다. `rerollOffers`가 무료분을 먼저 쓴다.
+  if (s.freeRerolls > 0 && rerollOffers(s)) return "rerolled";
+
+  // 생선으로 하는 재추첨 예산은 **웨이브마다** 돌아온다. 상점 방문마다
+  // 돌리면 상점 칸을 밟을수록 더 뽑게 되어 같은 축이 또 오염된다.
+  if (s.wave !== st.lastWave) {
+    st.lastWave = s.wave;
+    st.rerolls = 0;
+  }
+  if (st.rerolls < 4 && s.gold >= 12 && rerollOffers(s)) {
+    st.rerolls += 1;
+    return "rerolled";
+  }
+  return "leave";
 }
 
 /**

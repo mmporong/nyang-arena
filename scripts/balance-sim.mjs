@@ -9,7 +9,7 @@
  *
  * 실행: npm run sim
  */
-import { walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
+import { walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, relicActive, rerollOffers, startBattle, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
@@ -62,8 +62,7 @@ const bossLost = new Map();
  */
 function playOne(seed) {
   const s = newRun(seed);
-  let rerolls = 0;
-  let lastWave = 0;
+  const shop = { rerolls: 0, lastWave: 0 };
   let kindAtStart = null;
   let shapeAtStart = null;
   let waveAtStart = 0;
@@ -81,37 +80,15 @@ function playOne(seed) {
     }
 
     if (s.phase === "reward") {
-      // 살 수 있는 것 중 가장 비싼 것을 산다 (강화 우선이 되는 경향)
-      const affordable = s.offers
-        .filter((o) => o && o.cost <= s.gold)
-        // 유물은 조건을 이미 채우고 있을 때만 산다. 조건은 카드에 적혀 있으므로
-        // 이건 '카드를 읽는' 최소한의 플레이어다. 조건을 안 보고 사면 대가만
-        // 쌓여서, 기준 봇이 무작위 구매보다 나빠진다(측정: 8.8 대 9.3).
-        .filter((o) => o.kind !== "relic" || (o.relic ? relicActive(o.relic, livingCats(s.ally)) : false))
-        // 봇은 시너지 적합도를 판단하지 못하므로 교체가 순손실이다. 실제 플레이어는
-        // 목표에 맞춰 쓰지만, 여기서는 다른 걸 못 살 때만 집는다.
-        .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);
-      if (affordable[0]) {
-        const pick = affordable[0];
-        const before = s.offers.length;
-        // 구매 실패한 카드가 목록에 남으면 같은 카드를 무한히 재시도하게 된다.
-        if (!buyOffer(s, pick) && s.offers.length === before) {
-          s.offers = s.offers.map((o) => (o === pick ? null : o));
-        }
-        continue;
-      }
-      // 살 게 없고 생선이 남으면 다시 뽑는다. 잉여를 전력으로 바꾸는 실제 플레이 방식.
-      if (s.wave !== lastWave) {
-        lastWave = s.wave;
-        rerolls = 0;
-      }
-      if (rerolls < 4 && s.gold >= 12 && rerollOffers(s)) {
-        rerolls += 1;
-        continue;
-      }
+      // 구매 정책은 bot-policy의 shopStep 한 곳에만 있다. 여기와 metrics-gen이
+      // 각자 갖고 있었더니 재추첨 예산 리셋 시점이 갈려 같은 코드에서 p25가
+      // 8과 9로 달라졌다.
+      const act = shopStep(s, shop);
+      if (act !== "leave") continue;
       leaveShop(s);
       continue;
     }
+
     if (s.phase === "map") {
       walkMap(s, mapPick);
       continue;

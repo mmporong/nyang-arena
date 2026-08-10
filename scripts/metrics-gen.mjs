@@ -19,19 +19,16 @@ import { stepBattle } from "../src/game/battle.ts";
 import { BALANCE } from "../src/game/balance.ts";
 import { isBossStep, STAGE_STEPS } from "../src/game/map.ts";
 import {
-  buyOffer,
   currentKind,
   newRun,
-  rerollOffers,
   startBattle,
 } from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
 const SCHEMA = 1;
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
 const mapPick = MAP_POLICIES["무작위"];
-const byCost = (a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
 
 const finals = [];
 const tried = new Map();
@@ -45,6 +42,7 @@ function note(map, key, v = 1) {
 for (let seed = 1; seed <= RUNS; seed++) {
   const s = newRun(seed);
   const respond = makeBossBot();
+  const shop = { rerolls: 0, lastWave: 0 };
   let kind = null;
   let guard = 0;
   while (guard++ < MAX_WAVE * 4000) {
@@ -53,35 +51,13 @@ for (let seed = 1; seed <= RUNS; seed++) {
       break;
     }
     if (s.phase === "reward") {
-      for (let k = 0; k < 40; k++) {
-        const aff = affordable(s);
-        const pick = aff.length > 0 ? [...aff].sort(byCost)[0] : null;
-        if (!pick) break;
-        if (!buyOffer(s, pick)) s.offers = s.offers.map((o) => (o === pick ? null : o));
-      }
-      /**
-       * 재추첨 뒤에 **다시 산다.** balance-sim과 한 글자도 다르면 안 된다 —
-       * 처음엔 재추첨만 하고 안 샀더니 같은 코드에서 중앙값이 11과 12로
-       * 갈렸다. 기준 수치를 내는 자리에서 그런 차이가 나면, 이 파일이 고치려던
-       * 문제(문서마다 숫자가 다르다)를 그대로 재현하는 것이다.
-       */
-      const buyAll = () => {
-        for (let k = 0; k < 40; k++) {
-          const aff = affordable(s);
-          const pick = aff.length > 0 ? [...aff].sort(byCost)[0] : null;
-          if (!pick) break;
-          if (!buyOffer(s, pick)) s.offers = s.offers.map((o) => (o === pick ? null : o));
-        }
-      };
-      let rolls = 0;
-      while (rolls < 4 && s.gold >= 12 && rerollOffers(s)) {
-        rolls += 1;
-        buyAll();
-      }
-      while (s.freeRerolls > 0) {
-        rerollOffers(s);
-        buyAll();
-      }
+      // 구매 정책은 bot-policy의 shopStep 한 곳에만 있다. 예전에는 이 파일이
+      // 제 나름의 사본을 갖고 있었고 — 바로 위에 "balance-sim과 한 글자도
+      // 다르면 안 된다"고 적어 두고도 — 재추첨 예산 리셋 시점과 무료 재추첨
+      // 처리가 갈려 같은 코드에서 p25가 8과 9로 달라졌다. 복사해 놓고 같기를
+      // 바라는 대신 부를 수 있는 것 하나로 만들었다.
+      const act = shopStep(s, shop);
+      if (act !== "leave") continue;
       leaveShop(s);
       continue;
     }
