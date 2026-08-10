@@ -427,10 +427,17 @@ function hudChip(
   align: "left" | "center" | "right",
   icon = false,
 ): void {
-  const cap = Math.max(9, box.h * 0.24);
-  const px = Math.max(2, Math.round(box.h * 0.055));
-  const valueY = box.y + box.h * 0.72;
-  const iconSize = box.h * 0.42;
+  /**
+   * HUD 글자를 키웠다.
+   *
+   * 크기를 `min(화면폭, 화면높이)`에서 뽑는 값들이라 큰 화면일수록 **판 안에서**
+   * 상대적으로 작아졌다. 1669x925에서 캡션이 9px, 생선 그림이 18px이라
+   * 자원이 자원으로 안 읽혔다. 자원은 매 걸음 보는 숫자라 한눈에 들어와야 한다.
+   */
+  const cap = Math.max(11, box.h * 0.30);
+  const px = Math.max(3, Math.round(box.h * 0.075));
+  const valueY = box.y + box.h * 0.70;
+  const iconSize = box.h * 0.62;
   // 그림이 붙으면 숫자와 그림을 합친 덩어리가 정렬 기준을 따라야 한다.
   // 숫자만 정렬하면 가운데 정렬에서 덩어리가 그림 폭만큼 왼쪽으로 밀린다.
   // 그림과 숫자 사이 간격. 0.78이면 붙어 보여서 한 덩어리로 안 읽혔다.
@@ -1802,81 +1809,56 @@ function drawOffers(
     }
 
     /**
-     * 카드를 세울 높이가 안 나오는 화면에서는 눕힌다. 초상 왼쪽, 글 오른쪽.
+    /**
+     * 카드를 세울 높이가 안 나오는 화면에서는 눕힌다. **두 구역**으로 나눈다.
      *
-     * 초상을 카드 **높이**에만 맞추면 넓지 않은 카드에서 그림이 폭의 절반 가까이를
-     * 먹는다. 428px 화면에서 340x180 카드의 초상이 155px였고, 비용 뱃지를 뺀
-     * 글자 자리가 70px밖에 안 남아 이름이 세로 막대로 눌렸다.
-     * 폭에도 상한을 둬서 글이 최소한의 자리를 갖게 한다.
+     *   윗줄  [초상] 이름 / 능력          [비용]
+     *   아랫줄 설명 — 카드 폭을 통째로 쓴다
+     *
+     * 예전에는 셋을 전부 초상 오른쪽 한 칸에 밀어 넣었다. 340px 카드에서 초상
+     * 75 + 뱃지 85 + 여백 48이 60%를 먹어 글에 133px밖에 안 남았고, 거기에
+     * 41px 글자를 넣으니 축소 한계를 넘어 뱃지 위로 흘렀다.
+     *
+     * 설명은 원래 문장이라 가장 긴데 가장 좁은 자리를 받고 있었다. 초상 아래
+     * 빈 폭이 그대로 남아 있었으므로 거기로 내린다 — **긴 글에 긴 자리를** 준다.
      */
-    const side = Math.min(cr.h - pad * 2, cr.w * 0.22);
-    const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: side, h: side };
-    drawPortraitWell(
-      ctx,
-      well,
-      o.breed!.id,
-      o.breed!.id * 7 + i,
-      accent,
-      afford,
-      t,
-    );
-
-    const br = Math.max(11, cr.h * 0.17);
-    const fs = Math.max(11, cr.h * 0.19);
-    const textX = well.x + well.w + pad;
-    // 뱃지가 실제로 먹는 폭만큼 뗀다. 어림하면 두 자리 비용에서 글을 덮는다.
-    const textW = cr.x + cr.w - pad - costBadgeWidth(ctx, br, o.cost) - pad * 0.6 - textX;
+    const br = Math.max(12, cr.h * 0.155);
     const roomy = cr.h >= 84;
+    const headH = roomy ? cr.h * 0.58 : cr.h;
+    const side = Math.min(headH - pad * 1.4, cr.w * 0.19);
+    const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: side, h: side };
+    drawPortraitWell(ctx, well, o.breed!.id, o.breed!.id * 7 + i, accent, afford, t);
 
-    uiText(
-      ctx,
-      o.label,
-      textX,
-      cr.y + cr.h * (roomy ? 0.26 : 0.34),
-      fs,
-      afford ? T.text : T.muted,
-      {
-        align: "left",
-        weight: 800,
-        maxWidth: textW,
-      },
-    );
-    uiText(
-      ctx,
-      abilityLine,
-      textX,
-      cr.y + cr.h * (roomy ? 0.48 : 0.58),
-      fs * 0.74,
-      afford ? accent : T.muted,
-      {
-        align: "left",
-        weight: 700,
-        maxWidth: textW,
-      },
-    );
+    const fs = Math.max(13, Math.min(cr.h * 0.2, cr.w * 0.088));
+    const textX = well.x + well.w + pad;
+    const textW = cr.x + cr.w - pad - costBadgeWidth(ctx, br, o.cost) - pad * 0.7 - textX;
+
+    uiText(ctx, o.label, textX, cr.y + headH * (roomy ? 0.38 : 0.4), fs, afford ? T.text : T.muted, {
+      align: "left",
+      weight: 800,
+      maxWidth: textW,
+    });
+    uiText(ctx, abilityLine, textX, cr.y + headH * (roomy ? 0.72 : 0.72), fs * 0.62, afford ? accent : T.muted, {
+      align: "left",
+      weight: 700,
+      maxWidth: textW,
+    });
+
+    // 설명은 카드 폭을 다 쓴다. 두 줄까지 접는다.
     if (roomy) {
-      uiText(
-        ctx,
-        abilityDesc,
-        textX,
-        cr.y + cr.h * 0.68,
-        fs * 0.68,
-        afford ? T.paperDim : T.muted,
-        {
+      const dfs = Math.max(11, fs * 0.58);
+      const dw = cr.w - pad * 2;
+      let dy = cr.y + headH + dfs * 0.9;
+      for (const line of wrapLines(ctx, abilityDesc, dfs, 500, dw, 2)) {
+        uiText(ctx, line, cr.x + pad, dy, dfs, afford ? T.paperDim : T.muted, {
           align: "left",
           weight: 500,
-          maxWidth: textW,
-        },
-      );
+        });
+        dy += dfs * 1.35;
+      }
     }
-    drawCostBadge(
-      ctx,
-      cr.x + cr.w - pad - br,
-      cr.y + cr.h / 2,
-      br,
-      o.cost,
-      afford,
-    );
+
+    drawCostBadge(ctx, cr.x + cr.w - pad - br, cr.y + cr.h / 2, br, o.cost, afford);
   });
 }
 

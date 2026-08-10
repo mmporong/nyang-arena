@@ -117,8 +117,8 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
   // 음소거는 손가락으로 눌러야 하므로 HUD가 얇아져도 32px 아래로는 안 간다.
   const muteS = Math.round(Math.max(32, Math.min(hudH, 40)));
   const muteGap = Math.round(pad * 0.5);
-  const hud: Rect = { x: pad, y: pad, w: w - pad * 2 - muteS - muteGap, h: hudH };
-  const mute: Rect = {
+  let hud: Rect = { x: pad, y: pad, w: w - pad * 2 - muteS - muteGap, h: hudH };
+  let mute: Rect = {
     x: w - pad - muteS,
     y: pad + Math.round((hudH - muteS) / 2),
     w: muteS,
@@ -138,7 +138,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
   const colGap = Math.round(pad * 1.2);
   const columns = !portrait && colW >= COL_MIN_W && w - (pad + colW + colGap) * 2 >= 320;
 
-  const button: Rect = {
+  let button: Rect = {
     x: portrait || !columns ? pad : pad + colW + colGap,
     y: bottomY,
     w: portrait || !columns ? w - pad * 2 : w - (pad + colW + colGap) * 2,
@@ -149,7 +149,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
   // 페이즈가 한 줄로 들어가야 해서 안내 문구만 있을 때보다 조금 두껍다.
   // 좁은 화면(tight)에서는 그대로 두는데, 거기서는 배너도 같이 줄어든다.
   const noticeH = Math.round(Math.max(tight ? 13 : 24, Math.min(w, h) * (tight ? 0.045 : 0.055)));
-  const notice: Rect = { x: pad, y: hud.y + hud.h, w: w - pad * 2, h: noticeH };
+  let notice: Rect = { x: pad, y: hud.y + hud.h, w: w - pad * 2, h: noticeH };
 
   // 보드 위 진영 라벨("우리 편"/"상대")이 안내 문구와 겹치지 않도록 자리를 뗀다.
   const labelH = Math.round(Math.max(tight ? 9 : 14, Math.min(w, h) * 0.032));
@@ -332,6 +332,26 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
       synergyBar = { ...synergyBar, x: leftX };
       offerCards = { ...offerCards, x: rightX2 };
       offersPanel = { ...offersPanel, x: rightX2 - pad * 0.5 };
+
+      /**
+       * **한 판(plate).** 행동하는 모든 것을 잰 사각형 하나 안에 넣는다.
+       *
+       * 문제는 화면에 기준선이 둘이었다는 것이다 — HUD는 화면 가장자리에,
+       * 나머지는 판에 붙어 있었다. 1669px 화면에서 그 둘이 320px씩 벌어져
+       * 눈이 두 번 움직였고, 바깥 여백이 화면에서 가장 넓은 물건이 됐다.
+       *
+       * 세로줄 왼쪽 끝부터 오른쪽 끝까지를 하나의 판으로 보고 HUD·안내·버튼을
+       * 전부 그 폭에 맞춘다. 판 안이 아레나이고 밖은 골목 풍경이다 —
+       * 배경이 남는 게 아니라 **바깥에 있는 것**이 된다.
+       */
+      const stageX = leftX;
+      const stageR = rightX2 + colW;
+      hud = { x: stageX, y: hud.y, w: stageR - stageX - muteS - muteGap, h: hud.h };
+      mute = { ...mute, x: stageR - muteS };
+      notice = { x: stageX, y: notice.y, w: stageR - stageX, h: notice.h };
+      // 주 행동 버튼은 판 가운데 — 두 세로줄 사이, 곧 보드 폭에 맞춘다.
+      const btnX = leftX + colW + colGap;
+      button = { x: btnX, y: button.y, w: rightX2 - colGap - btnX, h: button.h };
     }
   } else {
     const cy = fieldTop + fieldH / 2 - bh / 2;
