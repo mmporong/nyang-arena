@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "12e7b70",
-    "dirty": true,
-    "reproducible": false,
+    "commit": "8cbab25",
+    "dirty": false,
+    "reproducible": true,
     "node": "v22.23.2",
     "seeds": {
       "from": 1,
@@ -26,31 +26,31 @@
     "median": 12,
     "p75": 17,
     "max": 44,
-    "mean": 13.35,
+    "mean": 13.14,
     "hitMaxWave": 0
   },
   "waveKinds": {
     "mixed": {
-      "tried": 726,
+      "tried": 712,
       "passPct": 99.3,
       "p50Sec": 3.1,
       "p90Sec": 4.8
     },
     "rush": {
-      "tried": 732,
+      "tried": 719,
       "passPct": 100,
       "p50Sec": 3.5,
       "p90Sec": 5.3
     },
     "snipe": {
-      "tried": 1083,
-      "passPct": 97.8,
+      "tried": 1070,
+      "passPct": 97.7,
       "p50Sec": 3.8,
-      "p90Sec": 7
+      "p90Sec": 6.9
     },
     "boss": {
-      "tried": 1465,
-      "passPct": 81.5,
+      "tried": 1442,
+      "passPct": 81.3,
       "p50Sec": 17.3,
       "p90Sec": 31.2
     }
@@ -66,7 +66,7 @@
     "dodgeCharges": 6
   },
   "build": {
-    "bundleBytes": 102448
+    "bundleBytes": 102814
   },
   "openIssues": [
     {
