@@ -894,6 +894,14 @@ interface Particle {
   max: number;
   size: number;
   ramp: readonly string[];
+  /**
+   * 램프 단계 어긋남(0~1).
+   *
+   * 이게 없으면 한 번에 뿌린 파티클이 **전부 같은 속도로 늙어** 한 순간에는
+   * 한 색만 보인다. 램프가 3단이어도 화면에는 단색으로 나온다.
+   * 조각마다 단계를 조금씩 밀어 세 색이 늘 같이 보이게 한다.
+   */
+  jit: number;
 }
 
 const particles: Particle[] = [];
@@ -909,32 +917,95 @@ let fxLast = 0;
  * 자동으로 뽑으므로 두 겹이 어긋날 수 없다.
  */
 const rampCache = new Map<string, readonly string[]>();
+
+function hexToRgb(h: string): [number, number, number] {
+  return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+}
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("")}`;
+}
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const R = r / 255, G = g / 255, B = b / 255;
+  const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+  const l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const d = mx - mn;
+  const sat = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  let h: number;
+  if (mx === R) h = ((G - B) / d + (G < B ? 6 : 0)) / 6;
+  else if (mx === G) h = ((B - R) / d + 2) / 6;
+  else h = ((R - G) / d + 4) / 6;
+  return [h * 360, sat, l];
+}
+function hslToHex(h: number, s: number, l: number): string {
+  const H = ((h % 360) + 360) % 360 / 360;
+  if (s === 0) { const v = l * 255; return rgbToHex(v, v, v); }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const f = (t0: number): number => {
+    let t = t0;
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return rgbToHex(f(H + 1 / 3) * 255, f(H) * 255, f(H - 1 / 3) * 255);
+}
+
+/** 색상환에서 target 쪽으로 짧은 길을 따라 amount도 만큼 돌린다. */
+function towardHue(h: number, target: number, amount: number): number {
+  let d = ((target - h + 540) % 360) - 180;
+  d = Math.max(-amount, Math.min(amount, d));
+  return h + d;
+}
+
+/**
+ * 색 램프 — **색상 이동(hue shift)**으로 3단을 만든다.
+ *
+ * 예전에는 `흰색 → 제 색 → 검정`이었다. 3단이긴 했는데 밝은 쪽이 순백이라
+ * 채도가 통째로 날아가고 어두운 쪽은 그냥 탁해졌다. 밝기만 움직이면 같은 색의
+ * 명암 계단이 되지 입체가 안 생긴다.
+ *
+ * 픽셀 아트가 쓰는 방식은 **밝은 쪽을 빛의 색으로, 어두운 쪽을 그늘의 색으로**
+ * 트는 것이다. 여기서 빛은 골목의 가로등(따뜻한 노랑 45°), 그늘은 밤하늘
+ * (차가운 파랑 245°)이다. 배경이 실제로 그 두 색이라 파티클이 장면에 앉는다.
+ *
+ * 채도는 양끝에서 오히려 **올린다.** 밝게 하면서 채도를 두면 물감이 물에
+ * 풀린 것처럼 보이는데, 픽셀 아트의 하이라이트는 색이 옅어지는 게 아니라
+ * 더 진해지면서 밝아진다.
+ */
 function rampFor(color: string): readonly string[] {
   let r = rampCache.get(color);
   if (!r) {
-    r = ["#FFFFFF", color, mixHex(color, "#000000", 0.58)];
+    const [cr, cg, cb] = hexToRgb(color);
+    const [h, sat, l] = rgbToHsl(cr, cg, cb);
+    // 같은 색의 3단이다. 노랑이면 연한 노랑 · 노랑 · 진한 노랑.
+    // 색상은 아주 조금만(6~8도) 튼다 — 완전히 같은 색상으로 밝기만 바꾸면
+    // 회색을 섞은 것처럼 보이고, 크게 틀면 다른 색이 된다.
+    const hi = hslToHex(towardHue(h, 45, 7), Math.min(1, sat * 1.05 + 0.04), Math.min(0.9, l + 0.2));
+    const lo = hslToHex(towardHue(h, 245, 9), Math.min(1, sat * 1.1 + 0.06), Math.max(0.12, l - 0.22));
+    r = [hi, color, lo];
     rampCache.set(color, r);
   }
   return r;
 }
 
-function mixHex(a: string, b: string, k: number): string {
-  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
-  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
-  return (
-    "#" +
-    [0, 1, 2]
-      .map((i) => Math.round(pa[i]! + (pb[i]! - pa[i]!) * k).toString(16).padStart(2, "0"))
-      .join("")
-  );
+/** 램프의 밝은 칸·어두운 칸. 벡터 겹이 테두리를 세울 때 쓴다. */
+export function rampHi(color: string): string {
+  return rampFor(color)[0]!;
+}
+export function rampLo(color: string): string {
+  return rampFor(color)[2]!;
 }
 
 /** 각 연출이 뿌리는 파티클. 개수와 방향이 곧 그 스킬의 무게다. */
 function seed(f: Fx, x: number, y: number, cell: number): void {
   const ramp = rampFor(f.color);
   const u = cell * 0.02; // 셀 크기에 비례한 속도 단위. 화면이 커도 같게 보인다.
-  const push = (n: number, make: (i: number) => Omit<Particle, "ramp">): void => {
-    for (let i = 0; i < n; i++) particles.push({ ...make(i), ramp });
+  const push = (n: number, make: (i: number) => Omit<Particle, "ramp" | "jit">): void => {
+    for (let i = 0; i < n; i++) particles.push({ ...make(i), ramp, jit: Math.random() * 0.9 });
   };
   const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
 
@@ -1034,7 +1105,7 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
   // 파티클 — 하나가 fillRect 한 번이다. 알파 대신 색 램프로 식는다.
   for (const p of particles) {
     const k = 1 - p.life / p.max;
-    const col = p.ramp[Math.min(p.ramp.length - 1, Math.floor(k * p.ramp.length))]!;
+    const col = p.ramp[Math.min(p.ramp.length - 1, Math.floor(k * p.ramp.length + p.jit))]!;
     b.fillStyle = col;
     b.fillRect(Math.round(p.x / FX_PIXEL), Math.round(p.y / FX_PIXEL), p.size, p.size);
   }
@@ -1838,10 +1909,22 @@ function drawOffers(
       weight: 800,
       maxWidth: textW,
     });
-    uiText(ctx, abilityLine, textX, cr.y + headH * (roomy ? 0.72 : 0.72), fs * 0.62, afford ? accent : T.muted, {
+    /**
+     * 능력 줄 앞에 **직업 픽토그램**을 세운다.
+     *
+     * 카드가 "궁수 영입 · 꿰뚫기"라고 글로만 말하고 있었다. 직업은 이 게임에서
+     * 살지 말지를 가르는 첫 정보인데(유물 조건이 전부 직업 수다) 글자 두 자에
+     * 실려 있었다. 왼쪽 줄 직업 카운터가 이미 같은 그림을 쓰므로, 카드와 카운터가
+     * **같은 기호로 같은 것을 가리키게** 된다 — 새 어휘를 안 늘리고 연결만 짓는다.
+     */
+    const abilY = cr.y + headH * 0.72;
+    const icoS = fs * 0.72;
+    const hasCls = drawIcon(ctx, `cls-${o.breed!.cls}` as IconName, textX + icoS * 0.5, abilY, icoS, afford ? accent : T.muted);
+    const abilX = textX + (hasCls ? icoS * 1.25 : 0);
+    uiText(ctx, abilityLine, abilX, abilY, fs * 0.62, afford ? accent : T.muted, {
       align: "left",
       weight: 700,
-      maxWidth: textW,
+      maxWidth: textW - (abilX - textX),
     });
 
     // 설명은 카드 폭을 다 쓴다. 두 줄까지 접는다.
