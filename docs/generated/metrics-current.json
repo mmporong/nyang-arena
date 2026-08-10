@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "f166e18",
-    "dirty": false,
-    "reproducible": true,
+    "commit": "12e7b70",
+    "dirty": true,
+    "reproducible": false,
     "node": "v22.23.2",
     "seeds": {
       "from": 1,
@@ -24,35 +24,35 @@
     "min": 2,
     "p25": 9,
     "median": 12,
-    "p75": 16,
-    "max": 32,
-    "mean": 12.77,
+    "p75": 17,
+    "max": 44,
+    "mean": 13.35,
     "hitMaxWave": 0
   },
   "waveKinds": {
     "mixed": {
-      "tried": 1058,
-      "passPct": 99.2,
-      "p50Sec": 3.3,
-      "p90Sec": 5.2
+      "tried": 726,
+      "passPct": 99.3,
+      "p50Sec": 3.1,
+      "p90Sec": 4.8
     },
     "rush": {
-      "tried": 818,
+      "tried": 732,
       "passPct": 100,
-      "p50Sec": 3.6,
-      "p90Sec": 5.7
+      "p50Sec": 3.5,
+      "p90Sec": 5.3
     },
     "snipe": {
-      "tried": 546,
-      "passPct": 97.1,
-      "p50Sec": 4.1,
-      "p90Sec": 7.6
+      "tried": 1083,
+      "passPct": 97.8,
+      "p50Sec": 3.8,
+      "p90Sec": 7
     },
     "boss": {
-      "tried": 1409,
-      "passPct": 80.4,
-      "p50Sec": 18.8,
-      "p90Sec": 33.6
+      "tried": 1465,
+      "passPct": 81.5,
+      "p50Sec": 17.3,
+      "p90Sec": 31.2
     }
   },
   "balance": {
@@ -66,7 +66,7 @@
     "dodgeCharges": 6
   },
   "build": {
-    "bundleBytes": 98065
+    "bundleBytes": 102448
   },
   "openIssues": [
     {
