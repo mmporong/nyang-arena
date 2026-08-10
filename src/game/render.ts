@@ -2669,7 +2669,7 @@ export function buttonText(s: RunState): string {
     }
     case "reward":
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
-      return s.nodeKind === "shop" ? "길 고르기" : "자리 잡기";
+      return s.nodeKind === "shop" ? "길 고르기" : "싸우러 가기";
     case "map":
       return "길을 고르세요";
     case "gameover":

@@ -159,12 +159,24 @@ function pointerPos(e: PointerEvent): { x: number; y: number } {
 /**
  * 배치를 바꿀 수 있는 페이즈.
  *
- * reward를 뺀 이유: 보상 카드 패널이 좁은 화면에서 보드를 덮는데, 그 상태로
- * 보드가 반응하면 고양이를 집으려던 탭이 카드 구매로 새어 들어간다.
- * 흐름은 **지도(길) → 보상(적을 보며 구매) → 준비(배치) → 전투**다.
+ * **구매와 배치를 한 화면으로 합쳤다.** 전에는 흐름이 지도 → 보상(구매) →
+ * 준비(배치) → 전투였는데, 둘을 가른 이유가 설계가 아니라 레이아웃이었다 —
+ * 좁은 화면에서 카드가 판을 덮으므로 그동안 판이 입력을 안 받게 해 둔 것이다.
+ * 폰을 배제하면서 그 제약이 사라졌다. 데스크톱(세로줄 구성)에서는 카드가
+ * 판을 **0% 덮는다**(기기별 실측은 `npm run probe`).
+ *
+ * 합치는 것이 낫다고 본 이유는 화면 수가 아니라 **결정의 순서**다. 무엇을
+ * 살지와 어디에 놓을지는 같은 판단의 앞뒤인데, 화면이 갈려 있으면 카드를
+ * 고를 때 보드를 못 보고 보드를 만질 때 카드를 못 본다. 유물이 배치 조건을
+ * 갖게 되면서(`relics.ts`) 그 둘은 더 붙었다 — "앞줄에 근접 셋"을 요구하는
+ * 유물을 살지 말지는 지금 보드를 봐야 정할 수 있다.
+ *
+ * `prepare`는 국면 기계에 남는다. UI는 이제 그 화면을 안 그리지만(보상에서
+ * 바로 전투로 넘어간다) `startBattle` 직전의 자리로서 실재하고, 무엇보다
+ * 헤드리스 하네스 열여섯 개가 그 전이를 기준으로 계측한다.
  */
 function canRearrange(): boolean {
-  return state.phase === "prepare";
+  return state.phase === "reward" || state.phase === "prepare";
 }
 
 function onPrimaryAction(): void {
@@ -176,7 +188,18 @@ function onPrimaryAction(): void {
       break;
     case "reward":
       // 전이는 run.ts가 갖는다. 여기 인라인으로 두면 측정 스크립트와 갈라진다.
-      leaveShop(state);
+      // 정찰 칸은 싸우지 않는다 — leaveShop이 지도로 보낸다. 나머지는 준비를
+      // 거쳐 전투로 가는데, 구매와 배치가 한 화면이 됐으므로 그 준비 화면에서
+      // 멈출 이유가 없다. 여기서 바로 넘긴다.
+      //
+      // 판단 기준을 `phase`가 아니라 `nodeKind`로 두는 것은 취향이 아니다 —
+      // switch가 이미 phase를 "reward"로 좁혀 놔서 leaveShop 뒤의 phase를
+      // 읽으면 타입이 그럴 리 없다고 한다.
+      {
+        const fights = state.nodeKind !== "shop";
+        leaveShop(state);
+        if (fights) startBattle(state);
+      }
       break;
     case "map":
       break;

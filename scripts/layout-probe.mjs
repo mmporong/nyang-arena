@@ -20,7 +20,7 @@
  */
 import { cellRect, computeLayout, fieldToScreen } from "../src/game/layout.ts";
 import { wrapLines } from "../src/game/theme.ts";
-import { rerollRect, healthBarGeom } from "../src/game/render.ts";
+import { rerollRect, healthBarGeom, offerRects } from "../src/game/render.ts";
 import { BOARD_SIZE, BOARD_COLS, cellToField } from "../src/game/types.ts";
 import { BOSS_RADIUS, SNIPER_RADIUS } from "../src/game/bosses.ts";
 
@@ -204,3 +204,44 @@ if (barFailed > 0) {
   process.exit(1);
 }
 console.log("전부 통과 — 반경 있는 유닛도 바가 보드 안에 머문다");
+
+/**
+ * **구매와 배치를 한 화면으로 합쳤으므로, 카드가 판을 덮으면 안 된다.**
+ *
+ * 전에는 덮어도 됐다 — 보상 단계에서 판이 입력을 안 받았기 때문이다. 이제는
+ * 같은 화면에서 사고 끌므로 그 불변식이 사라졌고, 대신 **카드가 판을 비켜야
+ * 한다**는 계약이 생겼다. 이 검사가 없으면 좁아진 화면에서 카드가 조용히
+ * 판을 덮고, 고양이를 집으려던 손이 카드 구매로 새어 들어간다.
+ *
+ * 지원 대상인 세로줄 구성(데스크톱)에서만 요구한다. 접힌 구성(폰)은 카드가
+ * 위로 자라 판을 덮는데, 세로 화면에서 둘을 다 띄우려면 셀이 손가락으로 집을
+ * 수 없는 크기가 된다. **폰은 배제하기로 한 범위**이고, 거기서는 판의 덮이지
+ * 않은 부분만 만질 수 있다 — 히트테스트가 카드를 먼저 보므로 오작동은 아니다.
+ */
+const inter = (a, b) => {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
+};
+
+console.log("\n구매·배치 한 화면 — 카드가 판을 비키는가 (세로줄 구성만)");
+let mergeFailed = 0;
+for (const [name, w, h] of DEVICES) {
+  const L = computeLayout(w, h, true);
+  if (!L.columns) {
+    console.log(`  건너뜀 ${name.padEnd(16)} 접힌 구성(폰) — 배제한 범위`);
+    continue;
+  }
+  let cov = 0;
+  for (const r of offerRects(L)) cov += inter(L.allyBoard, r);
+  if (L.offersPanel) cov = Math.max(cov, inter(L.allyBoard, L.offersPanel));
+  const pctCov = (cov / (L.allyBoard.w * L.allyBoard.h)) * 100;
+  const ok = cov === 0;
+  if (!ok) mergeFailed++;
+  console.log(`  ${ok ? "OK  " : "실패"} ${name.padEnd(16)} 카드가 판을 ${pctCov.toFixed(1)}% 덮음`);
+}
+if (mergeFailed > 0) {
+  console.log(`\n${mergeFailed}기기 실패 — 카드가 판을 덮는데 같은 화면에서 드래그를 받는다`);
+  process.exit(1);
+}
+console.log("전부 통과 — 지원 구성에서 카드는 판을 비킨다");
