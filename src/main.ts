@@ -1,4 +1,4 @@
-import { clearBattleFx, stepBattle } from "./game/battle.ts";
+import { clearBattleFx, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
 import { mapNodeRects, offerRects, render, rerollRect, type DragState } from "./game/render.ts";
 import {
@@ -13,6 +13,7 @@ import {
   type RunState,
 } from "./game/run.ts";
 import { openLanes } from "./game/map.ts";
+import { cellToField } from "./game/types.ts";
 import { loadSprites } from "./game/sprites.ts";
 import { loadIcons } from "./game/icons.ts";
 import { playSting, setBed, toggleMute, unlockAudio } from "./game/audio.ts";
@@ -123,16 +124,10 @@ Object.defineProperty(window, "nyangTelemetry", {
 });
 const PHASE_LOCK_MS = 350;
 
-/**
- * 이 시간 넘게 누르고 있으면 "모여", 그 전에 떼면 "흩어져".
- *
- * 260ms인 이유: 사람의 의도적인 길게 누르기와 빠른 탭을 가르는 경계가 대략
- * 이쯤이다. 더 짧으면 급하게 탭할 때 오인되고, 더 길면 1.2초짜리 예고 안에
- * 반응할 시간이 모자란다.
+/*
+ * 탭/꾹을 가르던 `HOLD_MS`와 누름 상태는 지웠다. 개입이 버튼 하나가 되면서
+ * "얼마나 오래 눌렀나"가 아무 뜻도 갖지 않게 됐다.
  */
-const HOLD_MS = 260;
-let pressStartedAt = 0;
-let pressOnButton = false;
 
 function cancelDrag(): void {
   drag.active = false;
@@ -211,14 +206,42 @@ function musicFor(s: RunState): "prepare" | "boss" | "outro" {
   return "prepare";
 }
 
-/** 버튼에서 손을 뗀 순간 탭인지 꾹인지 판정한다. */
-function resolveButtonPress(): void {
-  if (!pressOnButton) return;
-  pressOnButton = false;
-  if (state.phase !== "battle" || state.dodgeCharges <= 0) return;
-  const held = performance.now() - pressStartedAt;
-  markIntervention();
-  state.pending.push({ kind: held >= HOLD_MS ? "gather" : "dodge" });
+/**
+ * 개입은 **버튼 하나**다.
+ *
+ * 전에는 짧게 누르면 흩어짐, 길게 누르면 뭉침이었다(키보드로는 Space/Shift).
+ * 손가락 하나로 해야 하는 화면의 제약에서 나온 설계인데, 그 제약을 마우스와
+ * 키보드가 있는 자리에까지 물려줄 이유가 없었고 무엇보다 **1.2초 안에 조작
+ * 방식까지 고르라는 것은 이 게임이 요구할 만한 판단이 아니었다.**
+ *
+ * 무엇을 할지는 `stepBattle`의 `resolveIntent`가 정한다. 화면에서 한 번,
+ * 거기서 또 한 번 고르면 브라우저와 헤드리스 시뮬이 갈라진다.
+ */
+
+
+
+/**
+ * 산 것이 판 어디에 나타났는지 알린다.
+ *
+ * 카드를 누르면 생선이 줄고 카드가 사라지는데, 정작 **무엇이 어디에 생겼는지**는
+ * 보드를 뒤져야 알 수 있었다. 사기 전후의 보드를 견줘서 달라진 칸을 찾고 그
+ * 자리에서 터뜨린다 — `buyOffer`가 어느 칸을 골랐는지 밖에서 다시 계산하지
+ * 않으므로, 배치 규칙이 바뀌어도 이 코드는 안 따라 바뀐다.
+ *
+ * 연출 전용이다. 판정에는 관여하지 않으므로 헤드리스 시뮬과 갈라지지 않는다.
+ */
+function buyWithFx(offer: NonNullable<RunState["offers"][number]>): boolean {
+  const before = state.ally.map((c) => (c ? { uid: c.uid, level: c.level } : null));
+  if (!buyOffer(state, offer)) return false;
+  state.notice = "";
+  state.ally.forEach((c, i) => {
+    if (!c) return;
+    const was = before[i];
+    const { fx, fy } = cellToField("ally", i);
+    if (!was || was.uid !== c.uid) spawnArrivalFx(fx, fy);
+    else if (c.level > was.level) spawnLevelUpFx(fx, fy, c.level);
+  });
+  return true;
 }
 
 canvas.addEventListener("pointerdown", (e) => {
@@ -250,16 +273,9 @@ canvas.addEventListener("pointerdown", (e) => {
 
   if (rectHas(layout.button, x, y)) {
     if (state.phase === "battle") {
-      // 취약 창에는 연타가 곧 화력이므로 누르는 즉시 들어간다.
-      const openBoss = state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
-      if (openBoss) {
-        markIntervention();
-        state.pending.push({ kind: "strike" });
-        return;
-      }
-      // 그 외에는 뗄 때 판정한다. 짧으면 흩어짐, 길면 모임.
-      pressStartedAt = performance.now();
-      pressOnButton = true;
+      // 누르는 즉시 들어간다. 뗄 때까지 기다릴 이유가 없어졌다 — 길게 누르기가
+      // 뜻하던 것(뭉침)이 사라졌고, 취약 창에서는 연타가 곧 화력이다.
+      pushIntent();
       return;
     }
     onPrimaryAction();
@@ -291,8 +307,7 @@ canvas.addEventListener("pointerdown", (e) => {
       if (r && offer && rectHas(r, x, y)) {
         // buyOffer가 실패 사유별로 notice를 세팅한다. 덮어쓰면 거짓 안내가 뜬다.
         // (보드 만석인데 "생선이 부족합니다"가 뜨던 버그)
-        if (buyOffer(state, offer)) state.notice = "";
-        else if (state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
+        if (!buyWithFx(offer) && state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
         return;
       }
     }
@@ -337,12 +352,9 @@ function endDrag(e: PointerEvent): void {
 // setPointerCapture가 실패했을 때(try/catch로 삼킴) 드래그가 영구히 걸린 채
 // 유령 고양이가 커서를 따라다니므로, window에서도 받는다.
 window.addEventListener("pointerup", (e) => {
-  resolveButtonPress();
   endDrag(e);
 });
 window.addEventListener("pointercancel", () => {
-  // 손가락이 취소되면 의도도 버린다. 어중간하게 흩어지면 오히려 손해다.
-  pressOnButton = false;
   cancelDrag();
 });
 canvas.addEventListener("pointerleave", () => {
@@ -357,29 +369,24 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 /* ------------------------------------------------------------------ */
 
 /**
- * 데스크톱에서는 개입을 **두 키로 갈라 준다.**
+ * 개입 키도 **하나**다. 버튼과 완전히 같은 일을 한다.
  *
- * 탭이냐 꾹이냐로 나눈 것은 손가락 하나로 해야 하는 폰의 제약이었다. 키보드가
- * 있으면 그 제약이 없고, 같은 키를 얼마나 오래 눌렀는지로 의도를 가르는 것은
- * 그 자체가 오해의 씨앗이다 — 급하게 누르면 뭉치려던 것이 흩어짐이 된다.
+ * 전에는 Space가 흩어짐, Shift가 뭉침이었다. 조작을 둘로 가른 것은 무엇을
+ * 할지를 사람이 고르게 하려는 설계였는데, 1.2초짜리 예고 안에서 **장판 색을
+ * 읽고 + 맞는 키를 고르는** 두 가지를 동시에 요구하는 셈이었다. 색을 읽는
+ * 것까지는 이 게임이 요구할 만하지만 키를 고르는 것은 아니다.
  *
- * 두 경로가 **같은 큐(`state.pending`)로 들어가는 것**이 중요하다. 판정은 전부
- * `stepBattle` 안에서 일어나므로 키보드를 붙여도 헤드리스 시뮬과 갈라지지 않는다.
+ * 무엇을 할지는 `stepBattle`의 `resolveIntent`가 정한다. 여기서 한 번,
+ * 거기서 또 한 번 고르면 브라우저와 헤드리스 시뮬이 갈라진다 — 이 게임의
+ * 모든 수치가 둘이 같은 코드를 돈다는 전제 위에 있다.
  *
- *   Space   흩어져 (취약 창에는 약점 공격)
- *   Shift   모여
- *   1 2 3   카드 구매 · R 다시 뽑기 · Enter 다음 단계
+ *   Space · 버튼   대응 (예고면 피하거나 모이고, 취약 창이면 약점 공격)
+ *   1 2 3          카드 구매 · R 다시 뽑기 · Enter 다음 단계
  */
-function pushIntent(kind: "dodge" | "gather"): void {
+function pushIntent(): void {
   if (state.phase !== "battle") return;
   markIntervention();
-  const openBoss = state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
-  if (openBoss) {
-    state.pending.push({ kind: "strike" });
-    return;
-  }
-  if (state.dodgeCharges <= 0) return;
-  state.pending.push({ kind });
+  state.pending.push({ kind: "act" });
 }
 
 window.addEventListener("keydown", (e) => {
@@ -397,12 +404,7 @@ window.addEventListener("keydown", (e) => {
     case "Space":
       e.preventDefault();
       // 취약 창에는 연타가 곧 화력이라 자동 반복도 그대로 받는다.
-      pushIntent("dodge");
-      return;
-    case "ShiftLeft":
-    case "ShiftRight":
-      e.preventDefault();
-      pushIntent("gather");
+      pushIntent();
       return;
     case "Enter":
       if (state.phase !== "battle") onPrimaryAction();
@@ -427,8 +429,7 @@ window.addEventListener("keydown", (e) => {
       if (slot > 2) return;
       const offer = state.offers[slot];
       if (!offer) return;
-      if (buyOffer(state, offer)) state.notice = "";
-      else if (state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
+      if (!buyWithFx(offer) && state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
       return;
     }
   }
@@ -474,7 +475,6 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       telegraphs: state.enemy.filter((c) => c?.telegraph).map((c) => c!.telegraph!.mode),
       vulnerable: state.enemy.some((c) => c?.alive && c.vulnerableMs > 0),
       button: { ...layout.button },
-      pressOnButton,
     }),
   });
 }

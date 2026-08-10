@@ -63,14 +63,10 @@ import {
  * 작을수록 전장이 넓어 보이고 유닛이 겹칠 일이 줄어든다.
  * 체력바·뱃지는 셀이 아니라 이 크기에 비례시켜야 축소해도 비율이 안 깨진다.
  */
-/**
- * 키보드를 쓸 수 있는 자리인가.
- *
- * 조작 안내를 기기에 맞춘다. 폰에서 "Space"라고 적으면 거짓말이고, 데스크톱에서
- * "탭·꾹"이라고 적으면 있는 조작을 숨기는 셈이다.
+/*
+ * 기기별로 조작 안내를 갈라 주던 `HAS_KEYS`는 지웠다. 개입이 버튼 하나가
+ * 되면서 안내할 조작 자체가 없어졌다 — 어디서든 "그 버튼을 누른다"가 전부다.
  */
-const HAS_KEYS =
-  typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches;
 
 const CAT_SCALE = 0.66;
 
@@ -2662,14 +2658,14 @@ export function buttonText(s: RunState): string {
       // 평소엔 회피. 조작을 늘리지 않고 레이드의 두 국면을 넣는 방법이다.
       const open = s.enemy.find((c) => c?.alive && c.vulnerableMs > 0);
       if (open) return open.strikeCombo > 0 ? `할퀴기!  x${open.strikeCombo}` : "할퀴기!";
-      // 무엇을 해야 하는지는 장판 색이 말한다. 버튼은 조작 방식만 알려준다 —
-      // 버튼까지 정답을 알려주면 읽을 이유가 사라진다.
       if (s.dodgeCharges <= 0) return "전투 중";
-      // 키보드가 있으면 두 키를 알려준다. 탭/꾹은 손가락 하나뿐인 화면의 제약이라
-      // 마우스와 키보드가 있는 자리에서까지 그 제약을 물려줄 이유가 없다.
-      return HAS_KEYS
-        ? `Space 흩어져 · Shift 뭉쳐   ${s.dodgeCharges}`
-        : `탭 흩어져 · 꾹 뭉쳐   ${s.dodgeCharges}`;
+      // 쿨다운 중에는 남은 시간을 그대로 보여준다. 잠긴 이유를 안 보여주면
+      // 그냥 안 먹는 버튼으로 읽힌다 — 예전에 실제로 그 보고를 받았다.
+      if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
+      // 버튼 하나가 상황에 맞게 일하므로 조작을 설명할 것이 없어졌다. 남는 것은
+      // **몇 번 남았나**뿐이다. 전에는 `Space 흩어져 · Shift 뭉쳐 6`이었는데
+      // 상자를 넘쳤고, 넘치지 않았더라도 1.2초 안에 읽을 분량이 아니었다.
+      return `대응  ${s.dodgeCharges}`;
     }
     case "reward":
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
@@ -2704,7 +2700,7 @@ function drawButton(
   const armed =
     (s.phase !== "battle" && s.phase !== "map") ||
     openBoss ||
-    (s.dodgeCharges > 0 && s.enemy.some((c) => c?.telegraph));
+    (s.dodgeCharges > 0 && s.actCooldown <= 0 && s.enemy.some((c) => c?.telegraph));
   const idle = !armed;
   const face = idle ? "rgba(239,224,198,0.07)" : T.action;
   const edge = idle ? "rgba(0,0,0,0.3)" : "#A85E1E";
@@ -2745,6 +2741,8 @@ function drawButton(
     ctx.fill();
   }
 
+  // maxWidth를 넘긴다. 없으면 uiText가 줄이지 않아 긴 글이 상자 밖으로 샌다 —
+  // 실제로 `Space 흩어져 · Shift 뭉쳐 6`이 버튼 오른쪽으로 삐져나와 있었다.
   uiText(
     ctx,
     buttonText(s),
@@ -2755,6 +2753,7 @@ function drawButton(
     {
       align: "center",
       weight: 800,
+      maxWidth: r.w * 0.86,
     },
   );
 }

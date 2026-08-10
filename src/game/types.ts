@@ -16,7 +16,24 @@ export type Side = "ally" | "enemy";
  * 탭하면 나뉘어야 할 피해를 통째로 맞는다. 그래서 "누를까"가 아니라
  * "어느 쪽인가"가 결정이 된다.
  */
-export type Intervention = { kind: "dodge" } | { kind: "gather" } | { kind: "strike" };
+/**
+ * 플레이어가 전투에 끼어드는 방법.
+ *
+ * `act`가 화면이 쓰는 유일한 것이다 — **버튼도 키도 하나**이고, 무엇을 할지는
+ * `stepBattle`이 지금 판을 보고 정한다. 예전에는 흩어짐과 뭉침을 사람이 갈라
+ * 눌렀는데(Space / Shift), 조작 둘을 1.2초 안에 고르라는 것은 이 게임이 요구할
+ * 만한 판단이 아니었다. 버튼 하나가 상황에 맞게 일한다.
+ *
+ * 나머지 셋은 **측정용으로 남긴다.** `scripts/intervention-space.mjs`가
+ * "늘 흩어지기만", "거꾸로 읽기" 같은 나쁜 정책을 일부러 돌려서 개입의 값을
+ * 재는데, 그러려면 정책이 직접 종류를 지정할 수 있어야 한다. 게임 화면에서는
+ * 안 쓰인다.
+ */
+export type Intervention =
+  | { kind: "act" }
+  | { kind: "dodge" }
+  | { kind: "gather" }
+  | { kind: "strike" };
 
 /** 보스 광역기의 예고 모양. 터지기 전에 화면에 그려진다. */
 export type TelegraphShape = "circle" | "line" | "cone";

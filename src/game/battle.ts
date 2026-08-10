@@ -11,6 +11,7 @@ import {
   surfaceDistance,
   MANA_MAX,
   type Cat,
+  type Intervention,
   type Side,
   type Telegraph,
   type TelegraphMode,
@@ -166,6 +167,57 @@ function pushFx(f: Omit<Fx, "maxLife"> & { maxLife?: number }): void {
 }
 
 export const BURST_LIFE_MS = 320;
+
+/**
+ * 상점에서 일어난 일을 판 위에 알린다.
+ *
+ * 카드를 누르면 생선이 줄고 카드가 사라지는데, **정작 무엇이 어디에 생겼는지는
+ * 보드를 뒤져야 알 수 있었다.** 새 고양이가 어느 칸에 앉았는지 못 찾아 같은
+ * 카드를 두 번 누르는 일이 생긴다. 산 자리에서 뭔가 터지면 눈이 거기로 간다.
+ *
+ * `fxs`는 국면과 무관하게 그려지고 필드 좌표를 쓰므로 상점·배치 화면에서도
+ * 그대로 나온다. 판정에는 전혀 관여하지 않는다 — 헤드리스 시뮬은 이 배열을
+ * 무시하고 돌고, 그래서 시뮬 결과가 이 함수 때문에 바뀌지 않는다.
+ */
+export function spawnArrivalFx(fx: number, fy: number): void {
+  pushFx({ kind: "ring", fx, fy, tx: fx, ty: fy, radius: 1.1, angle: 0, life: 520, color: "#F0BA4A" });
+  for (let i = 0; i < 7; i++) {
+    pushFx({
+      kind: "spark",
+      fx,
+      fy,
+      tx: fx,
+      ty: fy,
+      radius: 0.55,
+      angle: (i / 7) * Math.PI * 2,
+      life: 420,
+      color: i % 2 === 0 ? "#F4E3C1" : "#F0BA4A",
+    });
+  }
+}
+
+/**
+ * 레벨이 올랐다. 도착과 달리 **위로 솟는다** — 같은 자리에서 일어나는 다른
+ * 일이므로 모양으로 갈라야 무엇이 일어났는지 읽힌다.
+ */
+export function spawnLevelUpFx(fx: number, fy: number, level: number): void {
+  pushFx({ kind: "ring", fx, fy, tx: fx, ty: fy, radius: 0.9, angle: 0, life: 560, color: "#F0BA4A" });
+  for (let i = 0; i < 9; i++) {
+    pushFx({
+      kind: "ember",
+      fx: fx + (i / 9 - 0.5) * 0.8,
+      fy,
+      tx: fx,
+      ty: fy - 1.2,
+      radius: 0.3,
+      angle: 0,
+      life: 620,
+      color: i % 3 === 0 ? "#FFE24A" : "#F0BA4A",
+    });
+  }
+  pop({ fx, fy } as Cat, `Lv ${level}`, true);
+}
+
 
 /** 렌더러가 시전 이름표를 그릴 때 쓴다. */
 export function skillName(cat: Cat): string {
@@ -464,24 +516,52 @@ const DODGE_LOCK_MS = 1400;
 const PENDING_CAP = 4;
 
 /**
+ * 회피·뭉침을 쓴 뒤 버튼이 잠기는 시간(ms).
+ *
+ * 연타로 자원이 새지는 않게 이미 막았지만(달리는 중인 고양이는 다시 세지 않는다),
+ * 그건 "손해는 없다"일 뿐이고 누른 것이 손에 남지는 않는다. 한 번 누르면 잠기는
+ * 편이 무엇을 썼는지 분명하다. 예고 도화선이 1.2초이므로 1초는 **한 예고에 한
+ * 번**이라는 뜻이 된다.
+ */
+const ACT_COOLDOWN_MS = 1000;
+
+/**
  * 위험 구간 밖의 가장 가까운 자리를 찾는다.
  *
  * 각도와 거리를 고정 격자로 훑는다 — 난수를 쓰면 같은 시드에서도 회피 결과가
  * 갈려 개입의 값을 잴 수 없다.
  */
+/**
+ * 장판을 벗어난 뒤 더 확보하는 여유(칸).
+ *
+ * 전에는 "안전한 첫 자리"를 그대로 돌려줬는데, 그건 **장판 경계 바로 바깥**이다.
+ * 판정은 통과하지만 겹침 밀어내기가 한 번만 건드려도 도로 안으로 들어간다 —
+ * 계측에서 붉은 예고에 걸린 고양이의 40%가 "나갔다가 다시 들어간" 경우였다.
+ * 사람 눈에는 눌러서 피했는데 맞은 것으로 보인다.
+ */
+const DODGE_MARGIN = 0.6;
+
 function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | null {
   const risky = (fx: number, fy: number) => zones.some((z) => inTelegraph(z, fx, fy));
   if (!risky(cat.fx, cat.fy)) return null; // 안전하면 움직이지 않는다
 
-  for (let ring = 1; ring <= 7; ring++) {
+  const onBoard = (fx: number, fy: number) =>
+    fy >= -0.3 && fy <= BOARD_ROWS - 1 + 0.3 && fx >= -0.3;
+
+  for (let ring = 1; ring <= 9; ring++) {
     const r = ring * 0.55;
     for (let a = 0; a < 12; a++) {
       const ang = (a / 12) * Math.PI * 2;
       const fx = cat.fx + Math.cos(ang) * r;
       const fy = cat.fy + Math.sin(ang) * r;
       // 보드 밖으로 도망가지는 못한다. 피할 자리가 없으면 맞는 게 맞다.
-      if (fy < -0.3 || fy > BOARD_ROWS - 1 + 0.3 || fx < -0.3) continue;
-      if (!risky(fx, fy)) return { fx, fy };
+      if (!onBoard(fx, fy) || risky(fx, fy)) continue;
+      // 같은 방향으로 조금 더 밀어 **경계에 걸치지 않게** 한다. 더 간 자리가
+      // 판 밖이거나 다시 위험하면 원래 자리를 쓴다 — 여유는 보너스지 조건이 아니다.
+      const mx = cat.fx + Math.cos(ang) * (r + DODGE_MARGIN);
+      const my = cat.fy + Math.sin(ang) * (r + DODGE_MARGIN);
+      if (onBoard(mx, my) && !risky(mx, my)) return { fx: mx, fy: my };
+      return { fx, fy };
     }
   }
   return null;
@@ -529,6 +609,8 @@ function doGather(state: RunState): boolean {
 
   let moved = false;
   for (const c of livingCats(state.ally)) {
+    // 흩어짐과 같은 이유. 달리는 중인 고양이는 이미 대답한 것이다.
+    if (c.dash) continue;
     if (inTelegraph(target, c.fx, c.fy)) continue;
     // 장판 중심 쪽으로 당긴다. 가장자리에 걸치면 판정이 아슬아슬해지므로
     // 반경의 60% 안쪽으로 넣는다.
@@ -618,6 +700,29 @@ function tickDashes(cats: Cat[], dt: number): void {
   }
 }
 
+/**
+ * 버튼 하나가 지금 무엇을 해야 하는지 정한다.
+ *
+ * 화면은 `act` 하나만 보낸다. 무엇을 할지 사람이 1.2초 안에 고르게 하는 대신
+ * 판을 보고 여기서 정한다 — 취약 창이 열려 있으면 약점 공격, 청록 예고면
+ * 뭉치기, 그 밖에는 흩어지기.
+ *
+ * **이 함수가 유일한 결정 지점이어야 한다.** 화면에서 한 번, 여기서 또 한 번
+ * 고르면 브라우저와 헤드리스 시뮬이 갈라진다 — 이 게임의 모든 수치가 둘이
+ * 같은 코드를 돈다는 전제 위에 있다.
+ *
+ * `dodge`·`gather`·`strike`를 직접 지정한 것은 그대로 통과시킨다. 측정
+ * 스크립트가 "늘 흩어지기만", "거꾸로 읽기" 같은 나쁜 정책을 일부러 돌려
+ * 개입의 값을 재는 데 쓴다.
+ */
+function resolveIntent(state: RunState, intent: Intervention | undefined): Intervention | undefined {
+  if (intent?.kind !== "act") return intent;
+  if (state.enemy.some((c) => c?.alive && c.vulnerableMs > 0)) return { kind: "strike" };
+  const tg = state.enemy.find((c) => c?.telegraph)?.telegraph;
+  if (!tg) return { kind: "dodge" }; // 예고가 없으면 doDodge가 알아서 아무 일도 안 한다
+  return tg.mode === "gather" ? { kind: "gather" } : { kind: "dodge" };
+}
+
 /** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
 function doDodge(state: RunState): boolean {
   const zones: Telegraph[] = [];
@@ -628,8 +733,32 @@ function doDodge(state: RunState): boolean {
   const fuse = Math.min(...zones.map((z) => z.fuse));
   let moved = false;
   for (const c of livingCats(state.ally)) {
+    // 이미 안전한 자리로 달리는 중이면 다시 세지 않는다.
+    //
+    // 대시는 100~370ms 걸리는데 그동안 고양이는 아직 장판 안에 있다. 그래서
+    // 연타하면 "아직 위험한 고양이가 있다"로 읽혀 **차지가 한 번 더 나갔다** —
+    // 계측에서 예고 하나에 75번 누르니 2개가 다 빠졌다. 누르는 속도가 자원을
+    // 먹는 것은 어떤 설명으로도 정당화되지 않는다.
+    //
+    // `moved`를 켜지 않고 넘긴다 — 이미 대답한 것을 다시 세면 그게 곧 차지를
+    // 또 쓰는 일이다.
+    if (c.dash) continue;
     const spot = safeSpot(c, zones);
-    if (!spot) continue;
+    if (!spot) {
+      /**
+       * 이미 안전한 고양이는 **옮기지 않되 붙잡는다.**
+       *
+       * 전에는 아무것도 안 했다. 그래서 밖에 서 있던 고양이가 1.2초 동안
+       * 평소처럼 보스를 향해 걸어가다 장판 안으로 들어갔다 — 계측에서 예고에
+       * 걸린 고양이의 22%가 이 경우였고, 플레이어 입장에서는 분명히 눌렀는데
+       * 맞은 것이다. "흩어져"는 흩어지라는 뜻이지 "지금 위험한 애들만
+       * 옮겨라"가 아니다.
+       *
+       * 자리를 안 바꾸므로 회피가 공짜로 진형을 정리해 주지도 않는다.
+       */
+      if (c.moveLock < fuse) c.moveLock = fuse;
+      continue;
+    }
     // **도착할 수 있는 고양이만 센다.** 이동에 시간이 걸리게 되면서, 늦게 누르면
     // 출발은 하는데 터질 때까지 못 빠져나오는 경우가 생겼다. 그때도 `moved`를
     // 참으로 돌려주면 한정 자원인 회피 차지만 쓰고 아무 일도 안 일어난다 —
@@ -673,7 +802,12 @@ function separate(cats: Cat[]): void {
       if (!a || !b) continue;
       // 달리는 중에는 밀어내지 않는다. 겹침 방지가 경로를 휘면 개입으로 지시한
       // 자리에 못 서고, 위험 구간 가장자리에 걸친 채로 끝난다.
-      if (a.dash || b.dash) continue;
+      //
+      // 개입으로 자리를 지정받은 뒤(`moveLock`)에도 안 민다. **밀어내기는
+      // 개입을 되돌린다** — 계측에서 붉은 예고에 걸린 고양이의 40%가 일단
+      // 빠져나왔다가 이 힘에 떠밀려 도로 들어간 경우였다. 겹쳐 보이는 1.4초가
+      // 눌러도 안 피해지는 것보다 낫다.
+      if (a.dash || b.dash || a.moveLock > 0 || b.moveLock > 0) continue;
       const dx = b.fx - a.fx;
       const dy = b.fy - a.fy;
       const d = Math.hypot(dx, dy);
@@ -946,19 +1080,24 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
     bossKit(boss.breed.id).power;
   if (t.mode === "gather") {
-    // **절반 이상**이 들어와야 나눠진다. 한 마리만으로 성립하면 근접이 보스로
-    // 걸어가다 우연히 지나가는 것만으로 충족되어, 모이라는 요구가 요구가 아니게
-    // 된다. WoW의 soak도 "충분히 안 들어오면 치명적"이라는 같은 규칙을 쓴다.
-    const inside = foes.filter((f) => inTelegraph(t, f.fx, f.fy));
-    const need = Math.max(2, Math.ceil(foes.length / 2));
-    if (inside.length < need) {
-      tally.telegraphsEaten += 1;
-      const miss = frac * BALANCE.gatherMissMul;
-      for (const f of foes) damage(f, telegraphHit(f, boss, miss), false);
-    } else {
-      const share = frac / inside.length;
-      for (const f of inside) damage(f, telegraphHit(f, boss, share), false);
-    }
+    /**
+     * 청록 원은 **대피소**다. 안에 있으면 안 맞고, 밖에 있으면 맞는다 —
+     * 붉은 장판의 정확한 반대이고, 그래서 규칙이 둘이 아니라 하나다.
+     * "장판 색이 안이냐 밖이냐를 말한다."
+     *
+     * 전에는 WoW의 soak였다. 절반 이상이 들어오면 피해를 **들어온 것들끼리
+     * 나눠 받고**, 모자라면 전원이 크게 맞았다. 규칙으로는 말이 되는데 화면에서
+     * 거짓말을 했다 — 제때 눌러 제대로 모였는데도 숫자가 떴다. 실제로
+     * "눌러서 피했는데 데미지가 들어온다"는 보고를 받았고, 계측해 보니 기능이
+     * 아니라 설계가 그랬다. 성공했는데 벌을 받으면 다음부터 안 누른다.
+     *
+     * 모이는 것이 공짜가 되는 건 아니다. 뭉친 직후에는 무게중심이 한 점이라
+     * 다음 원형 예고가 통째로 덮는다 — 그래서 아래에서 moveLock을 풀어 곧바로
+     * 흩어질 수 있게 한다. 대가는 피해가 아니라 **다음 한 수**가 진다.
+     */
+    const outside = foes.filter((f) => !inTelegraph(t, f.fx, f.fy));
+    if (outside.length > 0) tally.telegraphsEaten += 1;
+    for (const f of outside) damage(f, telegraphHit(f, boss, frac), false);
     // 뭉침이 끝나면 곧바로 흩어질 수 있어야 한다. 묶어 두면 다음 원형 예고가
     // 무게중심을 노려 통째로 맞고, 그러면 모인 것이 벌이 된다.
     for (const f of foes) f.moveLock = 0;
@@ -1110,11 +1249,30 @@ export function stepBattle(state: RunState, dtMs: number): void {
     // 의도는 스텝당 하나만 소비한다. 브라우저(~17ms)와 시뮬(100ms)의 입력
     // 해상도가 달라도 같은 규칙에 묶이도록.
     if (state.pending.length > PENDING_CAP) state.pending.length = PENDING_CAP;
-    const intent = state.pending.shift();
+    if (state.actCooldown > 0) state.actCooldown = Math.max(0, state.actCooldown - step);
+
+    /**
+     * 쿨다운은 **차지를 쓰는 것에만** 건다. 약점 공격은 연타가 곧 화력이라
+     * (창 3초에 최대 30타) 1초를 걸면 3타가 되어 창 자체가 없어진다.
+     *
+     * 잠긴 동안 들어온 의도는 **버리지 않고 큐에 남긴다.** 처음엔 그냥
+     * 흘렸는데, 그러면 누른 것이 소리 없이 사라진다 — 계측에서 회피 성공률이
+     * 100%에서 40%로 떨어졌고, 사람 입장에서는 분명히 눌렀는데 맞은 것이다.
+     * 남겨 두면 풀리는 순간 나가고, 그 사이 예고가 지나갔으면 `doDodge`가
+     * 알아서 아무 일도 안 한다(차지도 안 쓴다).
+     */
+    const head = state.pending[0];
+    const locked =
+      state.actCooldown > 0 &&
+      head !== undefined &&
+      resolveIntent(state, head)?.kind !== "strike";
+    const intent = locked ? undefined : resolveIntent(state, state.pending.shift());
     if (intent?.kind === "dodge" && state.dodgeCharges > 0 && doDodge(state)) {
       state.dodgeCharges -= 1;
+      state.actCooldown = ACT_COOLDOWN_MS;
     } else if (intent?.kind === "gather" && state.dodgeCharges > 0 && doGather(state)) {
       state.dodgeCharges -= 1;
+      state.actCooldown = ACT_COOLDOWN_MS;
     } else if (intent?.kind === "strike") {
       // 약점 공격은 차지를 쓰지 않는다. 창이 열려 있는 3초 자체가 제한이다.
       doStrike(state);
