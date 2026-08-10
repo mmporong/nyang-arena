@@ -9,7 +9,7 @@
  * 그래서 **모든 측정 봇이 같은 기준선 위에서** 보스를 넘고, 그 위에서 재려는
  * 축만 바꾼다.
  */
-import { buyOffer, chooseNode, mapStep, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
+import { buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
 import { openLanes } from "../src/game/map.ts";
 import { rng } from "../src/game/rng.ts";
 import { livingCats } from "../src/game/types.ts";
@@ -100,6 +100,48 @@ export function shopStep(s, st) {
     return "rerolled";
   }
   return "leave";
+}
+
+/**
+ * 들고 있는 유물이 요구하는 모양으로 배치를 고친다.
+ *
+ * **이게 없으면 유물의 배치 조건은 잴 수 없다.** 자동 배치(`bestFreeCell`)는
+ * 직업만 보고 놓으므로 앞줄 근접 3은 31%, 뒷줄 원거리 4는 34%만 우연히
+ * 맞는다. 봇이 배치를 못 바꾸면 그 조건은 "운"이지 "결정"이 아니고, 그러면
+ * 유물 축을 재는 값이 사람이 겪는 것과 달라진다.
+ *
+ * 사람이 하는 일과 같은 것만 한다 — `moveCat`으로 칸을 맞바꾼다. 브라우저의
+ * 드래그가 부르는 바로 그 함수다.
+ *
+ * 욕심을 부리지 않는다. 조건 하나를 채우려다 다른 조건을 깨뜨릴 수 있으므로,
+ * **바꾼 뒤에 켜진 조건 수가 늘 때만** 유지한다. 최적 배치를 찾는 것이 아니라
+ * "유물을 읽고 손을 대는 플레이어"를 흉내 내는 것이 목적이다.
+ */
+export function arrangeForRelics(s) {
+  if (s.relics.length === 0) return;
+  const cats = () => livingCats(s.ally);
+  const score = () => s.relics.filter((r) => relicActive(r, cats())).length;
+
+  let best = score();
+  if (best === s.relics.length) return; // 이미 다 켜졌다
+
+  // 빈 칸과 찬 칸을 전부 맞바꿔 보고 개선되는 것만 남긴다. 5x5라 25*25이지만
+  // 한 걸음에 한 번뿐이고 조기 종료가 있어 측정 시간에 영향이 없다.
+  for (let pass = 0; pass < 3; pass++) {
+    let moved = false;
+    for (let from = 0; from < s.ally.length; from++) {
+      if (!s.ally[from]) continue;
+      for (let to = 0; to < s.ally.length; to++) {
+        if (from === to) continue;
+        moveCat(s, from, to);
+        const now = score();
+        if (now > best) { best = now; moved = true; }
+        else moveCat(s, to, from); // 되돌린다
+        if (best === s.relics.length) return;
+      }
+    }
+    if (!moved) return;
+  }
 }
 
 /**

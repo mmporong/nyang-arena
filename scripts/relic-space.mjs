@@ -12,7 +12,7 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
+import { affordable, arrangeForRelics, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 300);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
@@ -73,6 +73,10 @@ function play(pick, seed) {
     }
     if (s.phase === "prepare") {
       if (s.wave > MAX_WAVE) return MAX_WAVE;
+      // **유물을 읽고 배치를 고친다.** 자동 배치는 직업만 보므로 유물의 배치
+      // 조건은 우연히만 맞는다. 이 한 줄이 없으면 조건이 결정이 아니라 운이고,
+      // 그러면 여기서 재는 값이 사람이 겪는 것과 달라진다.
+      arrangeForRelics(s);
       startBattle(s);
       if (s.phase !== "battle") return s.wave;
       continue;

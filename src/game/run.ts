@@ -784,6 +784,14 @@ export function relicActive(relic: Relic, cats: Cat[]): boolean {
       return cats.some((x) => x.level >= c.min);
     case "breed_variety":
       return new Set(cats.map((x) => x.breed.id)).size >= c.min;
+    // 배치를 읽는 조건. 앞/뒤 정의는 시너지와 같은 것을 쓴다 —
+    // 열 0이 뒷줄, 마지막 열이 앞줄(적에게 가까운 쪽).
+    case "front_melee":
+      return cats.filter((x) => cellCol(x.cell) === BOARD_COLS - 1 && x.breed.kind === "melee").length >= c.min;
+    case "back_ranged":
+      return cats.filter((x) => cellCol(x.cell) === 0 && x.breed.kind === "ranged").length >= c.min;
+    case "row_spread":
+      return new Set(cats.map((x) => cellRow(x.cell))).size >= c.min;
   }
 }
 
