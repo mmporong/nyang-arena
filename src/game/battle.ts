@@ -253,6 +253,9 @@ function damage(target: Cat, amount: number, crit: boolean): void {
     target.alive = false;
     target.pose = "sleep";
     target.poseTimer = 0;
+    // 죽으면 달리기도 끝난다. `tickDashes`는 살아 있는 것만 도는 탓에, 여기서
+    // 안 지우면 목표가 시체에 붙어 다음 전투까지 따라간다.
+    target.dash = null;
   }
 }
 
@@ -533,8 +536,12 @@ function doGather(state: RunState): boolean {
     const dy = target.fy - c.fy;
     const d = Math.hypot(dx, dy) || 1;
     const pull = Math.max(0, d - target.arg * 0.6);
-    startDash(c, c.fx + (dx / d) * pull, c.fy + (dy / d) * pull, "#6E97C4");
-    moved = true;
+    const tx = c.fx + (dx / d) * pull;
+    const ty = c.fy + (dy / d) * pull;
+    // 흩어짐과 같은 이유로 도착할 수 있는 것만 센다. 뭉침은 거리가 더 멀어
+    // (실측 2.2칸 · 366ms) 늦게 누르면 더 잘 걸린다.
+    if (dashMs(c, tx, ty) <= target.fuse) moved = true;
+    startDash(c, tx, ty, "#6E97C4");
   }
   return moved;
 }
@@ -548,7 +555,20 @@ function doGather(state: RunState): boolean {
  */
 const DASH_SPEED = 9;
 
-/** 목표만 적어 둔다. 실제 이동은 `tickDashes`가 스텝마다 나눠서 한다. */
+/**
+ * 이 거리를 달리는 데 걸리는 시간(ms). 도화선과 견주려고 따로 뺐다.
+ */
+function dashMs(c: Cat, tx: number, ty: number): number {
+  return (Math.hypot(tx - c.fx, ty - c.fy) / DASH_SPEED) * 1000;
+}
+
+/**
+ * 목표만 적어 둔다. 실제 이동은 `tickDashes`가 스텝마다 나눠서 한다.
+ *
+ * 도착 여부는 여기서 안 본다 — 부르는 쪽이 도화선과 견줘서 정하고, 이 함수는
+ * 시키는 대로 출발시킨다. 못 갈 거리라도 달리기는 시작하는 편이 낫다. 눌렀는데
+ * 아무도 안 움직이면 입력이 먹었는지조차 알 수 없다.
+ */
 function startDash(c: Cat, tx: number, ty: number, color: string): void {
   c.dash = { tx, ty };
   c.moveLock = DODGE_LOCK_MS;
@@ -590,12 +610,18 @@ function doDodge(state: RunState): boolean {
   for (const e of state.enemy) if (e?.telegraph) zones.push(e.telegraph);
   if (zones.length === 0) return false;
 
+  // 남은 도화선. 여럿이면 가장 먼저 터지는 것에 맞춘다.
+  const fuse = Math.min(...zones.map((z) => z.fuse));
   let moved = false;
   for (const c of livingCats(state.ally)) {
     const spot = safeSpot(c, zones);
     if (!spot) continue;
+    // **도착할 수 있는 고양이만 센다.** 이동에 시간이 걸리게 되면서, 늦게 누르면
+    // 출발은 하는데 터질 때까지 못 빠져나오는 경우가 생겼다. 그때도 `moved`를
+    // 참으로 돌려주면 한정 자원인 회피 차지만 쓰고 아무 일도 안 일어난다 —
+    // 순간이동 시절에는 없던 실패다.
+    if (dashMs(c, spot.fx, spot.fy) <= fuse) moved = true;
     startDash(c, spot.fx, spot.fy, "#F3E8D6");
-    moved = true;
   }
   return moved;
 }

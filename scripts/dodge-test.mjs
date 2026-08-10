@@ -104,6 +104,10 @@ console.log("회피 동작 검사\n");
     const stillInside = inside.filter((c) => c.alive && inTelegraph(tg, c.fx, c.fy));
     check("구간 안의 고양이가 예고가 터지기 전에 빠져나온다", stillInside.length === 0,
       `${inside.length} → ${stillInside.length}, ${ms}ms 걸림 (도화선 ${fuseAtPress}ms)`);
+    // `c.alive &&`로 거르므로 **구간 안에서 죽으면 빠져나온 것으로 세어진다.**
+    // 그 구멍을 따로 막는다 — 전원이 장판에서 몰살당해도 위 검사는 통과한다.
+    const died = inside.filter((c) => !c.alive);
+    check("빠져나오다 죽은 고양이는 없다", died.length === 0, `${died.length}마리 사망`);
     // 도화선을 거의 다 쓰면 사람이 조금만 늦게 눌러도 못 빠져나온다.
     check("빠져나오는 데 도화선의 절반을 넘기지 않는다", ms <= fuseAtPress / 2,
       `${ms}ms / ${fuseAtPress}ms`);
@@ -165,6 +169,80 @@ console.log("회피 동작 검사\n");
     check("한 스텝에 의도를 하나만 소비한다", startCharges - s.dodgeCharges <= 1,
       `${startCharges} → ${s.dodgeCharges}`);
     check("큐가 상한을 넘지 않는다", s.pending.length <= 4, `${s.pending.length}개 남음`);
+  }
+}
+
+// ── 5. 순간이동이 아니라 달리기다 ─────────────────────────────
+/**
+ * 위 검사들은 **전부 순간이동으로도 통과한다.** 도착 시점만 보기 때문이다.
+ * 그래서 좌표가 여러 프레임에 나뉘어 움직였는지를 따로 묶는다.
+ *
+ * 브라우저 프레임 간격(16ms)으로 돌린다. `stepBattle`은 받은 dt를 그대로
+ * 서브스텝으로 쓰므로 이게 실제 화면에서 일어나는 일이다.
+ */
+{
+  const r = bossFightWithTelegraph(clustered);
+  if (r) {
+    const { s } = r;
+    const before = new Map(s.ally.filter((c) => c?.alive).map((c) => [c.uid, { x: c.fx, y: c.fy }]));
+    s.pending.push({ kind: "dodge" });
+
+    let frames = 0;
+    let biggest = 0; // 한 프레임에 움직인 최대 거리
+    const prev = new Map([...before].map(([k, v]) => [k, { ...v }]));
+    for (let i = 0; i < 80; i++) {
+      stepBattle(s, 16);
+      if (s.phase !== "battle") break;
+      frames += 1;
+      let anyDashing = false;
+      for (const c of s.ally) {
+        if (!c?.alive) continue;
+        const p = prev.get(c.uid);
+        if (!p) continue;
+        biggest = Math.max(biggest, Math.hypot(c.fx - p.x, c.fy - p.y));
+        prev.set(c.uid, { x: c.fx, y: c.fy });
+        if (c.dash) anyDashing = true;
+      }
+      if (!anyDashing && i > 0) break;
+    }
+
+    // 가장 멀리 간 고양이의 총 이동 거리
+    let total = 0;
+    for (const c of s.ally) {
+      if (!c?.alive) continue;
+      const p = before.get(c.uid);
+      if (p) total = Math.max(total, Math.hypot(c.fx - p.x, c.fy - p.y));
+    }
+
+    check("개입 이동이 여러 프레임에 나뉜다", frames >= 3, `${frames}프레임`);
+    // 한 프레임에 총 이동의 절반 이상을 갔으면 사실상 순간이동이다.
+    check("한 프레임에 통째로 옮기지 않는다", total < 0.05 || biggest < total * 0.5,
+      `총 ${total.toFixed(2)}칸 · 한 프레임 최대 ${biggest.toFixed(3)}칸`);
+  }
+}
+
+// ── 6. 못 갈 거리면 차지를 쓰지 않는다 ────────────────────────
+/**
+ * 이동에 시간이 걸리게 되면서 새로 생긴 실패다. 도화선이 얼마 안 남았을 때
+ * 누르면 출발은 하는데 터질 때까지 못 빠져나온다 — 그때도 차지를 쓰면
+ * **한정 자원만 날리고 아무 일도 안 일어난다.** 순간이동 시절에는 없던 일이라
+ * 회귀로 보고 막았고, 계약으로 묶어 둔다.
+ */
+{
+  for (const [forced, shouldSpend] of [[1200, true], [60, false]]) {
+    const r = bossFightWithTelegraph(clustered);
+    if (!r) continue;
+    const { s, boss } = r;
+    boss.telegraph.fuse = forced;
+    const before = s.dodgeCharges;
+    s.pending.push({ kind: "dodge" });
+    stepBattle(s, 100);
+    const spent = s.dodgeCharges < before;
+    check(
+      shouldSpend ? "갈 수 있으면 차지를 쓴다" : "못 갈 거리면 차지를 아낀다",
+      spent === shouldSpend,
+      `도화선 ${forced}ms · ${before} → ${s.dodgeCharges}`,
+    );
   }
 }
 

@@ -1020,6 +1020,11 @@ export function startBattle(state: RunState): void {
       c.comboTarget = null;
       c.combo = 0;
       c.moveLock = 0;
+      // 달리던 목표도 지운다. `state.pending`과 같은 부류다 — 지난 전투에서
+      // 시킨 것이 남으면 새 전투 첫 틱에 터진다. 여기서는 배치한 자리를 떠나
+      // 지난 판의 좌표로 뛰어가고, moveLock은 방금 0으로 밀렸으므로 걸음까지
+      // 겹쳐 한 스텝에 열 배로 움직인다.
+      c.dash = null;
       c.vulnerableMs = 0;
       c.strikeCombo = 0;
       c.vulnerableUsed = false;
