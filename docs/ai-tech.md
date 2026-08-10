@@ -114,7 +114,7 @@ src/data/synergies.json  ──(git 커밋)──▶  런에서 3개 추출
 |---|---|---|
 | **Claude Code** (claude-opus-5) | 전체 구현: 설계, TypeScript 코드, 스프라이트 슬라이싱 스크립트, 검증기, 밸런스 하네스, 문서 | 커밋 히스토리 전체. 각 커밋에 `Co-Authored-By` 명시 |
 | **Claude (동일 세션)** | 시너지 규칙 후보 생성 | `scripts/synergy-candidates.json` |
-| **음악 생성 모델** | 배경음악 4곡(준비 · 보스 · 타이틀 · 부검). 프롬프트는 전부 [`docs/audio-prompts.md`](audio-prompts.md)에 원문 그대로 | `public/bgm/` 8파일. 생성 후 dB로 측정하고 마스터링한 과정은 같은 문서 §7 |
+| **Lyria** (Google, Gemini 경유) | 배경음악 4곡(준비 · 보스 · 타이틀 · 부검). 프롬프트는 전부 [`docs/audio-prompts.md`](audio-prompts.md)에 원문 그대로 | `public/bgm/` 8파일. 생성 후 dB로 측정하고 마스터링한 과정은 같은 문서 §7 |
 | 코드 리뷰 에이전트 | 구현 후 **별도 컨텍스트**에서 리뷰. 같은 세션에서의 self-approve를 금지하는 것이 이 저장소의 규칙이다 | 커밋 `7b0aaf6`(17건), 커밋 `1ee6743`(치명 1건) |
 
 `gen-synergies.mjs`는 두 입력 모드를 지원한다. `OPENAI_API_KEY`가 있으면 OpenAI API를 호출하고, 없으면 세션에서 생성한 후보 파일을 읽는다. **어느 쪽이든 검증기는 동일하게 적용된다.** 이번 제출은 후자로 만들었다.
@@ -411,7 +411,7 @@ AI가 코드를 빠르게 쓸수록 **틀렸다는 걸 알아채는 속도**가 
 | 고양이 스프라이트 (20종 × 6포즈) | 자체 제작 (mmporong, 2026) | 자체 보유 |
 | 배경 · 전투 연출 | 자체 제작 (mmporong, 2026) | 자체 보유 |
 | **UI 아이콘 13장** (생선 · 직업 4 · 유물 8) | [GUI Pro - Minimal Game Light](https://assetstore.unity.com/packages/2d/gui/gui-pro-minimal-game-light-355406) (Layer Lab) | **유니티 에셋스토어 EULA(유료)** — 빌드 결과물에 통합해 배포하는 것은 허용, 에셋 자체를 재사용 가능한 형태로 배포하는 것은 금지 |
-| **음악 4곡** (준비 · 보스 · 타이틀 · 아웃트로) | **생성 AI로 제작.** 프롬프트 전문과 측정·마스터링 과정은 [`docs/audio-prompts.md`](audio-prompts.md) | 자체 보유 |
+| **음악 4곡** (준비 · 보스 · 타이틀 · 아웃트로) | **Lyria**(Google, Gemini 경유)로 생성. 프롬프트 전문과 측정·마스터링 과정은 [`docs/audio-prompts.md`](audio-prompts.md) | 자체 보유 |
 | TypeScript | Microsoft | Apache-2.0 |
 | Vite | Vite 팀 | MIT |
 | 폰트 | OS 시스템 폰트 (`system-ui`) | 별도 임베드 없음 |

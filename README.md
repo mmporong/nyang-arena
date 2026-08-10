@@ -186,7 +186,7 @@ TypeScript · Vite · Canvas 2D · Web Audio. 엔진·프레임워크 없음.
 - **고양이 스프라이트·배경·전투 연출**: 자체 제작 (mmporong, 2026)
 - **UI 아이콘 13장**: [GUI Pro - Minimal Game Light](https://assetstore.unity.com/packages/2d/gui/gui-pro-minimal-game-light-355406) (Layer Lab) —
   생선·직업 4종·유물 8종. 흰 실루엣을 게임 색으로 틴트해서 쓴다
-- **음악 4곡**: 생성 AI로 만들었다. 프롬프트는
+- **음악 4곡**: **Lyria**(Google, Gemini 경유)로 만들었다. 프롬프트는
   [`docs/audio-prompts.md`](docs/audio-prompts.md)에 그대로 있고, 받은 파일을
   어떻게 측정·마스터링해서 넣었는지도 같은 문서 §7에 있다
 - 그 외 외부 에셋·오픈소스 사용 없음. 런타임 의존성 0개
