@@ -2607,7 +2607,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
 export function buttonText(s: RunState): string {
   switch (s.phase) {
     case "prepare":
-      return "전투 시작";
+      return "싸우러 가기";
     case "battle": {
       // 보스전에는 이 자리가 개입 버튼이다. 전투 중 죽어 있던 공간을 재사용하므로
       // 세로 레이아웃 예산이 늘지 않는다.
@@ -2615,19 +2615,19 @@ export function buttonText(s: RunState): string {
       // 버튼은 하나이고 상황에 따라 역할만 바뀐다 — 취약 창이 열리면 약점 공격,
       // 평소엔 회피. 조작을 늘리지 않고 레이드의 두 국면을 넣는 방법이다.
       const open = s.enemy.find((c) => c?.alive && c.vulnerableMs > 0);
-      if (open) return open.strikeCombo > 0 ? `약점 공격!  x${open.strikeCombo}` : "약점 공격!";
+      if (open) return open.strikeCombo > 0 ? `할퀴기!  x${open.strikeCombo}` : "할퀴기!";
       // 무엇을 해야 하는지는 장판 색이 말한다. 버튼은 조작 방식만 알려준다 —
       // 버튼까지 정답을 알려주면 읽을 이유가 사라진다.
       if (s.dodgeCharges <= 0) return "전투 중";
       // 키보드가 있으면 두 키를 알려준다. 탭/꾹은 손가락 하나뿐인 화면의 제약이라
       // 마우스와 키보드가 있는 자리에서까지 그 제약을 물려줄 이유가 없다.
       return HAS_KEYS
-        ? `Space 흩어짐 · Shift 모임   ${s.dodgeCharges}`
-        : `탭 흩어짐 · 꾹 모임   ${s.dodgeCharges}`;
+        ? `Space 흩어져 · Shift 뭉쳐   ${s.dodgeCharges}`
+        : `탭 흩어져 · 꾹 뭉쳐   ${s.dodgeCharges}`;
     }
     case "reward":
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
-      return s.nodeKind === "shop" ? "길 고르기" : "배치하기";
+      return s.nodeKind === "shop" ? "길 고르기" : "자리 잡기";
     case "map":
       return "길을 고르세요";
     case "gameover":

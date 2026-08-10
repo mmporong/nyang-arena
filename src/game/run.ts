@@ -840,7 +840,7 @@ export function rollOffers(state: RunState): void {
         cost: b.cost,
         breed: b,
         label: b.name,
-        sublabel: `${CLASS_LABEL[b.cls]} 영입`,
+        sublabel: `${CLASS_LABEL[b.cls]} 데려오기`,
       });
     }
   } else {
@@ -865,7 +865,7 @@ export function rollOffers(state: RunState): void {
           breed: b,
           targetUid: weakest.uid,
           label: b.name,
-          sublabel: `${weakest.breed.name} 방출`,
+          sublabel: `${weakest.breed.name} 내보내기`,
         });
       }
     }
@@ -881,7 +881,9 @@ export function rollOffers(state: RunState): void {
       breed: target.breed,
       targetUid: target.uid,
       label: `${target.breed.name} Lv.${target.level + 1}`,
-      sublabel: "강화",
+      // 강화는 생선을 먹여서 크는 것이다. '강화'는 시스템 말이고, 화면에서
+      // 하는 일은 밥을 주는 것이다.
+      sublabel: "밥 주기",
     });
   }
 
@@ -1117,7 +1119,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   state.phase = "map";
   state.notice = refreshed
     ? "새 목표가 생겼어요"
-    : `웨이브 클리어! +${goldForWave(state.wave - 1, kind === "elite" ? "snipe" : kind === "boss" ? "boss" : null)}생선`;
+    : `한 걸음 넘었어요 · 생선 +${goldForWave(state.wave - 1, kind === "elite" ? "snipe" : kind === "boss" ? "boss" : null)}`;
 }
 
 export function moveCat(state: RunState, from: number, to: number): void {
