@@ -11,7 +11,7 @@ import {
   type StageMap,
 } from "./map.ts";
 import { seedRng, shuffle } from "./rng.ts";
-import { BREEDS, breedById } from "./breeds.ts";
+import { BREEDS, NIGHTMARE_BREEDS, breedById } from "./breeds.ts";
 import { BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
 import {
   type Intervention,
@@ -454,6 +454,7 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     strikeCombo: 0,
     vulnerableUsed: false,
     moveLock: 0,
+    dash: null,
     side,
     cell,
     fx,
@@ -564,8 +565,14 @@ export function newRun(seed?: number): RunState {
   return state;
 }
 
-const MELEE_IDS = BREEDS.filter((b) => b.kind === "melee").map((b) => b.id);
-const RANGED_IDS = BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
+/*
+ * 적 명단은 전부 `NIGHTMARE_BREEDS`에서 온다. 우리 고양이와 한 마리도 겹치지 않는다.
+ *
+ * 그 배열은 `BREEDS`와 index별로 직업·스탯·스킬이 같게 맞춰져 있으므로, 아래
+ * 세 풀도 예전과 같은 순서·같은 스탯이 된다 — 바뀌는 것은 누구로 보이는가뿐이다.
+ */
+const MELEE_IDS = NIGHTMARE_BREEDS.filter((b) => b.kind === "melee").map((b) => b.id);
+const RANGED_IDS = NIGHTMARE_BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
 /**
  * 돌격대는 전사만 낸다.
  *
@@ -573,7 +580,7 @@ const RANGED_IDS = BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
  * 뒷줄로 뛰어든다. 유닛이 셋뿐인 웨이브 2에서 그건 즉사였다(측정: W2에서만 42명).
  * 돌격은 전사가 하는 것이고, 암살자가 하는 건 돌격이 아니다.
  */
-const WARRIOR_IDS = BREEDS.filter((b) => b.cls === "warrior").map((b) => b.id);
+const WARRIOR_IDS = NIGHTMARE_BREEDS.filter((b) => b.cls === "warrior").map((b) => b.id);
 
 /**
  * 적 배치 순서.
@@ -624,7 +631,7 @@ function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
         break;
       case "boss":
       case "mixed":
-        out.push(BREEDS[(wave * 3 + i * 5) % BREEDS.length]?.id ?? 1);
+        out.push(NIGHTMARE_BREEDS[(wave * 3 + i * 5) % NIGHTMARE_BREEDS.length]?.id ?? 20);
         break;
     }
   }
