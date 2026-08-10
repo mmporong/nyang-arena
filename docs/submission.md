@@ -184,15 +184,22 @@
 
 ## 5. 제출 체크리스트
 
-| | 항목 | 상태 |
-|---|---|---|
-| NAN | 웹 빌드 + 소스(커밋 히스토리 포함) | ✅ |
-| NAN | 소개 PDF | ✅ `docs/intro.pdf` (5쪽) |
-| NAN | AI 기술문서 PDF | ✅ `docs/ai-tech.pdf` (10쪽) |
-| NAN | 30~60초 게임플레이 영상 | ✅ `docs/gameplay.mp4` (52.7초 · 1280×720 · H.264+AAC · **소리 있음**) |
-| OpenAI | 브라우저 플레이 링크 | ✅ `mmporong.github.io/nyang-arena` |
-| OpenAI | 16:9 썸네일 | ✅ `docs/thumbnail.png` (1280×720) |
-| OpenAI | Codex를 개발 과정에 사용 | ⬜ |
+**NAN 2026 사전과제 — 필수 제출물**
+
+| 항목 | 상태 |
+|---|---|
+| 웹 빌드 + 소스(커밋 히스토리 포함) | ✅ |
+| 소개 PDF | ✅ `docs/intro.pdf` (5쪽) |
+| AI 기술문서 PDF | ✅ `docs/ai-tech.pdf` (12쪽) |
+| 30~60초 게임플레이 영상 | ✅ `docs/gameplay.mp4` (52.7초 · 1280×720 · H.264+AAC · **소리 있음**) |
+| 브라우저 플레이 링크 | ✅ `mmporong.github.io/nyang-arena` |
+| 16:9 썸네일 | ✅ `docs/thumbnail.png` (1280×720) |
+
+**필수 항목은 전부 채웠다.** 아래는 별도 트랙(OpenAI)의 선택 항목이라 따로 적는다.
+
+| 항목 | 상태 |
+|---|---|
+| Codex를 개발 과정에 사용 | ⬜ 이번 제출에는 안 썼다. 구현은 Claude Code(claude-opus-5)로 했다 |
 
 스크린샷 일곱 장(`docs/shots/`)·썸네일·영상은 전부 **배포본을 실제로 플레이해서**
 찍었다. `npm run docs`가 PDF를 다시 만든다.
