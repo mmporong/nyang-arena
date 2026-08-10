@@ -206,22 +206,54 @@ export function uiText(
   opts: UiTextOpts = {},
 ): void {
   const { align = "left", weight = 400, maxWidth, outline = false } = opts;
-  ctx.font = fontOf(size, weight);
   ctx.textAlign = align;
   ctx.textBaseline = "middle";
 
+  /**
+   * **`fillText`의 maxWidth를 그대로 쓰면 안 된다.**
+   *
+   * 그 인자는 줄바꿈이 아니라 **가로 압축**이다. 자리가 절반이면 글자를 절반
+   * 폭으로 눌러 버리고, 한글은 그렇게 눌리면 획이 겹쳐 읽을 수가 없다.
+   * 좁은 화면 상점 카드에서 이름이 세로 막대처럼 뭉개진 것이 이것 때문이었다
+   * (폭 70px에 34px 글자를 넣고 있었다).
+   *
+   * 그래서 두 단계로 처리한다.
+   *   1. 들어갈 때까지 **글자 크기를 줄인다** (원래 크기의 62%까지)
+   *   2. 그래도 넘치면 **끝을 …으로 자른다**
+   *
+   * 압축은 절대 하지 않는다. 작아지거나 잘리는 건 읽을 수 있지만 눌린 글자는
+   * 읽을 수 없다.
+   */
+  let shown = text;
+  let fs = size;
+  if (maxWidth !== undefined && maxWidth > 0) {
+    ctx.font = fontOf(fs, weight);
+    if (ctx.measureText(shown).width > maxWidth) {
+      const floor = Math.max(9, size * 0.62);
+      while (fs > floor) {
+        fs -= 1;
+        ctx.font = fontOf(fs, weight);
+        if (ctx.measureText(shown).width <= maxWidth) break;
+      }
+      if (ctx.measureText(shown).width > maxWidth) {
+        while (shown.length > 1 && ctx.measureText(`${shown}…`).width > maxWidth) {
+          shown = shown.slice(0, -1);
+        }
+        shown = `${shown}…`;
+      }
+    }
+  }
+  ctx.font = fontOf(fs, weight);
+
   if (outline) {
     ctx.lineJoin = "round";
-    ctx.lineWidth = Math.max(2, size * 0.22);
+    ctx.lineWidth = Math.max(2, fs * 0.22);
     ctx.strokeStyle = "rgba(12,8,6,0.85)";
-    if (maxWidth !== undefined) ctx.strokeText(text, x, y, maxWidth);
-    else ctx.strokeText(text, x, y);
+    ctx.strokeText(shown, x, y);
   }
 
   ctx.fillStyle = color;
-  if (maxWidth !== undefined) ctx.fillText(text, x, y, maxWidth);
-  else ctx.fillText(text, x, y);
-
+  ctx.fillText(shown, x, y);
 }
 
 /**

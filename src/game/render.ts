@@ -433,7 +433,8 @@ function hudChip(
   const iconSize = box.h * 0.42;
   // 그림이 붙으면 숫자와 그림을 합친 덩어리가 정렬 기준을 따라야 한다.
   // 숫자만 정렬하면 가운데 정렬에서 덩어리가 그림 폭만큼 왼쪽으로 밀린다.
-  const gap = icon ? iconSize * 0.78 : 0;
+  // 그림과 숫자 사이 간격. 0.78이면 붙어 보여서 한 덩어리로 안 읽혔다.
+  const gap = icon ? iconSize * 1.15 : 0;
   const anchor =
     align === "left"
       ? box.x
@@ -452,7 +453,7 @@ function hudChip(
     const numW = numTextWidth(ctx, value, px);
     // 숫자 덩어리의 왼쪽 끝을 구해 거기서 한 칸 더 왼쪽에 놓는다.
     const numLeft = align === "left" ? x : align === "right" ? x - numW : x - numW / 2;
-    drawFish(ctx, numLeft - gap * 0.55, valueY, iconSize, color);
+    drawFish(ctx, numLeft - gap * 0.62, valueY, iconSize, color);
   }
 }
 
@@ -470,7 +471,8 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   hudChip(
     ctx,
     { x: r.x + third, y: r.y, w: third, h: r.h },
-    "생선",
+    // 캡션을 비운다. 생선 그림이 곧 이름이라 글자까지 붙이면 같은 말을 두 번 한다.
+    "",
     String(s.gold),
     T.fish,
     "center",
@@ -1799,8 +1801,15 @@ function drawOffers(
       return;
     }
 
-    // 카드를 세울 높이가 안 나오는 화면에서는 눕힌다. 초상 왼쪽, 글 오른쪽.
-    const side = cr.h - pad * 2;
+    /**
+     * 카드를 세울 높이가 안 나오는 화면에서는 눕힌다. 초상 왼쪽, 글 오른쪽.
+     *
+     * 초상을 카드 **높이**에만 맞추면 넓지 않은 카드에서 그림이 폭의 절반 가까이를
+     * 먹는다. 428px 화면에서 340x180 카드의 초상이 155px였고, 비용 뱃지를 뺀
+     * 글자 자리가 70px밖에 안 남아 이름이 세로 막대로 눌렸다.
+     * 폭에도 상한을 둬서 글이 최소한의 자리를 갖게 한다.
+     */
+    const side = Math.min(cr.h - pad * 2, cr.w * 0.3);
     const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: side, h: side };
     drawPortraitWell(
       ctx,

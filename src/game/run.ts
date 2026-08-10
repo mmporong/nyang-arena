@@ -326,7 +326,9 @@ export function chooseNode(state: RunState, idx: number): boolean {
   buildEnemyWave(state);
   rollOffers(state);
   state.phase = "reward";
-  state.notice = node.kind === "elite" ? "정예다. 이기면 유물이 나온다" : "상대를 보고 고르자";
+  // 길목은 안내를 비운다. 매 걸음 같은 말이 뜨면 글자가 배경이 되고,
+  // 그러면 정작 알려야 할 때(정예·경고) 아무도 안 읽는다.
+  state.notice = node.kind === "elite" ? "만만치 않아요. 이기면 유물을 남기고 가요" : "";
   return true;
 }
 
