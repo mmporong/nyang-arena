@@ -273,7 +273,7 @@ canvas.addEventListener("pointerdown", (e) => {
       const cx = n.rect.x + n.rect.w / 2;
       const cy = n.rect.y + n.rect.h / 2;
       if (Math.hypot(x - cx, y - cy) > n.rect.w / 2 + 6) continue;
-      if (!chooseNode(state, n.idx)) state.notice = "그 길로는 갈 수 없습니다";
+      if (!chooseNode(state, n.idx)) state.notice = "그 길로는 갈 수 없어요";
       return;
     }
     return;
@@ -292,7 +292,7 @@ canvas.addEventListener("pointerdown", (e) => {
         // buyOffer가 실패 사유별로 notice를 세팅한다. 덮어쓰면 거짓 안내가 뜬다.
         // (보드 만석인데 "생선이 부족합니다"가 뜨던 버그)
         if (buyOffer(state, offer)) state.notice = "";
-        else if (state.gold < offer.cost) state.notice = "생선이 부족합니다";
+        else if (state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
         return;
       }
     }
@@ -428,7 +428,7 @@ window.addEventListener("keydown", (e) => {
       const offer = state.offers[slot];
       if (!offer) return;
       if (buyOffer(state, offer)) state.notice = "";
-      else if (state.gold < offer.cost) state.notice = "생선이 부족합니다";
+      else if (state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
       return;
     }
   }

@@ -1883,11 +1883,11 @@ function offerHeadline(s: RunState): string {
   const team = `우리 편 ${owned}/${cap}`;
 
   if (s.offers.every((o) => o === null)) {
-    return `${team} · 다 샀다 — 배치를 다듬고 ${s.wave === 1 ? "시작하자" : "다음 웨이브로"}`;
+    return `${team} · 다 샀어요 — 자리를 다듬고 ${s.wave === 1 ? "가볼까요" : "다음 골목으로"}`;
   }
-  if (owned >= cap) return `${team} · 자리가 없다. 강화하거나 바꿔 넣자`;
-  if (s.wave === 1) return `${team} · 쓰고 시작해도, 그냥 시작해도 된다`;
-  return `${team} · 생선을 쓰거나, 그냥 다음 웨이브로`;
+  if (owned >= cap) return `${team} · 자리가 다 찼어요. 강화하거나 바꿔 넣어요`;
+  if (s.wave === 1) return `${team} · 쓰고 가도, 그냥 가도 괜찮아요`;
+  return `${team} · 생선을 쓸까요, 그냥 갈까요`;
 }
 
 /**
@@ -1929,13 +1929,13 @@ function drawRelicColumn(
 
   if (s.relics.length === 0) {
     // 빈 줄을 그냥 두면 고장으로 보인다. 어디서 얻는지를 적어 둔다.
-    uiText(ctx, "아직 없다", r.x + r.w / 2, r.y + r.h * 0.4, Math.max(11, r.w * 0.075), T.muted, {
+    uiText(ctx, "아직 없어요", r.x + r.w / 2, r.y + r.h * 0.4, Math.max(11, r.w * 0.075), T.muted, {
       align: "center",
       weight: 700,
     });
     uiText(
       ctx,
-      "정예를 넘거나 상점에서",
+      "텃세를 넘으면 하나 남기고 가요",
       r.x + r.w / 2,
       r.y + r.h * 0.4 + Math.max(16, r.w * 0.1),
       Math.max(10, r.w * 0.058),
@@ -2470,7 +2470,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
       ? bossLine
       : info
       ? `${info.name} — ${info.hint}`
-      : `${s.map.stage}번째 여정 · ${step + 1}/${STAGE_STEPS}걸음 — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
+      : `${s.map.stage}번째 골목 · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,
     mapBox(L).y - L.scale * 6,
     L.scale * 13,
@@ -2636,7 +2636,7 @@ function drawBossBanner(
   });
   uiText(
     ctx,
-    sniper ? "미니 보스" : "레이드 보스",
+    sniper ? "골목 파수꾼" : "이 구역 주인",
     r.x + pad * 1.4,
     y + h * 0.72,
     nameSize * 0.72,
@@ -2820,13 +2820,13 @@ function drawGameOver(
   };
 
   if (s.lossReason === "timeout") {
-    line("시간 안에 정리하지 못했습니다 · 화력이 모자랐다", T.enemy, 800);
+    line("시간이 다 됐어요 · 화력이 조금 모자랐어요", T.enemy, 800);
   } else if (s.killer) {
     const hp = Math.round(s.killer.hpFrac * 100);
     line(
       s.killer.boss
-        ? `${s.killer.name}에게 막혔다 · 체력 ${hp}% 남기고`
-        : `${s.killer.name} 무리에게 전멸`,
+        ? `${s.killer.name}에게 막혔어요 · 체력 ${hp}%를 남기고`
+        : `${s.killer.name} 무리에게 당했어요`,
       T.enemy,
       800,
     );
@@ -2933,7 +2933,7 @@ function watchTransitions(s: RunState): void {
     seenSeed = s.seed;
     seenStage = s.map.stage;
     seenBosses = bosses;
-    raise("냥 아레나", "고양이 오토배틀러인데, 보스전은 레이드다");
+    raise("냥 아레나", "집사님, 골목을 지켜주세요");
     return;
   }
   // 보스를 넘은 것이 먼저다. 넘는 순간 여정도 함께 바뀌는 경우가 있는데,
@@ -2941,12 +2941,12 @@ function watchTransitions(s: RunState): void {
   if (bosses > seenBosses) {
     seenBosses = bosses;
     seenStage = s.map.stage;
-    raise("보스 격파", `${s.wave - 1}웨이브까지 살아남았다`);
+    raise("보스를 넘었어요", `${s.wave - 1}웨이브까지 잘 버텼어요`);
     return;
   }
   if (s.map.stage !== seenStage) {
     seenStage = s.map.stage;
-    raise(`${s.map.stage}번째 여정`, "여섯 걸음 끝에 보스가 둘 있다");
+    raise(`${s.map.stage}번째 골목`, "여섯 걸음 안에 보스가 둘 있어요");
   }
 }
 

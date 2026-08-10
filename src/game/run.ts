@@ -311,7 +311,7 @@ export function chooseNode(state: RunState, idx: number): boolean {
     syncStage(state);
     rollOffers(state);
     state.phase = "reward";
-    state.notice = "쉬어 가는 길 — 생선과 다시 뽑기";
+    state.notice = "쉬어 가는 길이에요 — 생선과 다시 뽑기를 챙겼어요";
     return true;
   }
 
@@ -360,13 +360,13 @@ export function syncStage(state: RunState): void {
 export function waveKindInfo(k: WaveKind): { name: string; hint: string } {
   switch (k) {
     case "rush":
-      return { name: "돌격대", hint: "전부 근접이다. 앞줄이 버텨야 한다" };
+      return { name: "달려드는 무리", hint: "전부 발로 달려들어요" };
     case "snipe":
-      return { name: "저격대", hint: "원거리가 많다. 빨리 붙어야 한다" };
+      return { name: "던지는 무리", hint: "멀리서 던져요. 빨리 붙는 게 좋아요" };
     case "boss":
-      return { name: "대장묘", hint: "수는 적지만 한 마리가 아주 강하다" };
+      return { name: "대장묘", hint: "수는 적지만 하나가 아주 무서워요" };
     case "mixed":
-      return { name: "혼성대", hint: "근접과 원거리가 섞여 있다" };
+      return { name: "뒤섞인 무리", hint: "앞뒤가 고루 섞여 있어요" };
   }
 }
 
@@ -924,7 +924,7 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
     if (free < 0) {
       // 살 수 없는 카드를 목록에 남겨두면 무한히 재시도된다. 즉시 걷어낸다.
       state.offers = state.offers.map((o) => (o === offer ? null : o));
-      state.notice = "더 데리고 있을 수 없습니다";
+      state.notice = "자리가 다 찼어요";
       return false;
     }
     state.ally[free] = makeCat(offer.breed, "ally", free);
@@ -973,7 +973,7 @@ export function rerollOffers(state: RunState): boolean {
     return true;
   }
   if (state.gold < REROLL_COST) {
-    state.notice = "생선이 부족합니다";
+    state.notice = "생선이 조금 모자라요";
     return false;
   }
   state.gold -= REROLL_COST;
@@ -984,7 +984,7 @@ export function rerollOffers(state: RunState): boolean {
 
 export function startBattle(state: RunState): void {
   if (livingCats(state.ally).length === 0) {
-    state.notice = "고양이를 최소 한 마리는 배치해야 합니다";
+    state.notice = "한 마리는 세워주세요";
     return;
   }
   applySynergies(state);
@@ -1114,7 +1114,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   applySynergies(state);
   state.phase = "map";
   state.notice = refreshed
-    ? "새 목표가 걸렸습니다"
+    ? "새 목표가 생겼어요"
     : `웨이브 클리어! +${goldForWave(state.wave - 1, kind === "elite" ? "snipe" : kind === "boss" ? "boss" : null)}생선`;
 }
 
