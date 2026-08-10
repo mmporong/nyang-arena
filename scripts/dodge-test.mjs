@@ -112,11 +112,18 @@ console.log("회피 동작 검사\n");
     check("빠져나오는 데 도화선의 절반을 넘기지 않는다", ms <= fuseAtPress / 2,
       `${ms}ms / ${fuseAtPress}ms`);
 
-    // 위치로 비교하면 안 된다. 같은 스텝에 평범한 걸음도 일어나므로 회피가
-    // 옮긴 것과 걸어간 것을 구분할 수 없다. moveLock은 회피만 남기는 흔적이다.
-    const wronglyDodged = outside.filter((c) => c.moveLock > 0);
-    check("구간 밖 고양이는 회피 대상이 아니다", wronglyDodged.length === 0,
-      `${wronglyDodged.length}마리가 회피 처리됨`);
+    // 옮겨졌는지는 `dash`로 본다. 예전에는 moveLock을 흔적으로 썼는데,
+    // 이제 **안전한 고양이도 붙잡는다**(장판 안으로 걸어 들어가지 않게)므로
+    // moveLock은 "옮겨졌다"를 뜻하지 않는다. dash는 옮길 때만 붙는다.
+    const wronglyMoved = outside.filter((c) => c.dash !== null);
+    check("구간 밖 고양이는 자리를 옮기지 않는다", wronglyMoved.length === 0,
+      `${wronglyMoved.length}마리가 옮겨짐`);
+    // 대신 제자리에 붙잡혀야 한다. 안 그러면 1.2초 동안 평소처럼 보스를 향해
+    // 걸어가다 장판 안으로 들어간다 — 계측에서 예고에 걸린 고양이의 22%가
+    // 이 경우였고, 플레이어 입장에서는 분명히 눌렀는데 맞은 것이다.
+    const notHeld = outside.filter((c) => c.moveLock <= 0);
+    check("구간 밖 고양이는 제자리에 붙잡힌다", notHeld.length === 0,
+      `${notHeld.length}마리가 안 잡힘`);
 
     check("회피 횟수가 하나 줄었다", s.dodgeCharges === charges - 1, `${charges} → ${s.dodgeCharges}`);
   }
@@ -297,6 +304,78 @@ console.log("회피 동작 검사\n");
   check("한 프레임에 통째로 건너뛰지 않는다", total < 0.05 || biggest < total * 0.5,
     `한 프레임 최대 ${biggest.toFixed(3)}칸`);
   check("허공에 멈춘 도적이 없다 (양쪽 다 처리된다)", stuck.length === 0, `${stuck.length}마리 멈춤`);
+}
+
+
+// ── 8. 원버튼 계약 ────────────────────────────────────────────
+/**
+ * 화면은 `act` 하나만 보낸다. 세 가지를 묶는다.
+ *  ⓐ 상황에 맞게 갈린다 (붉은 예고 → 흩어짐, 청록 → 뭉침, 취약 창 → 약점 공격)
+ *  ⓑ 차지가 있으면 예고에 아무도 안 맞는다
+ *  ⓒ 연타해도 차지는 하나만 나가고, 예고가 없으면 아예 안 나간다
+ */
+{
+  // ⓐ·ⓑ — 예고가 뜬 순간 act 한 번
+  const r = bossFightWithTelegraph(clustered);
+  if (r) {
+    const { s, boss } = r;
+    const tg = boss.telegraph;
+    s.dodgeCharges = 9; // 계약 검사이므로 자원 부족과 섞지 않는다
+    s.pending.push({ kind: "act" });
+    while (boss.telegraph && s.phase === "battle") stepBattle(s, 16);
+    const caught = s.ally.filter(
+      (c) => c?.alive && (tg.mode === "gather" ? !inTelegraph(tg, c.fx, c.fy) : inTelegraph(tg, c.fx, c.fy)),
+    );
+    check(`원버튼 한 번으로 ${tg.mode === "gather" ? "청록" : "붉은"} 예고를 아무도 안 맞는다`,
+      caught.length === 0, `${caught.length}마리 걸림`);
+  }
+
+  // ⓒ — 예고가 없을 때 연타
+  const r2 = bossFightWithTelegraph(clustered);
+  if (r2) {
+    const { s, boss } = r2;
+    while (boss.telegraph && s.phase === "battle") stepBattle(s, 16);
+    const before = s.dodgeCharges;
+    for (let i = 0; i < 30; i++) { s.pending.push({ kind: "act" }); stepBattle(s, 16); }
+    check("예고가 없으면 연타해도 차지가 안 나간다", s.dodgeCharges === before,
+      `${before} → ${s.dodgeCharges}`);
+  }
+
+  // ⓒ — 한 예고 동안 연타
+  const r3 = bossFightWithTelegraph(clustered);
+  if (r3) {
+    const { s, boss } = r3;
+    s.dodgeCharges = 9;
+    const before = s.dodgeCharges;
+    let n = 0;
+    while (boss.telegraph && s.phase === "battle" && n < 200) {
+      s.pending.push({ kind: "act" }); stepBattle(s, 16); n += 1;
+    }
+    check("한 예고에 연타해도 차지는 하나만 나간다", before - s.dodgeCharges <= 1,
+      `${n}번 눌러 ${before} → ${s.dodgeCharges}`);
+  }
+
+  // 약점 공격은 쿨다운과 무관해야 한다 — 연타가 곧 화력이다
+  const r4 = bossFightWithTelegraph(clustered);
+  if (r4) {
+    const { s } = r4;
+    let guard = 0;
+    while (!s.enemy.some((c) => c?.alive && c.vulnerableMs > 0) && s.phase === "battle" && guard++ < 12000) {
+      const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
+      if (tg) s.pending.push({ kind: "act" });
+      stepBattle(s, 16);
+    }
+    const boss = s.enemy.find((c) => c?.alive && c.radius > 0);
+    if (boss && boss.vulnerableMs > 0) {
+      const before = s.dodgeCharges;
+      let taps = 0;
+      while (boss.vulnerableMs > 0 && s.phase === "battle" && taps < 300) {
+        s.pending.push({ kind: "act" }); stepBattle(s, 16); taps += 1;
+      }
+      check("취약 창에서는 쿨다운 없이 콤보가 쌓인다", boss.strikeCombo >= 5,
+        `콤보 ${boss.strikeCombo} · 차지 ${before} → ${s.dodgeCharges}`);
+    }
+  }
 }
 
 console.log(failed === 0 ? "\n전부 통과 — 회피는 위험 구간만 비우고, 비운 채로 유지된다" : `\n${failed}건 실패`);
