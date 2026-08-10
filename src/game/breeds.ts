@@ -91,6 +91,10 @@ export const BREEDS: readonly Breed[] = [
  * 밸런스는 건드리지 않는다 — `npm run sim` 분포가 그대로인 것으로 확인한다.
  * 새 품종을 끼워 넣거나 순서를 섞으면 그 보증이 깨진다.
  *
+ * `cost`는 전부 0이다. 악몽은 상점에 안 나온다 — 오퍼는 `BREEDS`만 본다.
+ * 처음엔 우리 쪽 값을 그대로 베꼈는데, 그러면 "팔지 않는 것"에 값이 붙어 있어
+ * 계약이 흐려진다. 보스도 같은 이유로 0이다.
+ *
  * 이름은 나쁜 밤에 겪는 것에서 따왔다. 우리 고양이와 같은 `-이` 꼴을 쓰는 것은
  * 같은 세계의 것이기 때문이고, 뜻이 하나같이 불편한 것은 같은 편이 아니기
  * 때문이다.
@@ -108,7 +112,7 @@ export const NIGHTMARE_BREEDS: readonly Breed[] = [
   {
     id: 16, name: "덮침이", color: "gray", cls: "warrior", kind: "melee",
     hp: 190, atk: 16, atkInterval: 640, range: 0.9, moveSpeed: 1.4,
-    manaPerAttack: 28, skill: "shockwave", passive: null, cost: 4,
+    manaPerAttack: 28, skill: "shockwave", passive: null, cost: 0,
   },
 
   // ── 도적 ─────────────────────────────────────────────
@@ -116,13 +120,13 @@ export const NIGHTMARE_BREEDS: readonly Breed[] = [
   {
     id: 19, name: "뜬눈이", color: "black", cls: "rogue", kind: "melee",
     hp: 95, atk: 29, atkInterval: 430, range: 0.8, moveSpeed: 2.4,
-    manaPerAttack: 50, skill: "shadow_strike", passive: null, cost: 4,
+    manaPerAttack: 50, skill: "shadow_strike", passive: null, cost: 0,
   },
   // 지나가며 스치는 것. 때릴수록 빨라진다.
   {
     id: 15, name: "스침이", color: "gray", cls: "rogue", kind: "melee",
     hp: 110, atk: 22, atkInterval: 440, range: 0.8, moveSpeed: 2.1,
-    manaPerAttack: 0, skill: null, passive: "combo", cost: 3,
+    manaPerAttack: 0, skill: null, passive: "combo", cost: 0,
   },
 
   // ── 궁수 ─────────────────────────────────────────────
@@ -130,13 +134,13 @@ export const NIGHTMARE_BREEDS: readonly Breed[] = [
   {
     id: 13, name: "울음이", color: "orange", cls: "archer", kind: "ranged",
     hp: 112, atk: 27, atkInterval: 540, range: 2.8, moveSpeed: 1.2,
-    manaPerAttack: 34, skill: "pierce", passive: null, cost: 4,
+    manaPerAttack: 34, skill: "pierce", passive: null, cost: 0,
   },
   // 이름을 부르는 것. 맞은 것 근처로 튕긴다.
   {
     id: 17, name: "부름이", color: "orange", cls: "archer", kind: "ranged",
     hp: 108, atk: 24, atkInterval: 510, range: 2.8, moveSpeed: 1.2,
-    manaPerAttack: 0, skill: null, passive: "ricochet", cost: 4,
+    manaPerAttack: 0, skill: null, passive: "ricochet", cost: 0,
   },
 
   // ── 마법사 ───────────────────────────────────────────
@@ -144,13 +148,13 @@ export const NIGHTMARE_BREEDS: readonly Breed[] = [
   {
     id: 18, name: "먼지털", color: "cream", cls: "mage", kind: "ranged",
     hp: 98, atk: 24, atkInterval: 660, range: 3.0, moveSpeed: 1.0,
-    manaPerAttack: 34, skill: "ember", passive: null, cost: 4,
+    manaPerAttack: 34, skill: "ember", passive: null, cost: 0,
   },
   // 목덜미에 닿는 찬 숨.
   {
     id: 14, name: "입김이", color: "white", cls: "mage", kind: "ranged",
     hp: 94, atk: 21, atkInterval: 630, range: 2.9, moveSpeed: 1.0,
-    manaPerAttack: 34, skill: "frost_nova", passive: null, cost: 4,
+    manaPerAttack: 34, skill: "frost_nova", passive: null, cost: 0,
   },
 ];
 

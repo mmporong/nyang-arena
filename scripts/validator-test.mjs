@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { EFFECT_RANGE, validateAll } from "../src/validate/synergy-schema.ts";
 import { BOSSES_PER_STAGE, checkStage, isBossStep, makeStage, STAGE_STEPS } from "../src/game/map.ts";
 import { BOSS_BREEDS, bossForIndex } from "../src/game/bosses.ts";
+import { BREEDS, NIGHTMARE_BREEDS } from "../src/game/breeds.ts";
 import { bossIndexAt } from "../src/game/run.ts";
 import { seedRng } from "../src/game/rng.ts";
 
@@ -186,5 +187,41 @@ if (bossFailures.length === 0) {
   console.log(`  OK   1번째 여정: ${sample.join(" → ")}`);
 } else {
   for (const p of bossFailures) console.log(`  실패 ${p}`);
+  process.exit(1);
+}
+
+/**
+ * 악몽 명단이 우리 명단과 index별로 맞물려 있는가.
+ *
+ * `enemyBreedIds`가 `(wave*3 + i*5) % 8`로 뽑으므로, i번째끼리 직업·스탯·스킬이
+ * 같아야 웨이브 구성이 명단을 가르기 전과 동일하게 유지된다. 이 계약은 지금
+ * 주석에만 적혀 있었는데, 주석은 새 품종을 끼워 넣는 사람을 못 막는다.
+ *
+ * `cost`와 `color`는 일부러 뺐다. 둘 다 아군 전용 경로(`rollOffers`,
+ * `boardUnits`)에서만 읽히고 적 쪽에는 쓰이지 않는다 — 악몽은 cost 0이고
+ * 삼색이 자리에는 삼색 스프라이트가 없어 주황이다.
+ */
+const MIRROR = ["cls", "kind", "hp", "atk", "atkInterval", "range", "moveSpeed", "manaPerAttack", "skill", "passive"];
+const mirrorFailures = [];
+if (BREEDS.length !== NIGHTMARE_BREEDS.length) {
+  mirrorFailures.push(`명단 길이가 다르다: 우리 ${BREEDS.length} vs 악몽 ${NIGHTMARE_BREEDS.length}`);
+} else {
+  BREEDS.forEach((a, i) => {
+    const b = NIGHTMARE_BREEDS[i];
+    const diff = MIRROR.filter((k) => a[k] !== b[k]);
+    if (diff.length > 0) {
+      mirrorFailures.push(`${i}번: ${a.name} vs ${b.name} — ${diff.map((k) => `${k}(${a[k]}\u2260${b[k]})`).join(", ")}`);
+    }
+  });
+  const overlap = BREEDS.filter((a) => NIGHTMARE_BREEDS.some((b) => b.id === a.id));
+  if (overlap.length > 0) mirrorFailures.push(`id가 겹친다: ${overlap.map((b) => b.id).join(",")}`);
+}
+
+console.log("\n적·아군 명단 계약");
+if (mirrorFailures.length === 0) {
+  console.log(`  OK   ${BREEDS.length}쌍이 index별로 직업·스탯·스킬 일치, id 겹침 0`);
+  console.log(`  OK   ${BREEDS.map((a, i) => `${a.name}\u2194${NIGHTMARE_BREEDS[i].name}`).join(" ")}`);
+} else {
+  for (const p of mirrorFailures) console.log(`  실패 ${p}`);
   process.exit(1);
 }
