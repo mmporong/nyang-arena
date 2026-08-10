@@ -12,9 +12,9 @@
 
 1. 원본 검토 요청서: `docs/review-brief.pdf` 또는 `docs/review-brief.md`
 2. 각 AI의 검토 답변 전문 — `검토 A`, `검토 B`처럼 출처를 구분한다
-3. 화면 자료: `docs/shots/03-boss-avoid-1280.png`,
-   `docs/shots/04-boss-gather-1280.png`, `docs/shots/05-boss-vulnerable-1280.png`,
-   `docs/shots/02-shop-1280.png`
+3. 화면 자료: `docs/shots/04-boss-avoid.png`,
+   `docs/shots/05-boss-gather.png`, `docs/shots/06-boss-vulnerable.png`,
+   `docs/shots/02-shop.png`
 4. 코드를 읽을 수 있다면 공개 저장소(<https://github.com/mmporong/nyang-arena>)와
    플레이 주소(<https://mmporong.github.io/nyang-arena>)
 
