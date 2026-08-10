@@ -720,11 +720,22 @@ function drawCat(
 
   if (cat.vulnerableMs > 0) drawVulnerableRing(ctx, cx, cy, size, cat);
 
-  // 체력 바 — 셀이 아니라 고양이 크기에 맞춘다
+  /**
+   * 체력 바 — 셀이 아니라 고양이 크기에 맞추고, **머리 위**에 둔다.
+   *
+   * 전에는 발밑(cy + size*0.5)에 있었다. 그런데 `drawList`가 y 오름차순으로
+   * 그리므로 **앞에 선 고양이가 정확히 그 자리를 덮는다** — 난전이 될수록
+   * 뒷줄의 체력이 안 보이고, 하필 발밑 진영 고리와도 겹쳐 둘이 서로를 가렸다.
+   * 머리 위는 반대다. 나보다 앞에 선 것은 화면에서 아래에 있으므로 절대
+   * 올라오지 않는다. 판에서 유일하게 안 가려지는 자리다.
+   *
+   * 두께도 올렸다(0.1 → 0.15). 진영을 색으로 말하는 물건이 손톱만 하면
+   * 색을 읽기 전에 형체부터 안 보인다.
+   */
   const bw = size * 0.88;
-  const bh = Math.max(3, size * 0.1);
+  const bh = Math.max(4, size * 0.15);
   const bx = cx - bw / 2;
-  const by = cy + size * 0.5;
+  const by = cy - size * 0.5 - bh - Math.max(2, size * 0.06);
   const frac = Math.max(0, Math.min(1, cat.hp / cat.maxHp));
 
   roundRect(ctx, { x: bx - 1, y: by - 1, w: bw + 2, h: bh + 2 }, (bh + 2) / 2);
@@ -779,14 +790,16 @@ function drawCat(
     drawClassIcon(ctx, cls, bxc, byc, rad * 1.35, hue);
   }
 
-  // 상태이상 — 기절·빙결은 위에 고리, 지속 피해는 아래에 점
+  // 상태이상 — 기절·빙결은 머리에 고리, 지속 피해는 아래에 점
   if (cat.stun > 0) {
     ctx.save();
     ctx.strokeStyle = T.ranged;
     ctx.lineWidth = Math.max(1.5, size * 0.05);
     ctx.globalAlpha = 0.9;
     ctx.beginPath();
-    ctx.arc(cx, cy - size * 0.56, size * 0.16, 0, Math.PI * 2);
+    // 전에는 머리 **위**(-0.56)였는데 체력 바가 그 자리로 올라왔다. 머리에
+    // 얹으면 겹치지 않고, 오히려 기절한 머리 위를 도는 고리로 읽힌다.
+    ctx.arc(cx, cy - size * 0.28, size * 0.16, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
