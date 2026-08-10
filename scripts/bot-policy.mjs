@@ -10,7 +10,7 @@
  * 축만 바꾼다.
  */
 import { buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
-import { openLanes } from "../src/game/map.ts";
+import { isBossStep, openLanes } from "../src/game/map.ts";
 import { rng } from "../src/game/rng.ts";
 import { livingCats } from "../src/game/types.ts";
 
@@ -169,7 +169,9 @@ export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
     s.phase = "prepare";
     return;
   }
-  const idx = pick(open, row) ?? open[0];
+  // 정책에 **판 상태도 넘긴다.** 안 넘기면 "늘 전투 / 늘 정찰" 같은 눈감은
+  // 정책만 만들 수 있고, 그러면 상황을 읽는 결정을 애초에 잴 수 없다.
+  const idx = pick(open, row, s) ?? open[0];
   if (!chooseNode(s, idx)) chooseNode(s, open[0]);
 }
 
@@ -191,4 +193,30 @@ export const MAP_POLICIES = {
   "정찰 몰빵": (open, row) => open.find((i) => row[i]?.kind === "shop") ?? open[0],
   // 아무 길이나. 지도가 결정인지 아닌지의 기준선이다.
   "무작위": (open) => open[Math.floor(rng() * open.length)] ?? open[0],
+  /**
+   * **판을 읽고 고른다.** 위의 넷은 전부 눈을 감고 있다 — 무엇을 만나든 늘 같은
+   * 종류로 간다. 구매 축도 정확히 이 문제였다: 카드만 보는 정책끼리만 견주다가
+   * "구매에 깊이가 없다"는 판정을 받았고, 로스터를 읽는 정책을 넣자 깊이가
+   * 2.5로 드러났다. 지도만 눈감은 정책으로 남아 있었다.
+   *
+   * 읽는 것은 셋이다.
+   * - **다음이 보스인가** — 그러면 정찰로 여분 회피를 챙긴다. 실측에서 보스전은
+   *   91%가 차지를 0까지 쓴다(모자란 자원이다)
+   * - **유물이 없는가** — 정예를 이기면 그 자리에서 유물을 준다. 유물 축이
+   *   4.3웨이브이므로 초반의 유물 하나는 크다
+   * - 그 밖에는 전투 — 정예는 판이 끝나는 이유의 31%라 이유 없이 갈 곳이 아니다
+   */
+  "읽고 고름": (open, row, s) => {
+    const next = mapStep(s) + 1;
+    const find = (k) => open.find((i) => row[i]?.kind === k);
+    if (isBossStep(next) && s.bonusDodge === 0) {
+      const shop = find("shop");
+      if (shop !== undefined) return shop;
+    }
+    if (s.relics.length === 0) {
+      const elite = find("elite");
+      if (elite !== undefined) return elite;
+    }
+    return find("battle") ?? open[0];
+  },
 };
