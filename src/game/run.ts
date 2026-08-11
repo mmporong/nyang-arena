@@ -189,6 +189,17 @@ export function levelScale(level: number): number {
   return Math.pow(BALANCE.levelScale, level - 1);
 }
 
+/**
+ * 영입 비용. 팀이 판의 수용력을 넘어서면 오른다.
+ *
+ * 강화(`upgradeCost`)와 대칭을 맞춘 것이다 — 한쪽만 지수면 그쪽이 늘 진다.
+ * 근거는 `balance.ts`의 `recruitFreeUpTo` 주석에 있다.
+ */
+export function recruitCost(base: number, owned: number): number {
+  const over = Math.max(0, owned - BALANCE.recruitFreeUpTo);
+  return Math.round(base * Math.pow(BALANCE.recruitGrowth, over));
+}
+
 export function upgradeCost(level: number): number {
   return Math.round(BALANCE.upgradeCostBase * Math.pow(BALANCE.upgradeCostGrowth, level - 1));
 }
@@ -871,10 +882,15 @@ export function rollOffers(state: RunState): void {
     for (const b of pool.slice(0, 2)) {
       offers.push({
         kind: "recruit",
-        cost: b.cost,
+        cost: recruitCost(b.cost, owned.length),
         breed: b,
         label: b.name,
-        sublabel: `${CLASS_LABEL[b.cls]} 데려오기`,
+        // 값이 왜 올랐는지 카드가 말해야 한다. 아무 설명 없이 4가 13이 되면
+        // 그냥 이상한 가격이지, 결정이 아니다.
+        sublabel:
+          owned.length > BALANCE.recruitFreeUpTo
+            ? `${CLASS_LABEL[b.cls]} 데려오기 · 자리가 좁아 비싸요`
+            : `${CLASS_LABEL[b.cls]} 데려오기`,
       });
     }
   } else {
