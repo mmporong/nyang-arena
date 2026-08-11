@@ -225,8 +225,10 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
      * 접힌 구성(세로 화면·폰 가로). 정보가 판 아래에 띠로 쌓인다.
      *
      * 카드는 `offers` 띠에서 **위로만** 자라 보상 단계에 판을 덮는다. 덮어도 되는
-     * 이유는 `main.ts`의 `canRearrange()`가 `prepare`에서만 참이라 그동안 판이
-     * 입력을 안 받기 때문이다. 이 불변식이 깨지면 카드가 탭을 가로챈다.
+     * 이유는 접힌 화면에서 판과 카드를 다 띄우면 셀이 손가락으로 집을 수 없어지기
+     * 때문이다. 예전 근거("보상 단계에는 판이 입력을 안 받는다")는 구매·배치를
+     * 합치면서 사라졌고, 지금은 **`main.ts`의 보상 분기가 카드 영역의 탭을 전부
+     * 삼켜서** 판이 안 잡힌다. 세로줄 구성은 아예 안 덮는다.
      * 단, HUD와 안내 문구는 절대 덮지 않는다. `npm run probe`가 둘 다 검사한다.
      */
     synergyBar = { x: pad, y: bottomY - barH - pad * 0.6, w: w - pad * 2, h: barH };

@@ -323,16 +323,52 @@ canvas.addEventListener("pointerdown", (e) => {
       rerollOffers(state);
       return;
     }
+    /**
+     * 카드 자리는 **빈 자리여도 탭을 삼킨다.**
+     *
+     * 전에는 `offer &&`가 조건에 있어서, 이미 산 자리를 누르면 아래로 흘러
+     * 보드 검사에 닿았다. 화면에는 "샀음" 판이 그려져 있는데 그 위를 누르면
+     * 뒤에 있는 고양이가 잡히는 셈이다. 구매·배치가 한 화면이 되면서 그
+     * 뒤에 실제로 보드가 있게 됐다.
+     */
     const rects = offerRects(layout);
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
+      if (!r || !rectHas(r, x, y)) continue;
       const offer = state.offers[i];
-      if (r && offer && rectHas(r, x, y)) {
-        // buyOffer가 실패 사유별로 notice를 세팅한다. 덮어쓰면 거짓 안내가 뜬다.
-        // (보드 만석인데 "생선이 부족합니다"가 뜨던 버그)
-        if (!buyWithFx(offer) && state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
-        return;
+      // buyOffer가 실패 사유별로 notice를 세팅한다. 덮어쓰면 거짓 안내가 뜬다.
+      // (보드 만석인데 "생선이 부족합니다"가 뜨던 버그)
+      if (offer && !buyWithFx(offer) && state.gold < offer.cost) {
+        state.notice = "생선이 조금 모자라요";
       }
+      return;
+    }
+
+    /**
+     * 카드 사이 틈도 삼킨다 — **접힌 구성에서만** 문제가 된다.
+     *
+     * 접힌 화면에서는 카드 줄이 판 위로 자라므로, 카드 사각형 사이의 빈틈을
+     * 누르면 보이지도 않는 판의 고양이가 잡힌다(667x275에서 패널의 5~18%가
+     * 그런 자리였다). 세로줄 구성에서는 패널이 판을 아예 안 덮으므로 이
+     * 조건이 걸리지 않는다.
+     */
+    if (!layout.columns) {
+      // 카드는 패널 띠 **위로 자란다.** 그래서 패널 사각형만 막으면 카드보다
+      // 위쪽의 틈이 그대로 샜다(667x275에서 0.5%). 카드들을 감싸는 상자까지
+      // 함께 삼킨다.
+      let box = layout.offersPanel ?? null;
+      for (const r of rects) {
+        if (!r) continue;
+        box = box
+          ? {
+              x: Math.min(box.x, r.x),
+              y: Math.min(box.y, r.y),
+              w: Math.max(box.x + box.w, r.x + r.w) - Math.min(box.x, r.x),
+              h: Math.max(box.y + box.h, r.y + r.h) - Math.min(box.y, r.y),
+            }
+          : r;
+      }
+      if (box && rectHas(box, x, y)) return;
     }
   }
 

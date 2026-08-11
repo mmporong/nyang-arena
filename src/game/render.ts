@@ -2204,7 +2204,8 @@ function drawBottomZone(
   }
 
   // 보상 단계에는 카드가 보드 위로 자란다. 그동안 보드는 어차피 만질 수 없으므로
-  // (main.ts canRearrange) 덮어도 되지만, 덮는다는 걸 눈에 보이게 해야 한다.
+  // 덮는다는 걸 눈에 보이게 해야 한다. (세로줄 구성에서는 아예 안 덮는다 —
+  // 구매·배치를 합치면서 그것이 계약이 됐고 npm run probe가 검사한다.)
   const panel: Rect = reward
     ? {
         x: 0,
@@ -2901,7 +2902,21 @@ function drawNotice(
   const size = Math.max(11, r.h * 0.56);
   const cy = r.y + r.h / 2;
 
-  if (s.phase === "prepare") {
+  /**
+   * 이번에 싸울 상대의 성격을 알린다.
+   *
+   * **구매·배치를 합치면서 이 배너가 통째로 사라졌었다.** 조건이
+   * `phase === "prepare"`뿐이었는데 UI가 그 화면을 안 그리게 됐기 때문이다.
+   * 하필 이 게임이 파는 것이 "무엇과 싸울지 알고 산다"이고, 그 '무엇'을 글로
+   * 말해 주는 자리가 여기 하나뿐이었다 — 기능을 합치면서 그 근거를 없앤 셈이다.
+   *
+   * 정찰 칸은 안 싸우므로 뺀다. `s.notice`가 있으면(정예 경고 등) 그쪽이
+   * 이긴다 — 성격은 매 걸음 같은 자리에 뜨지만 안내는 그때만 뜨므로,
+   * 겹치면 드문 쪽이 더 알릴 것이 있다.
+   */
+  const showsKind =
+    s.phase === "prepare" || (s.phase === "reward" && s.nodeKind !== "shop" && !s.notice);
+  if (showsKind) {
     // 웨이브 번호가 아니라 **고른 칸**이 성격을 정한다. `waveKind(s.wave)`를
     // 쓰던 동안 상점을 밟은 판에서 배너가 실제 적과 다른 이름을 달고 있었다.
     const info = waveKindInfo(currentKind(s));
