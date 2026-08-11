@@ -12,7 +12,7 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
-import { affordable, arrangeForRelics, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
+import { arrangeForRelics, makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 300);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
@@ -47,23 +47,16 @@ const POLICIES = {
 function play(pick, seed) {
   const s = newRun(seed);
   const respond = makeBossBot();
+  const shop = { rerolls: 0, lastWave: 0 };
   for (let guard = 0; guard < MAX_WAVE * 4000; guard++) {
     if (s.phase === "gameover") return s.wave;
     if (s.phase === "reward") {
-      let rolls = 0;
-      for (let k = 0; k < 60; k++) {
-        const afford = affordable(s);
-        const choice = afford.length > 0 ? pick(afford) : null;
-        if (choice) {
-          if (!buyOffer(s, choice)) s.offers = s.offers.map((o) => (o === choice ? null : o));
-          continue;
-        }
-        if (rolls < 4 && s.gold >= 12 && rerollOffers(s)) {
-          rolls += 1;
-          continue;
-        }
-        break;
-      }
+      // 구매 정책은 bot-policy의 shopStep 한 곳에만 있다. 이 파일도 사본을
+      // 갖고 있었고, 그 사본이 `rolls < 4 && s.gold >= 12`로 재추첨을 막아
+      // **무료 재추첨을 놓쳤다** — 무료분은 생선이 필요 없는데 생선 조건이
+      // 먼저 걸린다. 상점 칸의 보상이 조용히 사라지는 자리였다.
+      // 실험 대상인 몰빵 정책만 `pick`으로 끼워 넣는다.
+      if (shopStep(s, shop, pick) !== "leave") continue;
       leaveShop(s);
       continue;
     }

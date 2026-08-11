@@ -4,6 +4,7 @@ import { rng } from "./rng.ts";
 import {
   BOARD_COLS,
   BOARD_ROWS,
+  ENEMY_FRONT_FX,
   cellRow,
   cellToField,
   fieldDistance,
@@ -828,8 +829,34 @@ function separate(cats: Cat[]): void {
       a.fy -= ny * overlap * aShare;
       b.fx += nx * overlap * bShare;
       b.fy += ny * overlap * bShare;
+      clampToField(a);
+      clampToField(b);
     }
   }
+}
+
+/**
+ * 판 안으로 묶는다.
+ *
+ * 밀어내기에는 경계가 없었다. 300판 43만 스텝을 훑으니 **1106번** 판 밖으로
+ * 나갔고, 최대 1.4칸까지 벗어났다 — 아군이 적 뒷줄 너머 `fx 11.15`, 적이 우리
+ * 뒷줄 너머 `fx -1.43`, 세로도 `-0.75 ~ 4.84`였다. 화면에서는 고양이가 판
+ * 테두리 밖에 서 있는 것으로 보인다.
+ *
+ * 한 판을 눈으로 봐서는 안 걸린다. 근접이 몰리는 순간에만 생기고, 밀린 뒤
+ * 다시 걸어 들어오므로 몇 프레임 만에 사라진다. 스텝을 수십만 번 보는 검사가
+ * 아니면 못 잡는 종류다(`npm run invariants`).
+ *
+ * 걸음(`stepToward`)은 목표를 향해서만 가므로 판을 안 벗어난다 — 새는 곳은
+ * 밀어내기뿐이라 여기서만 묶는다. 보스는 반경이 있어 중심이 가장자리에 서면
+ * 몸이 걸치지만, 보스는 밀리지 않으므로(위의 `aFixed`) 이 함수를 안 탄다.
+ */
+function clampToField(c: Cat): void {
+  const maxX = ENEMY_FRONT_FX + BOARD_COLS - 1;
+  if (c.fx < 0) c.fx = 0;
+  else if (c.fx > maxX) c.fx = maxX;
+  if (c.fy < 0) c.fy = 0;
+  else if (c.fy > BOARD_ROWS - 1) c.fy = BOARD_ROWS - 1;
 }
 
 function tickEffects(cats: (Cat | null)[], dt: number): void {

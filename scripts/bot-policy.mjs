@@ -68,13 +68,17 @@ export function affordable(s) {
  * 같기를 바라는 대신 **부를 수 있는 것 하나로** 만든다.
  *
  * @param st 런 하나 동안 유지되는 상태. `{ rerolls: 0, lastWave: 0 }`로 시작한다.
+ * @param choose 살 수 있는 것 중에서 고르는 함수. 안 주면 가장 비싼 것(기준 봇).
+ *   유물 축처럼 **구매 정책 자체가 실험 대상**인 하네스가 이걸로 자기 정책을
+ *   끼워 넣는다 — 그래야 재추첨 처리를 또 베끼지 않는다.
  * @returns "bought" 샀다 · "rerolled" 다시 뽑았다 · "leave" 더 할 일이 없다
  */
-export function shopStep(s, st) {
+export function shopStep(s, st, choose = null) {
   const byCost = (a, b) =>
     (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
 
-  const pick = [...affordable(s)].sort(byCost)[0];
+  const aff = affordable(s);
+  const pick = choose ? (aff.length > 0 ? choose(aff) : null) : [...aff].sort(byCost)[0];
   if (pick) {
     const before = s.offers.length;
     // 구매 실패한 카드가 목록에 남으면 같은 카드를 무한히 재시도하게 된다.
