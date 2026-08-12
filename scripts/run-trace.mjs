@@ -12,7 +12,7 @@
 import { walkMap, leaveShop } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, startBattle, unitCap, relicActive, currentKind } from "../src/game/run.ts";
-import { livingCats } from "../src/game/types.ts";
+import { livingCats, CLASS_ORDER, CLASS_SHORT, zeroByClass } from "../src/game/types.ts";
 
 const SEED = Number(process.argv[2] ?? 7);
 const DODGE = process.argv.includes("--dodge");
@@ -40,9 +40,12 @@ const buyPhase = () => {
 
 const team = () => {
   const cats = livingCats(s.ally);
-  const by = { warrior: 0, rogue: 0, archer: 0, mage: 0 };
+  // 직업 목록을 손으로 적지 않는다. `tsconfig.json`의 include가 `src`뿐이라
+  // **여기는 tsc가 안 본다** — 직업을 늘려도 컴파일 오류가 안 나고 새 직업만
+  // 조용히 이 줄에서 사라진다. types.ts에서 받아 쓰면 그럴 수 없다.
+  const by = zeroByClass();
   for (const c of cats) by[c.breed.cls] += 1;
-  return `전${by.warrior} 도${by.rogue} 궁${by.archer} 법${by.mage}`;
+  return CLASS_ORDER.map((k) => `${CLASS_SHORT[k]}${by[k]}`).join(" ");
 };
 
 // 판은 지도에서 시작한다. 길을 골라야 상대가 정해지고, 그 상대를 보고 산다.

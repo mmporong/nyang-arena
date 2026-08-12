@@ -72,6 +72,61 @@ export const BREEDS: readonly Breed[] = [
     hp: 94, atk: 21, atkInterval: 630, range: 2.9, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "frost_nova", passive: null, cost: 4,
   },
+  // ── 직업당 세 번째 ───────────────────────────────────
+  //
+  // **색을 갈아 만든 넷이다.** 원본 시트에 고양이가 20마리뿐이고 우리 8 ·
+  // 악몽 8 · 보스 4로 이미 다 썼다. 새 아트를 사는 대신 있는 그림의 밝기만
+  // 남기고 색을 갈아끼웠다(`scripts/recolor-sprites.py`). 청록·보라·연두·
+  // 분홍은 앞의 여덟에 없는 색이라 난전에서 헷갈리지 않는다.
+  //
+  // 넷 다 **직업의 빈자리**를 맡는다. 전사 둘이 광역이라 셋째는 지키는 쪽,
+  // 도적 둘이 마무리·연타라 셋째는 끊는 쪽, 궁수 둘이 직선·도탄이라 셋째는
+  // 흩뿌리는 쪽, 마법사 둘이 지속피해·제어라 셋째는 살리는 쪽이다.
+  {
+    id: 21, name: "물결이", color: "teal", cls: "warrior", kind: "melee",
+    hp: 170, atk: 14, atkInterval: 600, range: 0.85, moveSpeed: 1.5,
+    manaPerAttack: 28, skill: "guard", passive: null, cost: 4,
+  },
+  {
+    id: 22, name: "보라돌이", color: "purple", cls: "rogue", kind: "melee",
+    hp: 100, atk: 25, atkInterval: 450, range: 0.8, moveSpeed: 2.2,
+    manaPerAttack: 50, skill: "gouge", passive: null, cost: 4,
+  },
+  {
+    id: 23, name: "풀잎이", color: "green", cls: "archer", kind: "ranged",
+    hp: 105, atk: 22, atkInterval: 520, range: 2.7, moveSpeed: 1.2,
+    manaPerAttack: 34, skill: "volley", passive: null, cost: 3,
+  },
+  {
+    id: 24, name: "복숭이", color: "pink", cls: "mage", kind: "ranged",
+    hp: 92, atk: 18, atkInterval: 680, range: 2.9, moveSpeed: 1.0,
+    manaPerAttack: 34, skill: "mend", passive: null, cost: 3,
+  },
+  // ── 소환사 ───────────────────────────────────────────
+  //
+  // 다섯 번째 직업. **자기 화력은 여덟 직업 중 가장 낮고(DPS 22~25) 대신
+  // 판에 몸을 더 내보낸다.** 뒷줄에 서서 앞에 몸을 세우는 그림이라 원거리다.
+  //
+  // 소환 시스템은 유물(분신 부적·새끼 바구니)로만 닿을 수 있었다. 그쪽은
+  // 스탯 유물과 다른 축을 만들려는 장치라 화력이 거의 없는 반면, 이쪽은
+  // 직업의 본체다 — 불러낸 몸이 곧 이 직업의 화력이자 내구다.
+  //
+  // 마나는 원거리와 같은 34(3타)다. 소환이 늦으면 이미 진 뒤에 나온다.
+  {
+    id: 29, name: "부르미", color: "navy", cls: "summoner", kind: "ranged",
+    hp: 96, atk: 16, atkInterval: 700, range: 2.6, moveSpeed: 1.0,
+    manaPerAttack: 34, skill: "swarm", passive: null, cost: 4,
+  },
+  {
+    id: 30, name: "깃들이", color: "gold", cls: "summoner", kind: "ranged",
+    hp: 102, atk: 18, atkInterval: 720, range: 2.5, moveSpeed: 1.0,
+    manaPerAttack: 34, skill: "bulwark", passive: null, cost: 4,
+  },
+  {
+    id: 31, name: "메아리", color: "crimson", cls: "summoner", kind: "ranged",
+    hp: 90, atk: 15, atkInterval: 680, range: 2.7, moveSpeed: 1.0,
+    manaPerAttack: 34, skill: "echo", passive: null, cost: 3,
+  },
 ];
 
 /**
@@ -85,11 +140,24 @@ export const BREEDS: readonly Breed[] = [
  * 시트에 20종이 있는데 우리가 8종, 보스가 9~12번을 쓰고 13~20번이 놀고 있었다.
  * 정확히 여덟 장이 남아서 1:1로 갈라진다.
  *
- * **순서가 곧 계약이다.** `enemyBreedIds`는 `(wave*3 + i*5) % 8`로 뽑으므로,
- * 이 배열의 i번째가 `BREEDS`의 i번째와 직업·스탯·스킬이 같아야 웨이브 구성이
- * 예전과 완전히 동일하게 유지된다. 지금 바꾸는 것은 **누구로 보이는가**뿐이고
- * 밸런스는 건드리지 않는다 — `npm run sim` 분포가 그대로인 것으로 확인한다.
- * 새 품종을 끼워 넣거나 순서를 섞으면 그 보증이 깨진다.
+ * **순서가 곧 계약이다.** `enemyBreedIds`는 `(wave*3 + i*5) % 길이`로 뽑으므로,
+ * 이 배열의 i번째가 `BREEDS`의 i번째와 직업·스탯·스킬이 같아야 한다. 그래야
+ * 적이 우리와 같은 규칙의 고양이라는 것이 유지되고, 웨이브 구성이 그림이
+ * 아니라 수치로 결정된다. `npm test`의 짝 계약이 이걸 단언한다.
+ *
+ * **길이를 바꾸면 웨이브 구성이 통째로 바뀐다.** 8에서 12로 늘렸을 때
+ * `(wave*3 + i*5) % 12`가 완전히 다른 순열을 내므로, 밸런스가 그대로일
+ * 것이라고 가정하지 말고 `npm run sim`으로 다시 잴 것.
+ *
+ * **소환사는 여기 없다.** 우리 쪽 열다섯 중 뒤의 셋(소환사)에는 짝이 없다 —
+ * 악몽은 형체가 없어서 무엇을 불러낼 수가 없다는 설정이고, 실제로도 그래야
+ * 했다. 적에게 소환사를 주니 **웨이브 성격이 지워졌다**: 돌격이든 저격이든
+ * 소환사가 섞이면 "몸 여럿과 싸우는 판"으로 수렴해, 팀 성격이 웨이브 성격에
+ * 반응할 여지가 사라진다. 궁합이 8.3%p에서 4.1%p로 내려갔고(잡음 폭 1.1),
+ * 적에게서 소환사만 빼자 8.1·8.5로 돌아왔다.
+ *
+ * 그래서 **소환은 플레이어만 쓰는 기술**이다. 짝 계약은 앞의 열둘에만
+ * 적용되고, `npm test`가 "남는 것은 정확히 소환사뿐"임을 함께 단언한다.
  *
  * `cost`는 전부 0이다. 악몽은 상점에 안 나온다 — 오퍼는 `BREEDS`만 본다.
  * 처음엔 우리 쪽 값을 그대로 베꼈는데, 그러면 "팔지 않는 것"에 값이 붙어 있어
@@ -155,6 +223,30 @@ export const NIGHTMARE_BREEDS: readonly Breed[] = [
     id: 14, name: "입김이", color: "white", cls: "mage", kind: "ranged",
     hp: 94, atk: 21, atkInterval: 630, range: 2.9, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "frost_nova", passive: null, cost: 0,
+  },
+  // ── 직업당 세 번째 (짝) ──────────────────────────────
+  //
+  // 위 넷과 **직업·스탯·스킬이 같고 그림만 다르다.** 바탕도 악몽 쪽
+  // 스프라이트를 갈아 썼으므로 우리 고양이와 겹치지 않는다.
+  {
+    id: 25, name: "진땀이", color: "teal", cls: "warrior", kind: "melee",
+    hp: 170, atk: 14, atkInterval: 600, range: 0.85, moveSpeed: 1.5,
+    manaPerAttack: 28, skill: "guard", passive: null, cost: 0,
+  },
+  {
+    id: 26, name: "멍울이", color: "purple", cls: "rogue", kind: "melee",
+    hp: 100, atk: 25, atkInterval: 450, range: 0.8, moveSpeed: 2.2,
+    manaPerAttack: 50, skill: "gouge", passive: null, cost: 0,
+  },
+  {
+    id: 27, name: "곰팡이", color: "green", cls: "archer", kind: "ranged",
+    hp: 105, atk: 22, atkInterval: 520, range: 2.7, moveSpeed: 1.2,
+    manaPerAttack: 34, skill: "volley", passive: null, cost: 0,
+  },
+  {
+    id: 28, name: "열꽃이", color: "pink", cls: "mage", kind: "ranged",
+    hp: 92, atk: 18, atkInterval: 680, range: 2.9, moveSpeed: 1.0,
+    manaPerAttack: 34, skill: "mend", passive: null, cost: 0,
   },
 ];
 

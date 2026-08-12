@@ -78,7 +78,9 @@ export function shopStep(s, st, choose = null) {
     (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
 
   const aff = affordable(s);
-  const pick = choose ? (aff.length > 0 ? choose(aff) : null) : [...aff].sort(byCost)[0];
+  // 정책에 상태도 넘긴다. '몇 마리 데리고 있나'를 못 보면 보유 수를
+  // 조건으로 삼는 유물(분신 부적)을 쓰는 정책 자체를 쓸 수 없다.
+  const pick = choose ? (aff.length > 0 ? choose(aff, s) : null) : [...aff].sort(byCost)[0];
   if (pick) {
     const before = s.offers.length;
     // 구매 실패한 카드가 목록에 남으면 같은 카드를 무한히 재시도하게 된다.

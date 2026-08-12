@@ -12,6 +12,7 @@ import {
   surfaceDistance,
   MANA_MAX,
   type Cat,
+  type ClassKind,
   type Intervention,
   type Side,
   type Telegraph,
@@ -28,7 +29,17 @@ import {
   SKILLS,
   type SkillResult,
 } from "./skills.ts";
-import { bossRampFor, currentKind, finishWave, type RunState } from "./run.ts";
+import {
+  bossRampFor,
+  currentKind,
+  finishWave,
+  KITTEN,
+  makeSummon,
+  MIRROR_IMAGE,
+  relicActive,
+  type RunState,
+  type SummonSpec,
+} from "./run.ts";
 
 /** 고정 시뮬레이션 스텝. */
 export const SIM_STEP_MS = 100;
@@ -93,6 +104,8 @@ export interface DamagePop {
   text: string;
   life: number;
   crit: boolean;
+  /** 회복이면 참. 색이 갈려야 깎인 것과 헷갈리지 않는다. */
+  heal?: boolean;
   /**
    * 같은 프레임에 뜬 몇 번째 숫자인가.
    *
@@ -227,7 +240,7 @@ export function skillName(cat: Cat): string {
   return "";
 }
 
-function pop(target: Cat, text: string, crit: boolean): void {
+function pop(target: Cat, text: string, crit: boolean, heal = false): void {
   if (damagePops.length > 16) damagePops.shift();
   // 같은 자리에 아직 떠 있는 숫자를 센다. 같은 프레임만 세면 보스처럼 여럿에게
   // 연달아 맞는 대상에서 전부 step 0으로 겹쳤다(실제로 그랬다 — 보스 털 위에
@@ -245,6 +258,7 @@ function pop(target: Cat, text: string, crit: boolean): void {
     text,
     life: POP_LIFE_MS,
     crit,
+    heal,
     step,
   });
 }
@@ -284,22 +298,29 @@ function damage(target: Cat, amount: number, crit: boolean): void {
     target.shield -= absorbed;
     left -= absorbed;
   }
+  /**
+   * 피격 반응은 **보호막이 전부 막았을 때도** 일어난다.
+   *
+   * 전에는 흡수되면 여기서 바로 빠져나갔다. 그때는 보호막을 거는 코드가
+   * 아예 없어서(감싸기가 처음이다) 드러나지 않았을 뿐이다. 그대로 두면
+   * **보호막을 받은 전사는 피격 마나가 안 차서** 스킬이 늦어진다 — 지키는
+   * 축을 넣었더니 전사 마나 엔진이 꺼지는, 아무도 의도하지 않은 상호작용이다.
+   *
+   * 전사 피격 마나 자체의 근거: 측정에서 전사 스킬이 원거리의 3~6분의
+   * 1밖에 안 나갔다. 4번 때려야 하는데 걸어가는 시간까지 있어서다. TFT도
+   * 탱커에게 피격 마나를 주는데, 앞에서 두들겨 맞는 역할이 곧 마나 엔진이
+   * 되므로 정체성과도 맞는다. 쓸 스킬이 없으면 채워 봐야 쓸 데가 없다 —
+   * 보스는 전사이면서 스킬이 없어서 마나바가 가득 찬 채로 영원히 떠 있었다.
+   */
+  target.flash = FLASH_MS;
+  if (target.breed.cls === "warrior" && target.breed.skill) {
+    target.mana = Math.min(MANA_MAX, target.mana + MANA_ON_HIT_WARRIOR);
+  }
   if (left <= 0) {
     pop(target, "막힘", false);
     return;
   }
   target.hp -= left;
-  target.flash = FLASH_MS;
-
-  // 전사는 맞을 때도 마나가 찬다.
-  // 측정해 보니 전사 스킬이 원거리의 3~6분의 1밖에 안 나갔다. 4번 때려야 하는데
-  // 걸어가는 시간까지 있어서다. TFT도 탱커에게 피격 마나를 주는데, 앞에서
-  // 두들겨 맞는 역할이 곧 마나 엔진이 되므로 정체성과도 맞는다.
-  // 쓸 스킬이 없으면 채워 봐야 쓸 데가 없다. 보스는 전사이면서 스킬이 없어서
-  // 마나바가 가득 찬 채로 영원히 떠 있었다.
-  if (target.breed.cls === "warrior" && target.breed.skill) {
-    target.mana = Math.min(MANA_MAX, target.mana + MANA_ON_HIT_WARRIOR);
-  }
   pop(target, String(left), crit);
   if (target.hp <= 0) {
     target.hp = 0;
@@ -318,8 +339,76 @@ function damage(target: Cat, amount: number, crit: boolean): void {
  * 결과 계산은 skills.ts가 하고 여기서는 적용과 연출만 한다. 그래야 브라우저와
  * 헤드리스 시뮬이 같은 판정을 쓴다.
  */
-function castSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): void {
+/**
+ * 스킬을 쓴다. **아무 일도 못 하면 쓰지 않고 거짓을 돌려준다.**
+ *
+ * 핥아주기는 전원 만피면 회복할 대상이 없다. 그런데 예전에는 그래도
+ * 마나를 0으로 밀고 그 틱의 평타까지 건너뛰었다 — 발동할수록 손해였다.
+ * 다른 일곱 스킬도 대상이 없을 수 있으므로 한 자리에서 막는다.
+ */
+function castSkill(
+  state: RunState,
+  caster: Cat,
+  target: Cat,
+  foes: Cat[],
+  allies: Cat[],
+): boolean {
   const res = runSkill(caster, target, foes, allies);
+  if (
+    res.hits.length === 0 &&
+    res.stuns.length === 0 &&
+    res.dots.length === 0 &&
+    res.heals.length === 0 &&
+    res.shields.length === 0 &&
+    res.summons.length === 0
+  ) {
+    return false;
+  }
+
+  /**
+   * **소환을 먼저 시도한다.** 상한에 막혀 한 마리도 못 내면 그 스킬은 아무
+   * 일도 안 한 것이고, 마나를 태우기 전에 그것을 알아야 한다. 위의 빈 결과
+   * 검사는 `runSkill`의 **의도**만 보므로 여기까지 와야 **결과**를 안다.
+   */
+  const born: Cat[] = [];
+  for (const { spec, from } of res.summons) {
+    /**
+     * 본뜰 원형.
+     *
+     * `"fallen"`이면 **쓰러진 우리 편**을 본떠 그 자리에 세운다. 살아 있는
+     * 것 중에 고르면 그냥 복제가 되어 되살린다는 성격이 사라진다. 아직
+     * 아무도 안 쓰러졌으면 시전자를 본뜬다.
+     *
+     * 동점은 uid로 갈라 헤드리스 시뮬과 브라우저가 같은 것을 고르게 한다.
+     */
+    let model = caster;
+    if (from === "fallen") {
+      const board = caster.side === "ally" ? state.ally : state.enemy;
+      const fallen = board
+        .filter((c): c is Cat => c !== null && !c.alive)
+        .sort((a, b) => b.maxHp - a.maxHp || (a.uid < b.uid ? -1 : 1))[0];
+      if (fallen) model = fallen;
+    }
+    const made = summon(state, caster, spec, model);
+    if (made === 0) continue;
+    for (const sm of state.summons.slice(-made)) {
+      // 버팀목은 세우면서 보호막까지 두른다. 시전 시점에는 그 몸이 아직
+      // 없으므로 `runSkill`의 `shields`로는 표현할 수 없다.
+      if (spec.shieldFrac) sm.shield = Math.max(sm.shield, Math.round(sm.maxHp * spec.shieldFrac));
+      born.push(sm);
+    }
+  }
+  // 소환만 하는 스킬이 한 마리도 못 냈으면 마나를 안 태우고 평타로 떨어진다.
+  if (
+    born.length === 0 &&
+    res.hits.length === 0 &&
+    res.stuns.length === 0 &&
+    res.dots.length === 0 &&
+    res.heals.length === 0 &&
+    res.shields.length === 0
+  ) {
+    return false;
+  }
 
   caster.mana = res.manaRefund;
   caster.castFlash = 700;
@@ -341,7 +430,7 @@ function castSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): void {
       radius: 0.5,
       angle: Math.random() * Math.PI * 2,
       life: 260,
-      color: CLASS_FX[caster.breed.cls] ?? "#FFFFFF",
+      color: CLASS_FX[caster.breed.cls],
     });
   }
   for (const s of res.stuns) {
@@ -352,19 +441,82 @@ function castSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): void {
     if (!d.target.alive) continue;
     d.target.dot = { dps: d.dps, remain: d.ms };
   }
+  for (const h of res.heals) {
+    if (!h.target.alive) continue;
+    // 최대치를 넘지 않는다. 넘게 두면 불변식(`체력이 최대를 넘는다`)이 깨진다.
+    const before = h.target.hp;
+    h.target.hp = Math.min(h.target.maxHp, h.target.hp + h.amount);
+    const got = Math.round(h.target.hp - before);
+    // 0이면 띄우지 않는다. 만피인 고양이 위로 "+0"이 뜨면 스킬이 헛돈 것처럼 보인다.
+    if (got > 0) {
+      pop(h.target, `+${got}`, false, true);
+      pushFx({
+        kind: "ring",
+        fx: h.target.fx,
+        fy: h.target.fy,
+        tx: h.target.fx,
+        ty: h.target.fy,
+        radius: 0.75,
+        angle: 0,
+        life: 520,
+        color: "#8FD9A8",
+      });
+    }
+  }
+  for (const sh of res.shields) {
+    if (!sh.target.alive) continue;
+    // 쌓지 않고 **더 큰 쪽으로 덮는다.** 쌓이면 전사 둘이 감싸기를 번갈아 써서
+    // 보호막만으로 판을 버티게 된다.
+    sh.target.shield = Math.max(sh.target.shield, sh.amount);
+    pushFx({
+      kind: "ring",
+      fx: sh.target.fx,
+      fy: sh.target.fy,
+      tx: sh.target.fx,
+      ty: sh.target.fy,
+      radius: 0.68,
+      angle: 0,
+      life: 460,
+      color: "#9ED0F0",
+    });
+  }
+
+  for (const sm of born) {
+    pushFx({
+      kind: "ring",
+      fx: sm.fx,
+      fy: sm.fy,
+      tx: sm.fx,
+      ty: sm.fy,
+      radius: 0.7,
+      angle: 0,
+      life: 480,
+      color: CLASS_FX.summoner,
+    });
+  }
+
+  return true;
 }
 
-/** 직업별 이펙트 색 */
-const CLASS_FX: Record<string, string> = {
+/**
+ * 직업별 이펙트 색.
+ *
+ * **`Record<string, string>`이 아니라 `Record<ClassKind, string>`이다.**
+ * 전자였을 때는 직업을 늘려도 타입 검사가 통과하고, 새 직업의 스킬만 조용히
+ * 흰색(`?? "#FFFFFF"`)으로 나왔다. 색이 빠진 것을 화면에서 알아채기 전까지
+ * 아무도 모른다. 지금은 여기를 안 채우면 컴파일이 안 된다.
+ */
+const CLASS_FX: Record<ClassKind, string> = {
   warrior: "#FF9E5A",
   rogue: "#D98BE8",
   archer: "#FFC46B",
   mage: "#8FD4FF",
+  summoner: "#8E9BFF",
 };
 
 /** 스킬마다 다른 연출을 뿌린다. 무엇이 터졌는지 색과 모양으로 구분되게. */
 function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
-  const color = CLASS_FX[caster.breed.cls] ?? "#FFFFFF";
+  const color = CLASS_FX[caster.breed.cls];
   const base = { fx: caster.fx, fy: caster.fy, tx: target.fx, ty: target.fy, angle: 0, color };
 
   switch (caster.breed.skill) {
@@ -499,7 +651,7 @@ function ricochet(attacker: Cat, target: Cat, foes: Cat[]): void {
       radius: 0.12,
       angle: 0,
       life: 220,
-      color: CLASS_FX["archer"] ?? "#FFC46B",
+      color: CLASS_FX.archer,
     });
     damage(f, attacker.atk * RICOCHET_MUL, false);
   }
@@ -546,8 +698,10 @@ function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | nu
   const risky = (fx: number, fy: number) => zones.some((z) => inTelegraph(z, fx, fy));
   if (!risky(cat.fx, cat.fy)) return null; // 안전하면 움직이지 않는다
 
+  // 오른쪽 상한이 없었다. 판 끝(fx 11.8)에 선 고양이가 오른쪽으로 피하면
+  // 12.25에 착지했다 — 세로와 왼쪽만 막혀 있었다.
   const onBoard = (fx: number, fy: number) =>
-    fy >= -0.3 && fy <= BOARD_ROWS - 1 + 0.3 && fx >= -0.3;
+    fy >= -0.3 && fy <= BOARD_ROWS - 1 + 0.3 && fx >= -0.3 && fx <= FIELD_MAX_FX + 0.3;
 
   for (let ring = 1; ring <= 9; ring++) {
     const r = ring * 0.55;
@@ -609,7 +763,9 @@ function doGather(state: RunState): boolean {
   if (!target) return false;
 
   let moved = false;
-  for (const c of livingCats(state.ally)) {
+  // 소환수도 함께 움직인다. 분신만 장판에 남아 녹으면 화면에서는
+  // "눌렀는데 안 피했다"로 읽힌다 — 어느 것이 분신인지 사람은 모른다.
+  for (const c of allyBodies(state)) {
     // 흩어짐과 같은 이유. 달리는 중인 고양이는 이미 대답한 것이다.
     if (c.dash) continue;
     if (inTelegraph(target, c.fx, c.fy)) continue;
@@ -692,6 +848,9 @@ function tickDashes(cats: Cat[], dt: number): void {
       c.fx = c.dash.tx;
       c.fy = c.dash.ty;
       c.dash = null;
+      // 착지는 모든 대시(회피·뭉침·도적 도약·소환)가 지나는 길목이다.
+      // 목표를 고르는 쪽을 하나 고쳐도 다른 경로가 또 새므로 여기서도 막는다.
+      clampToField(c);
     } else {
       c.fx += (dx / d) * travel;
       c.fy += (dy / d) * travel;
@@ -733,7 +892,7 @@ function doDodge(state: RunState): boolean {
   // 남은 도화선. 여럿이면 가장 먼저 터지는 것에 맞춘다.
   const fuse = Math.min(...zones.map((z) => z.fuse));
   let moved = false;
-  for (const c of livingCats(state.ally)) {
+  for (const c of allyBodies(state)) {
     // 이미 안전한 자리로 달리는 중이면 다시 세지 않는다.
     //
     // 대시는 100~370ms 걸리는데 그동안 고양이는 아직 장판 안에 있다. 그래서
@@ -795,6 +954,112 @@ function stepToward(cat: Cat, target: Cat, stepMs: number): void {
 }
 
 /** 같은 편끼리 뭉치지 않도록 살짝 밀어낸다. 길찾기가 아니라 겹침 방지다. */
+/**
+ * 판 위에 실제로 서 있는 아군 전부 — 진짜 고양이 + 소환수.
+ *
+ * **전투 계산만 이걸 쓴다.** 보유 한도·강화 대상·시너지 집계·유물 조건·전멸
+ * 판정은 계속 `livingCats(state.ally)`를 쓴다. 소환수가 그쪽에 섞이면 분신
+ * 둘이 '근접 3마리' 유물을 켜고, 주인이 다 죽어도 전멸이 아니게 된다.
+ */
+function allyBodies(state: RunState): Cat[] {
+  return bodies(state, "ally");
+}
+
+/**
+ * 적 쪽 몸 전부.
+ *
+ * **지금 악몽 명단에는 소환사가 없어서 적 소환수는 생기지 않는다**
+ * (`breeds.ts` 참고 — 적이 소환하면 웨이브 성격이 지워졌다). 그래도 진영을
+ * 갈라 두는 이유는, 이 함수가 없으면 나중에 적에게 소환을 주는 순간 적
+ * 소환수가 우리 편으로 세어지기 때문이다. 방어는 남기고 근거만 바로잡는다.
+ */
+function foeBodies(state: RunState): Cat[] {
+  return bodies(state, "enemy");
+}
+
+/**
+ * 한쪽 진영의 몸 전부 — 보드 위 고양이 + 그 진영의 소환수.
+ *
+ * **`side`로 거르는 것이 핵심이다.** `state.summons`는 양쪽 소환수를 함께
+ * 담는다(전투가 끝나면 통째로 비우므로 배열을 둘로 나눌 이유가 없다).
+ * 거르지 않으면 적이 부른 몸이 우리 편으로 세어져 **적의 소환수가 우리를
+ * 위해 싸운다** — 적에게 소환사를 줘 봤을 때 불변식 검사가 300판에서
+ * 11417번 잡았다. 그 실험은 되돌렸지만(궁합이 무너졌다) 필터는 남겨 둔다.
+ */
+function bodies(state: RunState, side: Side): Cat[] {
+  const out = livingCats(side === "ally" ? state.ally : state.enemy);
+  for (const s of state.summons) if (s.alive && s.side === side) out.push(s);
+  return out;
+}
+
+/**
+ * 소환수의 수명을 깎고, 다한 것을 치운다.
+ *
+ * 죽은 것도 여기서 걷어낸다 — 배열에 남겨 두면 `allyBodies`가 매 스텝
+ * 걸러내야 하고, 전투가 길어질수록 시체가 쌓인다.
+ */
+function tickSummons(state: RunState, dtMs: number): void {
+  const list = state.summons;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const s = list[i];
+    if (!s) continue;
+    if (s.summon) {
+      s.summon.lifeMs -= dtMs;
+      if (s.summon.lifeMs <= 0) s.alive = false;
+    }
+    if (!s.alive) list.splice(i, 1);
+  }
+}
+
+/**
+ * 소환수를 불러 판에 세운다.
+ *
+ * **`caster`와 `model`을 갈라 둔 것이 핵심이다.**
+ * - `caster`: 부르는 주체. 살아 있어야 한다.
+ * - `model`: 본뜰 원형. 스탯·그림·자리를 여기서 가져온다. **죽어 있어도 된다.**
+ *
+ * 전에는 인자가 하나여서 두 뜻을 겸했고, 맨 앞의 `!alive` 가드가 되살리기를
+ * 통째로 막았다 — 되살리기는 원형이 시체일 때만 의미가 있는데, 정확히 그
+ * 경우에만 0마리를 냈다(300시드에서 시전 392회 · 소환 0). 마나와 그 틱의
+ * 평타까지 태우면서 아무 일도 안 했고, 어떤 검사도 "소환 스킬이 실제로 몸을
+ * 냈는가"를 안 봐서 전부 초록이었다.
+ *
+ * 진영은 `caster`에서 가져온다. 원형이 시체여도 부른 쪽 편이다.
+ *
+ * 상한을 두는 이유는 밀도다 — 10마리일 때 최근접 거리가 이미 1.05(분리
+ * 목표 1.0)라, 몸을 무제한으로 얹으면 상시 밀어내기가 되고 그게 판 밖으로
+ * 밀려나는 버그를 되살린다.
+ */
+export function summon(
+  state: RunState,
+  caster: Cat,
+  spec: SummonSpec,
+  model: Cat = caster,
+): number {
+  if (!caster.alive) return 0;
+  let made = 0;
+  // **상한은 진영별이다.** 합계로 세면 한쪽이 먼저 채운 판에서 다른 쪽이
+  // 아무것도 못 낸다 — 같은 스킬을 썼는데 누가 먼저 터졌느냐로 결과가
+  // 갈리는 것은 규칙이 아니라 사고다. (지금은 적이 소환하지 않으므로
+  // 실효가 없지만, 진영 필터와 같은 이유로 남겨 둔다.)
+  let mine = state.summons.filter((c) => c.side === caster.side).length;
+  for (let i = 0; i < spec.count; i++) {
+    if (mine >= SUMMON_CAP) break;
+    mine += 1;
+    const s = makeSummon(model, spec, i);
+    s.side = caster.side;
+    // 주인 옆 0.7칸에 놓기만 하므로 주인이 판 끝에 서 있으면 넘어간다.
+    // 도적 도약이 먼저 돌면 주인이 적진 맨 뒤라 실제로 fx 12.3까지 나갔다.
+    clampToField(s);
+    state.summons.push(s);
+    made += 1;
+  }
+  return made;
+}
+
+/** **한 진영이** 동시에 세울 수 있는 소환수 수. 밀도 상한이다. 하네스가 이걸 import한다. */
+export const SUMMON_CAP = 4;
+
 function separate(cats: Cat[]): void {
   for (let i = 0; i < cats.length; i++) {
     for (let j = i + 1; j < cats.length; j++) {
@@ -812,7 +1077,9 @@ function separate(cats: Cat[]): void {
       const dx = b.fx - a.fx;
       const dy = b.fy - a.fy;
       const d = Math.hypot(dx, dy);
-      const minD = SEPARATION + a.radius + b.radius;
+      // 작은 몸은 좁게 선다. 배수가 둘 다 1이면 예전 식과 완전히 같다
+      // (`SEPARATION + 반경`) — 소환수만 이 항이 줄어든다.
+      const minD = SEPARATION * ((a.sizeMul + b.sizeMul) / 2) + a.radius + b.radius;
       if (d >= minD) continue;
       // 정확히 겹쳤으면 uid 순서로 축을 갈라 결정적으로 만든다.
       const nx = d > 1e-6 ? dx / d : a.uid < b.uid ? 1 : -1;
@@ -851,8 +1118,11 @@ function separate(cats: Cat[]): void {
  * 밀어내기뿐이라 여기서만 묶는다. 보스는 반경이 있어 중심이 가장자리에 서면
  * 몸이 걸치지만, 보스는 밀리지 않으므로(위의 `aFixed`) 이 함수를 안 탄다.
  */
+/** 판의 오른쪽 끝. `clampToField`와 `safeSpot`이 같은 값을 봐야 한다. */
+const FIELD_MAX_FX = ENEMY_FRONT_FX + BOARD_COLS - 1;
+
 function clampToField(c: Cat): void {
-  const maxX = ENEMY_FRONT_FX + BOARD_COLS - 1;
+  const maxX = FIELD_MAX_FX;
   if (c.fx < 0) c.fx = 0;
   else if (c.fx > maxX) c.fx = maxX;
   if (c.fy < 0) c.fy = 0;
@@ -922,6 +1192,27 @@ function findLanding(taken: Set<number>, wantRow: number, landSide: Side): numbe
   return cells.find((i) => !taken.has(i)) ?? -1;
 }
 
+/**
+ * 전투가 열릴 때 규칙 유물이 부르는 소환수.
+ *
+ * **조건은 진짜 고양이만 센다**(`livingCats(state.ally)`). 분신이 조건을
+ * 세면 '다섯 마리 이하' 유물이 자기가 부른 분신 때문에 꺼지거나, 반대로
+ * 소환수가 소환 조건을 채워 무한히 불어난다.
+ *
+ * 주인은 **가장 앞선 고양이**다. 분신은 맞아 주는 몸이라 맞는 자리에
+ * 서야 값을 한다 — 뒷줄 마법사를 복제하면 아무도 안 때린다.
+ */
+function openingSummons(state: RunState): void {
+  const cats = livingCats(state.ally);
+  if (cats.length === 0) return;
+  const owner = cats.reduce((a, b) => (b.fx > a.fx ? b : a));
+  for (const r of state.relics) {
+    if (!r.boonRule || r.boonRule.kind !== "summon") continue;
+    if (!relicActive(r, cats)) continue;
+    summon(state, owner, r.boonRule.spec === "mirror" ? MIRROR_IMAGE : KITTEN);
+  }
+}
+
 function assassinLeap(state: RunState): void {
   const sides: { mine: (Cat | null)[]; foes: (Cat | null)[]; foeSide: Side }[] = [
     { mine: state.ally, foes: state.enemy, foeSide: "enemy" },
@@ -971,7 +1262,7 @@ function assassinLeap(state: RunState): void {
         radius: 0.5,
         angle: 0,
         life: 340,
-        color: CLASS_FX["rogue"] ?? "#D98BE8",
+        color: CLASS_FX.rogue,
       });
       pushFx({
         kind: "ring",
@@ -982,7 +1273,7 @@ function assassinLeap(state: RunState): void {
         radius: 0.9,
         angle: 0,
         life: 380,
-        color: CLASS_FX["rogue"] ?? "#D98BE8",
+        color: CLASS_FX.rogue,
       });
     }
   }
@@ -1242,6 +1533,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
 export function stepBattle(state: RunState, dtMs: number): void {
   tickEffects(state.ally, dtMs);
   tickEffects(state.enemy, dtMs);
+  tickEffects(state.summons, dtMs);
 
   for (let i = damagePops.length - 1; i >= 0; i--) {
     const p = damagePops[i];
@@ -1265,13 +1557,32 @@ export function stepBattle(state: RunState, dtMs: number): void {
   if (state.phase !== "battle") return;
 
   // 전투 첫 프레임에 도적이 뛰어든다.
-  if (state.battleElapsed === 0) assassinLeap(state);
 
   let remaining = Math.min(dtMs, SIM_STEP_MS * 4); // 탭 복귀 시 폭주 방지
   while (remaining > 0) {
     const step = Math.min(SIM_STEP_MS, remaining);
     remaining -= step;
     state.battleElapsed += step;
+
+    /**
+     * 전투를 여는 처리. **첫 스텝이 실제로 돌 때** 한 번만 한다.
+     *
+     * 전에는 루프 밖에서 `battleElapsed === 0`으로 걸었다. 그런데 `dt`가 0인
+     * 프레임이 한 번 오면 `remaining = 0`이라 루프가 한 번도 안 돌고
+     * `battleElapsed`가 0에 남는다 — 다음 프레임에 조건이 또 참이 되어 소환이
+     * 다시 일어난다(분신 2마리가 4마리가 된다). 브라우저는 타이머 정밀도를
+     * 낮출 때 rAF 타임스탬프가 같은 값으로 두 번 올 수 있고, 하네스는 항상
+     * 100ms를 넘기므로 이 경로를 못 밟는다.
+     *
+     * 여기서는 `battleElapsed`가 방금 0에서 올라온 순간에만 참이다.
+     *
+     * 소환이 도약보다 먼저다. 도약 뒤에 부르면 적진 맨 뒤로 뛴 도적이 '가장
+     * 앞선 고양이'가 되어, 분신이 우리 진형이 아니라 적 뒷줄에 생긴다.
+     */
+    if (state.battleElapsed === step) {
+      openingSummons(state);
+      assassinLeap(state);
+    }
 
     // 의도는 스텝당 하나만 소비한다. 브라우저(~17ms)와 시뮬(100ms)의 입력
     // 해상도가 달라도 같은 규칙에 묶이도록.
@@ -1305,19 +1616,26 @@ export function stepBattle(state: RunState, dtMs: number): void {
       doStrike(state);
     }
 
-    const allies = livingCats(state.ally);
+    tickSummons(state, step);
+    // 전멸 판정은 **진짜 고양이만** 본다. 분신이 남아 있다고 판이 이어지면
+    // 죽은 뒤에 분신이 대신 싸우는 6초가 생긴다.
+    const realAllies = livingCats(state.ally);
+    const allies = allyBodies(state);
     // 달리기는 타겟팅·공격보다 먼저 처리한다. 이번 스텝의 사거리 판정이
     // **도착한 자리** 기준이라야, 위험 구간을 빠져나온 것이 그 스텝에 반영된다.
     //
     // 양쪽 다 돈다. 개입은 아군만 쓰지만 도적 도약은 적도 하므로, 여기서 적을
     // 빠뜨리면 적 도적이 허공에 멈춘 채로 전투가 끝난다.
     tickDashes(allies, step);
-    tickDashes(livingCats(state.enemy), step);
-    for (const e of livingCats(state.enemy)) if (e.radius > 0) tickBoss(e, allies, step, state);
-    const foes = livingCats(state.enemy);
+    const foes = foeBodies(state);
+    tickDashes(foes, step);
+    for (const e of foes) if (e.radius > 0) tickBoss(e, allies, step, state);
 
-    if (allies.length === 0 || foes.length === 0) {
-      finishWave(state, foes.length === 0 && allies.length > 0);
+    // 양쪽 다 **진짜 고양이만** 센다. 소환수가 남았다고 판이 이어지면
+    // 죽은 뒤에 분신이 대신 싸우는 시간이 생긴다.
+    const realFoes = livingCats(state.enemy);
+    if (realAllies.length === 0 || realFoes.length === 0) {
+      finishWave(state, realFoes.length === 0 && realAllies.length > 0);
       return;
     }
 
@@ -1334,7 +1652,14 @@ export function stepBattle(state: RunState, dtMs: number): void {
       // 기절·빙결 중에는 이동도 공격도 못 한다. 쿨다운도 멈춘다.
       if (cat.stun > 0) continue;
 
-      const enemies = cat.side === "ally" ? livingCats(state.enemy) : livingCats(state.ally);
+      // 적은 분신도 노린다 — 그게 분신의 값이다. 노려지지 않으면 그냥
+      // 화면에 있는 장식이고, 맞아 주는 몸이라는 성격이 사라진다.
+      // **매번 새로 뽑는다.** `allies`는 이 루프가 돌기 전의 스냅샷이라,
+      // 이번 스텝에 죽은 아군이 그 안에 남는다 — `pickTarget`은 alive를
+      // 거르지 않으므로 적이 시체를 계속 때린다(화면엔 시체 위로 데미지가
+      // 뜨고, 그만큼 적 공격이 통째로 낭비돼 판이 조용히 쉬워진다).
+      // 아군 쪽은 원래부터 `livingCats(state.enemy)`를 매번 불렀다.
+      const enemies = cat.side === "ally" ? foeBodies(state) : allyBodies(state);
       const target = pickTarget(cat, enemies, claimed);
       if (!target) break;
       claimed.set(target.uid, (claimed.get(target.uid) ?? 0) + 1);
@@ -1344,10 +1669,17 @@ export function stepBattle(state: RunState, dtMs: number): void {
       if (surfaceDistance(cat, target) <= cat.breed.range) {
         if (cat.cooldown <= 0) {
           // 마나가 가득 찼으면 평타 대신 스킬이 나간다.
-          if (cat.breed.skill && cat.mana >= MANA_MAX) {
-            const own = cat.side === "ally" ? livingCats(state.ally) : livingCats(state.enemy);
-            castSkill(cat, target, enemies, own);
-          } else {
+          // 소환수는 제외한다 — 주인의 스킬이 그대로 복제되면 분신이 화력
+          // 증폭 장치가 되고, 그러면 `atk_mul` 유물과 같은 축이 된다.
+          const own = cat.side === "ally" ? livingCats(state.ally) : livingCats(state.enemy);
+          // 소환수는 `own`에 없다. 주인의 breed를 쓰므로 감싸기·핥아주기의
+          // 대상이 될 수 있는데, 6~20초 뒤 사라질 몸을 지키는 것은 낭비다.
+          const cast =
+            cat.breed.skill !== null &&
+            !cat.summon &&
+            cat.mana >= MANA_MAX &&
+            castSkill(state, cat, target, enemies, own);
+          if (!cast) {
             attack(cat, target);
             ricochet(cat, target, enemies);
           }

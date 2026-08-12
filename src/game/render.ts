@@ -28,7 +28,7 @@ import {
   type Offer,
   type RunState,
 } from "./run.ts";
-import { RELICS } from "./relics.ts";
+import { RELICS, type Relic } from "./relics.ts";
 
 /** 유물 총 종류. 오른쪽 줄이 "몇 개 중 몇 개"를 말하고 칸 높이를 여기서 뽑는다. */
 const RELIC_TOTAL = RELICS.length;
@@ -51,6 +51,9 @@ import { PASSIVES, SKILLS } from "./skills.ts";
 import {
   BOARD_SIZE,
   CLASS_LABEL,
+  CLASS_ORDER,
+  CLASS_SHORT,
+  zeroByClass,
   livingCats,
   type Cat,
   type ClassKind,
@@ -82,7 +85,9 @@ const CLASS_COLOR: Record<ClassKind, string> = {
   warrior: "#C4715A",
   rogue: "#A97CC4",
   archer: "#C9A05C",
+  // 소환사는 남색. 마법사의 하늘색과 이웃이라 한 단계 짙게 잡아 갈랐다.
   mage: "#6E97C4",
+  summoner: "#5C6BB8",
 };
 
 /**
@@ -109,6 +114,8 @@ const CLASS_ICON: Record<ClassKind, readonly number[]> = {
   archer: [0x38, 0x44, 0x42, 0x42, 0x42, 0x44, 0x38],
   // 별 — 상하좌우 대칭 십자
   mage: [0x08, 0x08, 0x1c, 0x7f, 0x1c, 0x08, 0x08],
+  // 부름 — 위의 고리 하나가 아래 점 셋을 부른다
+  summoner: [0x1c, 0x22, 0x22, 0x1c, 0x00, 0x00, 0x55],
 };
 
 /** 세로줄 직업 목록용 그림. 판 위 뱃지(7x7 비트맵)와 크기가 달라 따로 둔다. */
@@ -117,6 +124,7 @@ const CLASS_PICTO: Record<ClassKind, IconName> = {
   rogue: "cls-rogue",
   archer: "cls-archer",
   mage: "cls-mage",
+  summoner: "cls-summoner",
 };
 
 /** 뱃지 안에 직업 표식을 그린다. */
@@ -625,8 +633,9 @@ function drawVulnerableRing(
 }
 
 /** 고양이 몸 크기. 반경 있는 것(보스·저격수)은 셀 격자를 벗어나 크게 그린다. */
-export function catBodySize(L: Layout, radius: number): number {
-  return radius > 0 ? L.cell * radius * 2.1 : L.cell * CAT_SCALE;
+export function catBodySize(L: Layout, radius: number, sizeMul = 1): number {
+  const base = radius > 0 ? L.cell * radius * 2.1 : L.cell * CAT_SCALE;
+  return base * sizeMul;
 }
 
 /**
@@ -649,8 +658,9 @@ export function healthBarGeom(
   side: Side,
   radius: number,
   cy: number,
+  sizeMul = 1,
 ): { bh: number; by: number } {
-  const size = catBodySize(L, radius);
+  const size = catBodySize(L, radius, sizeMul);
   const bh = Math.max(4, size * 0.15);
   const lift = Math.min(size, L.cell * CAT_SCALE);
   const board = side === "ally" ? L.allyBoard : L.enemyBoard;
@@ -672,7 +682,8 @@ function drawCat(
   );
 
   // 보스는 반경만큼 크게 그린다. 셀 격자에 얽매이지 않고 3x3을 덮는다.
-  const size = catBodySize(L, cat.radius);
+  // 소환수는 sizeMul로 작아진다.
+  const size = catBodySize(L, cat.radius, cat.sizeMul);
   const x = cx - size / 2;
   const y = cy - size / 2 - L.cell * 0.03;
 
@@ -719,6 +730,11 @@ function drawCat(
   ctx.save();
   if (!cat.alive) ctx.globalAlpha = 0.32;
   else if (dimmed) ctx.globalAlpha = 0.35;
+  // 소환수는 **비쳐 보인다.** 분신은 주인과 같은 그림이라(시트 20장이 이미
+  // 소진돼 새 스프라이트가 없다) 크기만으로는 어느 쪽이 진짜인지 안 갈린다.
+  // 반투명은 "실체가 덜한 것"으로 곧장 읽히고, 색조를 돌리는 것과 달리
+  // 어느 품종인지는 그대로 남는다.
+  else if (cat.summon) ctx.globalAlpha = 0.62;
 
   const img = spriteFor(cat.breed.id, cat.pose);
   if (img) {
@@ -763,7 +779,7 @@ function drawCat(
    * 색을 읽기 전에 형체부터 안 보인다.
    */
   const bw = size * 0.88;
-  const { bh, by } = healthBarGeom(L, cat.side, cat.radius, cy);
+  const { bh, by } = healthBarGeom(L, cat.side, cat.radius, cy, cat.sizeMul);
   const bx = cx - bw / 2;
   const frac = Math.max(0, Math.min(1, cat.hp / cat.maxHp));
 
@@ -776,11 +792,15 @@ function drawCat(
 
   // 마나 바. 체력 바 바로 아래에 얇게. 가득 차면 스킬이 나간다.
   // 스킬이 없는 고양이(패시브·보스)는 마나가 의미 없으므로 아예 그리지 않는다.
+  // **소환수도 같은 사유다.** 주인의 breed를 쓰므로 스킬이 '있는' 것으로
+  // 보이지만 발동은 막혀 있다(`battle.ts`의 `!cat.summon`). 그리면 가득 찬
+  // 채로 영영 안 나가는 스킬을 준비된 것처럼 보여주게 된다.
   const my = by + bh + 1.5;
   const mh = Math.max(2, bh * 0.62);
-  const mfrac = cat.breed.skill
-    ? Math.max(0, Math.min(1, cat.mana / cat.manaMax))
-    : -1;
+  const mfrac =
+    cat.breed.skill && !cat.summon
+      ? Math.max(0, Math.min(1, cat.mana / cat.manaMax))
+      : -1;
   if (mfrac >= 0) {
     roundRect(
       ctx,
@@ -1338,7 +1358,9 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
         ox,
         oy,
         Math.max(1, L.cell * (p.crit ? 0.035 : 0.028)),
-        p.crit ? T.vuln : "#FFFFFF",
+        // 회복은 초록. 판 위에서 숫자가 뜨는 것은 늘 깎이는 일이었으므로,
+        // 색이 안 갈리면 "+12"도 맞은 것으로 먼저 읽힌다.
+        p.heal ? "#8FD9A8" : p.crit ? T.vuln : "#FFFFFF",
         "center",
         true,
         true,
@@ -1496,17 +1518,13 @@ function drawTeamStrip(
 ): void {
   const r = L.offers;
   const cats = livingCats(s.ally);
-  const counts: Record<ClassKind, number> = {
-    warrior: 0,
-    rogue: 0,
-    archer: 0,
-    mage: 0,
-  };
+  // 카운터와 순서 둘 다 `CLASS_LABEL`에서 뽑는다. 손으로 적으면 직업을
+  // 늘렸을 때 배열은 타입 검사를 통과하면서 새 직업만 빠진다.
+  const counts = zeroByClass();
   for (const c of cats) counts[c.breed.cls] += 1;
 
-  const order: ClassKind[] = ["warrior", "rogue", "archer", "mage"];
   const rows: [string, number, string, IconName | null][] = [
-    ...order.map(
+    ...CLASS_ORDER.map(
       (cls) =>
         [CLASS_LABEL[cls], counts[cls], CLASS_COLOR[cls], CLASS_PICTO[cls]] as
           [string, number, string, IconName | null],
@@ -1703,7 +1721,7 @@ function drawCostBadge(
 function drawRelicCard(
   ctx: CanvasRenderingContext2D,
   cr: Rect,
-  relic: { name: string; want: string; toll: string },
+  relic: Relic,
   cost: number,
   afford: boolean,
   pad: number,
@@ -1747,7 +1765,8 @@ function drawRelicCard(
       weight: 800,
       maxWidth: relicTw,
     });
-    uiText(ctx, `${relic.want} · ${relic.toll}`, cr.x + pad, cr.y + cr.h * 0.66, fsBody, afford ? T.fish : T.muted, {
+    const brief = relic.gain ? `${relic.want} · ${relic.gain}` : `${relic.want} · ${relic.toll}`;
+    uiText(ctx, brief, cr.x + pad, cr.y + cr.h * 0.66, fsBody, afford ? T.fish : T.muted, {
       align: "left",
       weight: 600,
       maxWidth: relicTw,
@@ -1768,10 +1787,13 @@ function drawRelicCard(
 
   // 원하는 것 / 치르는 것을 라벨과 함께. 어느 쪽이 이익인지 헷갈리면 안 된다.
   ty += fsName * 0.75 + fsBody;
-  for (const [label, text, color] of [
+  const rows: (readonly [string, string, string])[] = [
     ["원하는 것", relic.want, afford ? T.fish : T.muted],
-    ["치르는 것", relic.toll, afford ? T.enemy : T.muted],
-  ] as const) {
+  ];
+  // 규칙 유물만 '얻는 것'을 적는다. 스탯 유물은 세진다는 게 자명하다.
+  if (relic.gain) rows.push(["얻는 것", relic.gain, afford ? T.ally : T.muted]);
+  rows.push(["치르는 것", relic.toll, afford ? T.enemy : T.muted]);
+  for (const [label, text, color] of rows) {
     uiText(ctx, label, cx, ty, fsBody * 0.85, "rgba(156,139,118,0.9)", { align: "center", weight: 600 });
     ty += fsBody * 1.15;
     for (const line of wrapLines(ctx, text, fsBody, 700, tw, 2)) {
@@ -3033,9 +3055,9 @@ function drawGameOver(
   // 살아남은 고양이가 아니라 **데리고 있던** 고양이를 센다. 전멸한 판에서
   // livingCats를 쓰면 전부 0이 떠서 어떤 팀이었는지가 사라진다.
   const cats = s.ally.filter((c): c is Cat => c !== null);
-  const by = { warrior: 0, rogue: 0, archer: 0, mage: 0 };
+  const by = zeroByClass();
   for (const c of cats) by[c.breed.cls] += 1;
-  const team = `전${by.warrior} 도${by.rogue} 궁${by.archer} 법${by.mage}`;
+  const team = CLASS_ORDER.map((c) => `${CLASS_SHORT[c]}${by[c]}`).join(" ");
   line(s.relics.length > 0 ? `${team} · ${s.relics.map((r) => r.name).join(" · ")}` : team, T.muted);
 
   /**
@@ -3220,6 +3242,12 @@ export function render(
         dimmed: drag.active && drag.fromCell === i,
       });
     }
+  }
+  // 소환수는 보드가 아니라 state.summons에 산다. 같은 목록에 넣어야
+  // 겹칠 때 앞뒤가 맞는다.
+  for (const sm of s.summons) {
+    if (!sm.alive) continue;
+    drawList.push({ cat: sm, y: fieldToScreen(L, sm.fx, sm.fy).y, dimmed: false });
   }
   drawList.sort((p, q) => p.y - q.y);
   for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed);

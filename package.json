@@ -11,6 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "slice": "python3 scripts/slice-sprites.py",
+    "recolor": "python3 scripts/recolor-sprites.py",
     "gen:synergies": "node --experimental-strip-types scripts/gen-synergies.mjs",
     "sim": "node --experimental-strip-types scripts/balance-sim.mjs",
     "sweep": "node --experimental-strip-types scripts/balance-sweep.mjs",

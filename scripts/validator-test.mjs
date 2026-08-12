@@ -17,7 +17,7 @@ import { EFFECT_RANGE, validateAll } from "../src/validate/synergy-schema.ts";
 import { BOSSES_PER_STAGE, checkStage, isBossStep, makeStage, STAGE_STEPS } from "../src/game/map.ts";
 import { BOSS_BREEDS, bossForIndex } from "../src/game/bosses.ts";
 import { BREEDS, NIGHTMARE_BREEDS } from "../src/game/breeds.ts";
-import { bossIndexAt } from "../src/game/run.ts";
+import { bossIndexAt, WAVE_STRIDE, UNIT_STRIDE, WARRIOR_IDS, MELEE_IDS, RANGED_IDS } from "../src/game/run.ts";
 import { seedRng } from "../src/game/rng.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -110,7 +110,7 @@ let laneSteps = 0;
 for (let seed = 1; seed <= 200; seed++) {
   seedRng(seed);
   for (let stage = 1; stage <= 4; stage++) {
-    const m = makeStage(stage);
+    const m = makeStage(stage, seed);
     for (const p of checkStage(m)) mapFailures.push(`시드 ${seed} 스테이지 ${stage}: ${p}`);
     m.steps.forEach((row, i) => {
       if (!isBossStep(i)) { laneTotal += row.length; laneSteps += 1; }
@@ -120,9 +120,9 @@ for (let seed = 1; seed <= 200; seed++) {
 
 // 같은 시드는 같은 지도를 내야 한다. 이게 깨지면 "시드 하나로 판을 재현한다"가 거짓말이 된다.
 seedRng(4242);
-const mapA = JSON.stringify(makeStage(2));
+const mapA = JSON.stringify(makeStage(2, 4242));
 seedRng(4242);
-const mapB = JSON.stringify(makeStage(2));
+const mapB = JSON.stringify(makeStage(2, 4242));
 if (mapA !== mapB) mapFailures.push("같은 시드가 다른 지도를 냈다");
 
 console.log("\n지도 계약");
@@ -193,7 +193,7 @@ if (bossFailures.length === 0) {
 /**
  * 악몽 명단이 우리 명단과 index별로 맞물려 있는가.
  *
- * `enemyBreedIds`가 `(wave*3 + i*5) % 8`로 뽑으므로, i번째끼리 직업·스탯·스킬이
+ * `enemyBreedIds`가 `(wave*3 + i*5) % 길이`로 뽑으므로, i번째끼리 직업·스탯·스킬이
  * 같아야 웨이브 구성이 명단을 가르기 전과 동일하게 유지된다. 이 계약은 지금
  * 주석에만 적혀 있었는데, 주석은 새 품종을 끼워 넣는 사람을 못 막는다.
  *
@@ -203,11 +203,81 @@ if (bossFailures.length === 0) {
  */
 const MIRROR = ["cls", "kind", "hp", "atk", "atkInterval", "range", "moveSpeed", "manaPerAttack", "skill", "passive"];
 const mirrorFailures = [];
-if (BREEDS.length !== NIGHTMARE_BREEDS.length) {
-  mirrorFailures.push(`명단 길이가 다르다: 우리 ${BREEDS.length} vs 악몽 ${NIGHTMARE_BREEDS.length}`);
+/**
+ * **보폭이 명단 길이와 서로소인가.**
+ *
+ * 적 구성은 `(wave*WAVE_STRIDE + i*UNIT_STRIDE) % 길이`로 정한다. 서로소가
+ * 아니면 오프셋이 일부 값만 돌아 웨이브 종류가 줄어든다 — 8종에서 12종으로
+ * 늘렸을 때 보폭 3이 `gcd(3,12)=3`이라 구성이 4웨이브마다 반복됐고, 명단을
+ * 늘렸는데 다양성은 절반이 됐다. 눈으로는 안 보이는 종류의 퇴행이라
+ * 계약으로 잡는다.
+ */
+const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+/**
+ * **`enemyBreedIds`가 나머지 연산에 쓰는 모듈러스 전부**를 본다.
+ *
+ * 처음에는 전체 명단 길이 하나만 봤다. 그런데 돌격·저격 웨이브는 직업 풀을
+ * 따로 쓰고(전사 3 · 근접 6 · 원거리 6), 거기서 `gcd(3,3)=3`·`gcd(3,6)=3`으로
+ * 같은 결함이 살아 있었다 — **검사는 초록인데 돌격 웨이브 구성이 전 구간
+ * 하나로 굳어 있었다.** 검사가 보는 것과 코드가 쓰는 것이 어긋나면, 통과는
+ * 아무것도 보장하지 않는다.
+ */
+const MODULI = [
+  ["명단 전체", NIGHTMARE_BREEDS.length],
+  ["전사 풀(돌격)", WARRIOR_IDS.length],
+  ["근접 풀(저격)", MELEE_IDS.length],
+  ["원거리 풀(저격)", RANGED_IDS.length],
+];
+for (const [poolName, len] of MODULI) {
+  if (len === 0) {
+    mirrorFailures.push(`${poolName}이 비었다`);
+    continue;
+  }
+  for (const [name, stride] of [
+    ["WAVE_STRIDE", WAVE_STRIDE],
+    ["UNIT_STRIDE", UNIT_STRIDE],
+  ]) {
+    const g = gcd(stride, len);
+    if (g !== 1) {
+      mirrorFailures.push(
+        `${name}=${stride}이 ${poolName} 길이 ${len}과 서로소가 아니다 (gcd=${g}) — ` +
+          `오프셋이 ${len / g}종류만 돈다`,
+      );
+    }
+  }
+}
+if (WAVE_STRIDE === UNIT_STRIDE) {
+  mirrorFailures.push(
+    `보폭 둘이 같다(${WAVE_STRIDE}) — 자리 i의 적이 웨이브 w+i의 첫 적과 늘 같아진다`,
+  );
+}
+
+/**
+ * **짝은 앞에서부터 맞고, 남는 것은 정확히 소환사여야 한다.**
+ *
+ * 예전에는 길이가 같은지만 봤다. 지금은 소환사가 우리 쪽에만 있어서 길이가
+ * 다르다 — 적에게 소환사를 주니 웨이브 성격이 지워졌기 때문이다(궁합
+ * 8.3 → 4.1%p, `breeds.ts` 참고). 그 예외를 계약으로 못 박는다: 남는 것이
+ * 소환사가 아니면 **아무도 모르게 짝 없는 고양이가 늘어난** 것이다.
+ */
+if (NIGHTMARE_BREEDS.length > BREEDS.length) {
+  mirrorFailures.push(
+    `악몽이 더 많다: 우리 ${BREEDS.length} vs 악몽 ${NIGHTMARE_BREEDS.length}`,
+  );
+}
+const unpaired = BREEDS.slice(NIGHTMARE_BREEDS.length);
+const strays = unpaired.filter((b) => b.cls !== "summoner");
+if (strays.length > 0) {
+  mirrorFailures.push(
+    `짝 없는 고양이 중 소환사가 아닌 것: ${strays.map((b) => `${b.name}(${b.cls})`).join(", ")}`,
+  );
+}
+if (unpaired.length !== BREEDS.filter((b) => b.cls === "summoner").length) {
+  mirrorFailures.push("소환사가 짝 있는 구간에 섞여 있다 — 소환사는 명단 끝에 모여야 한다");
 } else {
-  BREEDS.forEach((a, i) => {
-    const b = NIGHTMARE_BREEDS[i];
+  // 짝이 있는 구간(악몽 명단 길이)만 돈다. 뒤의 소환사는 짝이 없다.
+  NIGHTMARE_BREEDS.forEach((b, i) => {
+    const a = BREEDS[i];
     const diff = MIRROR.filter((k) => a[k] !== b[k]);
     if (diff.length > 0) {
       mirrorFailures.push(`${i}번: ${a.name} vs ${b.name} — ${diff.map((k) => `${k}(${a[k]}\u2260${b[k]})`).join(", ")}`);
@@ -219,8 +289,15 @@ if (BREEDS.length !== NIGHTMARE_BREEDS.length) {
 
 console.log("\n적·아군 명단 계약");
 if (mirrorFailures.length === 0) {
-  console.log(`  OK   ${BREEDS.length}쌍이 index별로 직업·스탯·스킬 일치, id 겹침 0`);
-  console.log(`  OK   ${BREEDS.map((a, i) => `${a.name}\u2194${NIGHTMARE_BREEDS[i].name}`).join(" ")}`);
+  console.log(
+    `  OK   ${NIGHTMARE_BREEDS.length}쌍이 index별로 직업·스탯·스킬 일치, id 겹침 0`,
+  );
+  console.log(
+    `  OK   ${NIGHTMARE_BREEDS.map((b, i) => `${BREEDS[i].name}\u2194${b.name}`).join(" ")}`,
+  );
+  console.log(
+    `  OK   짝 없는 ${unpaired.length}마리는 전부 소환사 (${unpaired.map((b) => b.name).join(" ")}) — 악몽은 소환하지 않는다`,
+  );
 } else {
   for (const p of mirrorFailures) console.log(`  실패 ${p}`);
   process.exit(1);

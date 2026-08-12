@@ -1,4 +1,7 @@
-import { rng } from "./rng.ts";
+import { makeRng, mixSeed } from "./rng.ts";
+
+/** 난수기 하나. 지도는 전투와 다른 줄기를 쓴다. */
+type Rand = () => number;
 import type { WaveKind } from "./run.ts";
 
 /**
@@ -95,7 +98,7 @@ function laneCount(step: number): number {
  * 교차하지 않는다** — 슬더슬이 명시적으로 두는 규칙이고, 이유는 그리기다.
  * 선이 X자로 만나면 화면에서 어느 선이 내 선인지 따라갈 수가 없다.
  */
-function drawPath(startLane: number, edges: Set<string>[]): number[] {
+function drawPath(startLane: number, edges: Set<string>[], rng: Rand): number[] {
   const lanes: number[] = [];
   let cur = startLane;
   lanes.push(cur);
@@ -139,7 +142,7 @@ function drawPath(startLane: number, edges: Set<string>[]): number[] {
  * `rush`를 먼저 쓰고 모자랄 때만 `snipe`를 꺼낸다. 순서를 시드로 섞어야 판마다
  * 어느 줄이 어느 성격인지가 달라진다.
  */
-function battleWaves(count: number, hasElite: boolean): WaveKind[] {
+function battleWaves(count: number, hasElite: boolean, rng: Rand): WaveKind[] {
   // 앞의 둘은 섞고 `snipe`는 뒤에 붙인다. 정예가 이미 `snipe`이므로 전투 칸이
   // 셋 이상일 때만 꺼내 쓴다 — 겹치더라도 **같은 전투 칸끼리 겹치는 것보다
   // 정예와 겹치는 편이 낫다.** 전자는 고를 것이 없어지고 후자는 난이도만 겹친다.
@@ -171,7 +174,7 @@ function battleWaves(count: number, hasElite: boolean): WaveKind[] {
  * 겹쳐서 **정예가 한 번도 안 뜨는** 지도가 나왔다 — 규칙은 그 게임의 사정에서
  * 나온 것이지 보편이 아니다.
  */
-function assignKinds(steps: number[][], stage: number): NodeKind[][] {
+function assignKinds(steps: number[][], stage: number, rng: Rand): NodeKind[][] {
   const ramp = Math.min(1, (stage - 1) / 4);
   const out: NodeKind[][] = [];
 
@@ -232,7 +235,18 @@ function assignKinds(steps: number[][], stage: number): NodeKind[][] {
  * `rng`를 쓰므로 같은 시드는 같은 지도를 낸다 — 시드 하나로 판 전체를 재현할 수
  * 있다는 이 저장소의 규칙이 지도에도 그대로 적용된다.
  */
-export function makeStage(stage: number): StageMap {
+/**
+ * 여정 지도를 만든다.
+ *
+ * **전투와 다른 난수 줄기를 쓴다.** 전역 스트림은 회피 판정이 공격 횟수만큼
+ * 먹으므로, 지도를 거기서 뽑으면 "1스테이지에서 몇 대 때렸나"가 2스테이지
+ * 지도를 바꾼다. 그러면 같은 시드로 두 정책을 비교해도 서로 다른 지도를
+ * 걷게 되어 짝비교가 성립하지 않는다 — 결정 축의 잡음이 넓었던 이유다.
+ *
+ * @param runSeed 런 시드. 스테이지와 섞어 이 지도만의 줄기를 만든다.
+ */
+export function makeStage(stage: number, runSeed = 0): StageMap {
+  const rng = makeRng(mixSeed(runSeed, stage));
   // 걸음별 간선 집합. 교차 검사가 이걸 본다.
   const edges: Set<string>[] = Array.from({ length: STAGE_STEPS - 1 }, () => new Set<string>());
   const paths: number[][] = [];
@@ -241,7 +255,7 @@ export function makeStage(stage: number): StageMap {
     let start = Math.floor(rng() * LANES);
     // 처음 두 길은 서로 다른 줄에서 시작한다. 같으면 첫 걸음에 갈래가 없다.
     if (p === 1 && start === paths[0]![0]) start = (start + 1 + Math.floor(rng() * (LANES - 1))) % LANES;
-    paths.push(drawPath(start, edges));
+    paths.push(drawPath(start, edges, rng));
   }
 
   // 밟힌 줄만 살린다. 안 밟힌 칸은 그려 봐야 못 가는 곳이다.
@@ -252,7 +266,7 @@ export function makeStage(stage: number): StageMap {
     used.push([...set].sort((a, b) => a - b));
   }
 
-  const kinds = assignKinds(used, stage);
+  const kinds = assignKinds(used, stage, rng);
   const steps: MapNode[][] = [];
 
   for (let step = 0; step < STAGE_STEPS; step++) {
@@ -263,6 +277,7 @@ export function makeStage(stage: number): StageMap {
     const battleWaveQueue = battleWaves(
       rowKinds.filter((k) => k === "battle").length,
       rowKinds.some((k) => k === "elite"),
+      rng,
     );
     let battleAt = 0;
     const row: MapNode[] = lanes.map((lane, i) => {

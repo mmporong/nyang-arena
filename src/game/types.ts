@@ -1,6 +1,26 @@
 export type Pose = "idle" | "sleep" | "wink" | "move" | "back" | "run";
 
-export type CatColor = "black" | "cream" | "gray" | "white" | "calico" | "orange";
+/**
+ * 털색. 뒤의 넷은 **색을 갈아 만든 품종**이다(`scripts/recolor-sprites.py`).
+ *
+ * 원본 시트에 고양이가 20마리뿐이고 우리 8 · 악몽 8 · 보스 4로 이미 다
+ * 썼다. 새 아트를 사는 대신 있는 그림의 밝기만 남기고 색을 갈아끼웠다.
+ * 앞의 여섯에 없는 색으로 골라서 난전에서 헷갈리지 않는다.
+ */
+export type CatColor =
+  | "black"
+  | "cream"
+  | "gray"
+  | "white"
+  | "calico"
+  | "orange"
+  | "teal"
+  | "purple"
+  | "green"
+  | "pink"
+  | "navy"
+  | "gold"
+  | "crimson";
 
 export type Side = "ally" | "enemy";
 
@@ -77,14 +97,64 @@ export type AttackKind = "melee" | "ranged";
  * 직업. 근접/원거리의 하위 분류다.
  * 전사·도적은 근접, 궁수·마법사는 원거리라서 기존 배치 규칙이 그대로 산다.
  */
-export type ClassKind = "warrior" | "rogue" | "archer" | "mage";
+export type ClassKind = "warrior" | "rogue" | "archer" | "mage" | "summoner";
 
 export const CLASS_LABEL: Record<ClassKind, string> = {
   warrior: "전사",
   rogue: "도적",
   archer: "궁수",
   mage: "마법사",
+  summoner: "소환사",
 };
+
+/**
+ * 한 글자 약칭. 부검 화면의 팀 요약("전1 도2 궁3 법4")에 쓴다.
+ *
+ * 전에는 그 줄이 `전${by.warrior} 도${by.rogue} ...`로 **문자열에 손으로**
+ * 박혀 있었다. 직업을 늘리면 객체는 컴파일러가 잡지만 이 문자열은 그대로
+ * 통과하고, 새 직업만 요약에서 사라진다. `Record<ClassKind, ...>`로 옮겨
+ * 안 채우면 컴파일이 안 되게 했다.
+ */
+export const CLASS_SHORT: Record<ClassKind, string> = {
+  warrior: "전",
+  rogue: "도",
+  archer: "궁",
+  mage: "법",
+  summoner: "소",
+};
+
+/**
+ * 직업 하나도 안 빠진 순서 배열만 통과시킨다.
+ *
+ * 빠진 것이 있으면 인자 타입이 `never`가 되어 **선언 자리에서** 컴파일이
+ * 멈춘다. 별도의 검사용 변수를 두지 않아도 되고(`noUnusedLocals`에 안 걸린다),
+ * 순서가 배열 리터럴로 눈에 보인 채로 남는다.
+ */
+function everyClass<const T extends readonly ClassKind[]>(
+  order: Exclude<ClassKind, T[number]> extends never ? T : never,
+): T {
+  return order;
+}
+
+/**
+ * 화면에 직업을 늘어놓는 순서.
+ *
+ * 전에는 `render.ts`에 `["warrior", "rogue", "archer", "mage"]`가 손으로
+ * 적혀 있었다. 배열이라 원소가 빠져도 타입 검사가 통과한다 — 직업을 늘리면
+ * `Record<ClassKind, ...>` 자리들은 컴파일러가 잡아 주지만 **그 배열만
+ * 조용히 옛 넷으로 남아** 새 직업이 시너지 패널과 부검 요약에서 사라진다.
+ *
+ * `Object.keys(CLASS_LABEL)`로 뽑는 방법도 됐지만, 그러면 **화면 순서가
+ * 라벨 맵의 선언 순서에 조용히 묶인다** — 라벨 줄을 재정렬하는 겉보기에
+ * 무해한 편집이 패널 순서를 뒤집는데 컴파일러도 테스트도 모른다. 순서는
+ * 여기 눈에 보이게 두고, 누락만 `everyClass`가 막는다.
+ */
+export const CLASS_ORDER = everyClass(["warrior", "rogue", "archer", "mage", "summoner"]);
+
+/** 직업별 0으로 채운 카운터. 직업을 늘려도 손댈 필요가 없다. */
+export function zeroByClass(): Record<ClassKind, number> {
+  return Object.fromEntries(CLASS_ORDER.map((c) => [c, 0])) as Record<ClassKind, number>;
+}
 
 /** 고양이마다 하나씩 갖는 고유 스킬. 실행 로직은 skills.ts에 있다. */
 /**
@@ -100,7 +170,18 @@ export type SkillId =
   | "shadow_strike"
   | "pierce"
   | "ember"
-  | "frost_nova";
+  | "frost_nova"
+  // 아래 넷은 직업당 세 번째 고양이가 쓴다. 앞의 여섯과 메커니즘이 겹치지
+  // 않게 골랐다 — 특히 `guard`와 `mend`는 이 게임에 없던 **지키는 쪽** 축이다.
+  | "guard"
+  | "gouge"
+  | "volley"
+  | "mend"
+  // 소환사 셋. 판에 몸을 더 내보내는 것이 공통이고, **무엇을 어떻게 부르는지가
+  // 서로 다르다** — 숫자로 밀지, 큰 것 하나로 버틸지, 쓰러진 자리에서 되부를지.
+  | "swarm"
+  | "bulwark"
+  | "echo";
 
 export const BOARD_COLS = 5;
 export const BOARD_ROWS = 5;
@@ -137,7 +218,10 @@ export function cellToField(side: Side, cell: number): { fx: number; fy: number 
 }
 
 export interface Breed {
-  /** 시트 행 번호 (1-20). 스프라이트 파일명 접두사와 같다. */
+  /**
+   * 스프라이트 파일명 접두사. 1~20은 시트에서 자른 원본이고, 21~28은
+   * 그 원본의 색을 갈아 만든 것이다(`scripts/recolor-sprites.py`).
+   */
   readonly id: number;
   readonly name: string;
   readonly color: CatColor;
@@ -243,6 +327,30 @@ export interface Cat {
   /** 도적 연격: 연속으로 때린 대상과 쌓인 횟수. 대상이 바뀌면 초기화된다. */
   comboTarget: string | null;
   combo: number;
+
+  /**
+   * 몸 크기 배수. 그림과 **겹침 반경**을 함께 줄인다. 보통 고양이는 1이다.
+   *
+   * `radius`로는 작은 유닛을 못 만든다 — 그쪽은 보스용이라 0보다 크면
+   * `separate()`가 "안 밀리는 몸"으로 취급한다(`aFixed = a.radius > 0`).
+   * 소환수를 `radius`로 줄이면 잡몹에게 안 밀리는 새끼 고양이가 된다.
+   *
+   * 판이 이미 꽉 차 있어서 이 축이 필요했다. 10마리일 때 최근접 거리가
+   * 1.05로 분리 목표 1.0에 붙어 있다 — 같은 크기의 몸을 더 얹으면 상시
+   * 밀어내기가 되고, 그게 벽 밀림을 만든다. 소환수는 작아야 들어간다.
+   */
+  sizeMul: number;
+  /**
+   * 소환수라면 누가 언제까지 불렀는가. 진짜 고양이는 null이다.
+   *
+   * 소환수는 `state.summons`에 따로 산다. 아군 보드에 끼워 넣지 않는 이유는
+   * **아군을 세는 곳이 24군데**여서다 — 보유 한도·강화 대상·시너지 집계·유물
+   * 조건·전멸 판정·하네스 일곱 개가 전부 `livingCats(state.ally)`를 부른다.
+   * 거기 섞이면 분신이 시너지를 켜고 전멸을 막는다. 따로 두면 기본값이
+   * "안 세어진다"가 되어, 빠뜨렸을 때 조용히 이득 보는 쪽이 아니라 그냥
+   * 없는 쪽으로 실패한다.
+   */
+  summon: { ownerUid: string; lifeMs: number } | null;
 }
 
 export type Board = (Cat | null)[];

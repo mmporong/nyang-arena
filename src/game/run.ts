@@ -108,6 +108,15 @@ export interface RunState {
   actCooldown: number;
   /** 이번 런에서 모은 유물. 조건을 채운 것만 보너스가 붙고 대가는 항상 붙는다. */
   relics: Relic[];
+  /**
+   * 이번 전투에만 존재하는 소환수. 전투가 끝나면 통째로 비운다.
+   *
+   * **보드가 아니라 여기 산다.** 아군 보드에 넣으면 보유 한도(10)를 먹고,
+   * 강화 대상으로 잡히고, 시너지·유물 조건 집계에 섞이고, 전멸 판정을
+   * 막는다 — `livingCats(state.ally)`를 부르는 곳이 게임과 하네스를 합쳐
+   * 24군데다. 전투 계산만 `allyBodies()`로 명시적으로 합친다.
+   */
+  summons: Cat[];
 
   /**
    * 부검용 기록.
@@ -252,7 +261,7 @@ export function veterancyScale(wave: number): number {
 /**
  * 웨이브 성격.
  *
- * 예전에는 적 구성이 BREEDS[(w*3+i*5) % 8]로 결정돼 매 웨이브 비슷했다.
+ * 예전에는 적 구성이 BREEDS[(w*3+i*5) % 길이]로만 결정돼 매 웨이브 비슷했다.
  * 그래서 배치를 한 번 정하면 다시 손댈 이유가 없고 싸움 구도가 고정됐다.
  * 성격을 돌려가며 내면 "이번엔 어떻게 맞설까"가 매번 새로 생긴다.
  */
@@ -385,7 +394,7 @@ export function leaveShop(state: RunState): void {
 export function syncStage(state: RunState): void {
   if (state.step < STAGE_STEPS) return;
   state.step = 0;
-  state.map = makeStage(state.map.stage + 1);
+  state.map = makeStage(state.map.stage + 1, state.seed);
 }
 
 export function waveKindInfo(k: WaveKind): { name: string; hint: string } {
@@ -497,7 +506,147 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     speedMul: 1,
     comboTarget: null,
     combo: 0,
+    sizeMul: 1,
+    summon: null,
   };
+}
+
+/**
+ * 소환수의 성격. **주인 대비 배수로만 적는다** — 절대 수치로 적으면 웨이브가
+ * 오를수록 소환수가 상대적으로 약해져서 후반에 있으나 마나가 된다.
+ */
+export interface SummonSpec {
+  readonly id: string;
+  readonly label: string;
+  readonly atkMul: number;
+  readonly hpMul: number;
+  /** 몸·겹침 크기. 판이 좁아서 이 값이 곧 밀도다. */
+  readonly sizeMul: number;
+  readonly lifeMs: number;
+  /** 한 번에 몇 마리 */
+  readonly count: number;
+  /**
+   * 세우면서 두를 보호막(최대 체력 대비). 없으면 안 두른다.
+   *
+   * 전에는 `castSkill`이 `spec.id === "bulwark"`로 갈랐다. 그러면 새
+   * 사양을 더할 때 전투 코드도 같이 고쳐야 한다는 것이 타입에 안 드러난다.
+   */
+  readonly shieldFrac?: number;
+}
+
+/**
+ * 분신. 주인과 **같은 그림**이라 새 스프라이트가 필요 없다 — 시트 20장이
+ * 아군 8·악몽 8·보스 4로 이미 소진돼 있고, 21번째 행은 시트에 없다.
+ * 화면에서는 알파로 갈라낸다(`render.ts`의 `drawCat`).
+ *
+ * **수치는 쓸어서 정했고, 그 결과가 포화였다.** 마릿수 2→3, 체력 0.25→0.5,
+ * 수명 6초→600초를 조합해 아홉 가지를 재니 전부 +0.3~+1.1웨이브 안에
+ * 들어왔다. 손잡이를 어느 쪽으로 돌려도 값이 안 늘어난다 — 분신은 맞아
+ * 주는 몸이라 적의 공격 횟수가 상한이고, 그 상한은 분신 수와 무관하다.
+ * 그중 가장 나은 조합(2마리·체력 0.5·20초, +1.11)을 쓴다.
+ *
+ * 워크래프트의 미러 이미지와 같은 성격이다: 화력은 거의 없고 대신 맞아 준다.
+ * 공격력을 30%로 둔 것은 분신이 화력 증폭이 되면 안 되기 때문이다 — 그러면
+ * `atk_mul` 유물과 같은 축이 되고, 유물 축이 안 벌어지는 그 이유를 반복한다.
+ * 분신의 값은 **적의 공격을 나눠 받는 것**이지 더 때리는 것이 아니다.
+ */
+export const MIRROR_IMAGE: SummonSpec = {
+  id: "mirror",
+  label: "분신",
+  atkMul: 0.3,
+  hpMul: 0.5,
+  sizeMul: 0.62,
+  lifeMs: 20000,
+  count: 2,
+};
+
+/**
+ * 새끼 고양이. 분신보다 작고 오래 간다.
+ *
+ * 크기는 밀도에서 나온 값이다. 10마리일 때 최근접 거리가 1.05(분리 목표
+ * 1.0)였으므로 같은 크기의 몸을 더 얹을 자리가 없다. 0.48짜리 둘은 사이가
+ * 0.48칸이면 되고 보통 고양이와는 0.74칸이라, 지금 밀도 안에 들어간다.
+ */
+export const KITTEN: SummonSpec = {
+  id: "kitten",
+  label: "새끼",
+  atkMul: 0.45,
+  hpMul: 0.35,
+  sizeMul: 0.48,
+  lifeMs: 9000,
+  count: 1,
+};
+
+/**
+ * 소환사가 부르는 셋. **셋 다 몸을 내보내지만 값이 어디에 있는지가 다르다.**
+ *
+ * 유물이 주는 분신·새끼와 겹치지 않게 잡았다. 그쪽은 스탯 유물과 다른 축을
+ * 만들려는 것이라 화력이 거의 없는 반면, 이쪽은 **직업의 본체**라 이 셋이
+ * 곧 소환사의 화력이자 내구다. 그래서 소환사 본인의 DPS를 여덟 직업 중
+ * 가장 낮게 잡았다(22~25) — 몸을 대신 내보내는 값을 거기서 치른다.
+ */
+
+/** 떼부르기 — 작은 것 셋. 숫자로 민다. 광역기 한 방에 같이 녹는다. */
+export const SWARM_PACK: SummonSpec = {
+  id: "swarm",
+  label: "떼",
+  atkMul: 0.32,
+  hpMul: 0.18,
+  sizeMul: 0.42,
+  lifeMs: 7000,
+  count: 3,
+};
+
+/** 버팀목 — 큰 것 하나. 오래 서서 맞아 준다(시전 시 보호막도 함께 걸린다). */
+export const BULWARK_UNIT: SummonSpec = {
+  id: "bulwark",
+  label: "버팀",
+  atkMul: 0.5,
+  hpMul: 0.9,
+  sizeMul: 0.9,
+  lifeMs: 11000,
+  count: 1,
+  shieldFrac: 0.5,
+};
+
+/** 되살리기 — 쓰러진 아군의 모습으로, 쓰러진 그 자리에서 한 번 더 선다. */
+export const ECHO_UNIT: SummonSpec = {
+  id: "echo",
+  label: "메아리",
+  atkMul: 0.6,
+  hpMul: 0.5,
+  sizeMul: 0.72,
+  lifeMs: 9000,
+  count: 1,
+};
+
+/**
+ * 소환수를 만든다. 주인 옆에 선다.
+ *
+ * 자리는 주인 좌표에서 살짝 밀어 놓기만 한다 — 정확한 배치는 `separate()`가
+ * 하고, 판 밖으로 나가는 것도 거기서 막힌다(`clampToField`).
+ */
+export function makeSummon(owner: Cat, spec: SummonSpec, index: number): Cat {
+  const cat = makeCat(owner.breed, owner.side, owner.cell, owner.level);
+  const angle = (Math.PI * 2 * (index + 0.5)) / Math.max(1, spec.count);
+  cat.maxHp = Math.max(1, Math.round(owner.maxHp * spec.hpMul));
+  cat.hp = cat.maxHp;
+  cat.atk = Math.max(1, Math.round(owner.atk * spec.atkMul));
+  cat.atkInterval = owner.atkInterval;
+  cat.evade = owner.evade;
+  // 주인의 이동 속도를 따라간다. 지금은 아군에 speedMul을 거는 것이 없어
+  // 항상 1이지만, 나중에 생기면 분신만 뒤처지는 것이 조용한 어긋남이 된다.
+  cat.speedMul = owner.speedMul;
+  cat.sizeMul = spec.sizeMul;
+  cat.summon = { ownerUid: owner.uid, lifeMs: spec.lifeMs };
+  cat.fx = owner.fx + Math.cos(angle) * 0.7;
+  cat.fy = owner.fy + Math.sin(angle) * 0.7;
+  cat.pose = owner.pose;
+  // 소환수는 스킬을 안 쓴다. 마나를 채워 두면 주인의 스킬이 복제돼 화력이
+  // 통째로 두 배가 된다 — 분신은 맞아 주는 몸이지 화력이 아니다.
+  cat.mana = 0;
+  cat.cooldown = owner.atkInterval;
+  return cat;
 }
 
 export function loadBest(): number {
@@ -554,7 +703,7 @@ export function newRun(seed?: number): RunState {
     lossReason: null,
     telegraphsSeen: 0,
     telegraphsEaten: 0,
-    map: makeStage(1),
+    map: makeStage(1, runSeed),
     step: 0,
     nodeKind: null,
     nodeWave: null,
@@ -567,6 +716,7 @@ export function newRun(seed?: number): RunState {
     dodgeCharges: 0,
     actCooldown: 0,
     relics: [],
+    summons: [],
   };
 
   // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
@@ -596,8 +746,15 @@ export function newRun(seed?: number): RunState {
  * 그 배열은 `BREEDS`와 index별로 직업·스탯·스킬이 같게 맞춰져 있으므로, 아래
  * 세 풀도 예전과 같은 순서·같은 스탯이 된다 — 바뀌는 것은 누구로 보이는가뿐이다.
  */
-const MELEE_IDS = NIGHTMARE_BREEDS.filter((b) => b.kind === "melee").map((b) => b.id);
-const RANGED_IDS = NIGHTMARE_BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
+/**
+ * 적을 뽑는 풀들. **`enemyBreedIds`가 나머지 연산에 쓰는 모듈러스 전부**를
+ * 내보낸다 — 계약 검사가 이 길이들과 보폭이 서로소인지 단언한다.
+ *
+ * 전체 명단 길이만 검사했다가 이 셋을 놓쳤다. 검사는 초록인데 돌격 웨이브가
+ * 굳어 있었다.
+ */
+export const MELEE_IDS = NIGHTMARE_BREEDS.filter((b) => b.kind === "melee").map((b) => b.id);
+export const RANGED_IDS = NIGHTMARE_BREEDS.filter((b) => b.kind === "ranged").map((b) => b.id);
 /**
  * 돌격대는 전사만 낸다.
  *
@@ -605,7 +762,7 @@ const RANGED_IDS = NIGHTMARE_BREEDS.filter((b) => b.kind === "ranged").map((b) =
  * 뒷줄로 뛰어든다. 유닛이 셋뿐인 웨이브 2에서 그건 즉사였다(측정: W2에서만 42명).
  * 돌격은 전사가 하는 것이고, 암살자가 하는 건 돌격이 아니다.
  */
-const WARRIOR_IDS = NIGHTMARE_BREEDS.filter((b) => b.cls === "warrior").map((b) => b.id);
+export const WARRIOR_IDS = NIGHTMARE_BREEDS.filter((b) => b.cls === "warrior").map((b) => b.id);
 
 /**
  * 적 배치 순서.
@@ -640,10 +797,45 @@ function enemyOrder(kind: WaveKind): number[] {
   return out;
 }
 
+/**
+ * 웨이브·자리 보폭. **둘 다 명단 길이와 서로소여야 한다.**
+ *
+ * 적 구성은 `(wave*WAVE_STRIDE + i*UNIT_STRIDE) % 길이`로 정한다. 웨이브
+ * 보폭이 길이와 서로소가 아니면 오프셋이 일부 값만 돌고, 그만큼 웨이브
+ * 종류가 줄어든다.
+ *
+ * 실제로 밟았다. 명단을 8종에서 12종으로 늘렸을 때 보폭이 3이라
+ * `gcd(3,12)=3` — 오프셋이 {0,3,6,9} 넷만 돌아 **웨이브 구성이 4웨이브마다
+ * 반복됐다.** 8종일 때는 `gcd(3,8)=1`이라 여덟 개가 다 돌았으므로, 명단을
+ * 늘렸을 뿐인데 다양성이 절반이 된 것이다. 도달 웨이브 중앙값도 11에서 9로
+ * 내려갔는데 **원인은 새 고양이의 스킬이 아니라 이 주기였다** — 회복
+ * 배수를 0으로 낮춰도 수치가 그대로였던 것으로 확인했다.
+ *
+ * 명단 길이와 서로소인 값 중 서로 다른 둘을 골랐다. 11은 소환사를 적에게도
+ * 주려다 악몽 명단이 15종이 됐을 때 잡은 값이다 — `gcd(5,15)=5`라 5는
+ * 무효였고 계약 검사가 잡았다. 적 소환사를 되물린 뒤 악몽은 12종이라
+ * 5도 다시 유효하지만, 되돌리면 웨이브 구성이 통째로 다시 섞여 방금 잰
+ * 수치가 전부 무효가 된다. 11도 12와 서로소이므로 그대로 둔다. 둘이 같으면 자리 i의 적이
+ * 웨이브 w+i의 첫 적과 늘 같아져 구성이 대각선으로 밀리기만 한다.
+ *
+ * `npm test`의 명단 계약이 서로소 여부를 단언한다 — 명단 길이를 또 바꾸면
+ * 여기서 걸린다.
+ */
+export const WAVE_STRIDE = 7;
+export const UNIT_STRIDE = 11;
+
 /** 웨이브 성격에 맞는 적 품종 목록을 뽑는다. */
 function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
-  const pick = (pool: number[], i: number) => pool[(wave * 3 + i * 5) % pool.length] ?? pool[0]!;
+  // **여기도 같은 보폭을 쓴다.** 전에는 3/5가 박혀 있었고, 품종을 12종으로
+  // 늘리면서 직업 풀 길이가 전사 2→3 · 근접 4→6 · 원거리 4→6이 됐다.
+  // `gcd(3,3)=3`이라 돌격 웨이브는 **웨이브 항이 통째로 사라져** 전 구간이
+  // 한 가지 구성으로 굳었고, 저격은 짝/홀 두 가지만 돌았다. `boss`/`mixed`만
+  // 상수로 갈고 이쪽을 놓쳤던 것이다 — 같은 결함을 한 경로만 고쳤다.
+  const pick = (pool: number[], i: number) =>
+    pool[(wave * WAVE_STRIDE + i * UNIT_STRIDE) % pool.length] ?? pool[0]!;
   const out: number[] = [];
+  /** 보스 호위에서 이미 쓴 직업. 같은 직업이 겹치는 것을 막는다. */
+  const seenCls = new Set<string>();
   for (let i = 0; i < count; i++) {
     switch (kind) {
       case "rush":
@@ -655,9 +847,36 @@ function enemyBreedIds(kind: WaveKind, count: number, wave: number): number[] {
         out.push(i < 2 ? pick(MELEE_IDS, i) : pick(RANGED_IDS, i));
         break;
       case "boss":
-      case "mixed":
-        out.push(NIGHTMARE_BREEDS[(wave * 3 + i * 5) % NIGHTMARE_BREEDS.length]?.id ?? 20);
+      case "mixed": {
+        const n = NIGHTMARE_BREEDS.length;
+        const base = (wave * WAVE_STRIDE + i * UNIT_STRIDE) % n;
+        // **보스 호위는 직업이 겹치지 않게 한다.**
+        //
+        // 그냥 뽑으면 둘 다 도적이 나올 수 있고, 도적은 전투 첫 프레임에
+        // 우리 뒷줄로 뛰어든다(`assassinLeap`). 웨이브 3의 첫 보스에서
+        // 실제로 그랬다 — 400판 중 125판이 거기서 끝났고(31%) 호위는
+        // 매번 뜬눈이+멍울이였다. 명단이 8종일 때는 같은 자리가 전사+
+        // 마법사라 우연히 괜찮았을 뿐, 제약이 없다는 것은 그때도 같았다.
+        //
+        // 이미 뽑은 직업을 피해 한 칸씩 민다. 한 바퀴를 다 돌아도 못 피하면
+        // 원래 자리를 쓴다 — 직업 수보다 호위가 많으면 겹칠 수밖에 없다.
+        let idx = base;
+        if (kind === "boss") {
+          for (let step = 0; step < n; step++) {
+            const cand = NIGHTMARE_BREEDS[(base + step) % n];
+            if (cand && !seenCls.has(cand.cls)) {
+              idx = (base + step) % n;
+              break;
+            }
+          }
+        }
+        const b = NIGHTMARE_BREEDS[idx];
+        // 쓰기도 읽기와 같은 조건 안에 둔다. 한쪽만 가드 밖에 있으면, 나중에
+        // 분산을 무조건 적용으로 바꿀 때 mixed 웨이브가 조용히 달라진다.
+        if (b && kind === "boss") seenCls.add(b.cls);
+        out.push(b?.id ?? 20);
         break;
+      }
     }
   }
   return out;
@@ -708,7 +927,9 @@ function buildBossWave(state: RunState, wave: number, scale: number): void {
   state.enemy[bossCell] = boss;
 
   const escortCells = ROW_ORDER.map((r) => r * BOARD_COLS + 0);
-  const ids = enemyBreedIds("mixed", BALANCE.bossEscortCount, wave);
+  // **"boss"로 부른다.** 예전엔 "mixed"였는데, 그러면 호위 직업이
+  // 아무 제약 없이 뽑혀 둘 다 도적이 되는 판이 생긴다.
+  const ids = enemyBreedIds("boss", BALANCE.bossEscortCount, wave);
   for (let i = 0; i < BALANCE.bossEscortCount; i++) {
     const cell = escortCells[i];
     const id = ids[i];
@@ -850,7 +1071,7 @@ export function applySynergies(state: RunState): void {
     // 조건을 못 맞추면 손해만 본다 — 그게 '질렀다'를 만드는 유일한 장치다.
     for (const r of state.relics) {
       apply(r.bane.key, r.bane.value);
-      if (relicActive(r, cats)) apply(r.boon.key, r.boon.value);
+      if (r.boon && relicActive(r, cats)) apply(r.boon.key, r.boon.value);
     }
 
     const ratio = cat.maxHp > 0 ? cat.hp / cat.maxHp : 1;
@@ -1071,6 +1292,9 @@ export function startBattle(state: RunState): void {
   // 개입 상태는 전투마다 초기화한다. 남아 있으면 다음 전투 첫 틱에 한꺼번에 터진다.
   state.pending.length = 0;
   state.actCooldown = 0;
+  // 소환수는 전투 밖에서 존재하지 않는다. 남겨 두면 다음 판을 지난 판의
+  // 분신과 함께 시작하고, 그 분신은 이미 사라진 주인을 uid로 가리킨다.
+  state.summons.length = 0;
   const wk = currentKind(state);
   state.dodgeCharges =
     wk === "boss" ? BALANCE.dodgeCharges : wk === "snipe" ? BALANCE.sniperDodgeCharges : 0;
@@ -1086,6 +1310,9 @@ export function startBattle(state: RunState): void {
 }
 
 export function finishWave(state: RunState, won: boolean, reason: "wipe" | "timeout" = "wipe"): void {
+  // 소환수는 전투 안에서만 산다. `startBattle`에서만 비우면 보상·지도
+  // 화면 내내 지난 판의 분신이 남는다(불변식 검사에서 678회 걸렸다).
+  state.summons.length = 0;
   if (!won) {
     state.lossReason = reason;
     state.phase = "gameover";

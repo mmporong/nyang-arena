@@ -1,4 +1,5 @@
 import { fieldDistance, type Cat, type PassiveId, type SkillId } from "./types.ts";
+import { BULWARK_UNIT, ECHO_UNIT, SWARM_PACK, type SummonSpec } from "./run.ts";
 
 /**
  * 스킬 여덟 개. 직업이 같아도 메커니즘이 겹치지 않게 짰다.
@@ -49,6 +50,13 @@ export const SKILLS: Record<SkillId, SkillMeta> = {
   pierce: { name: "꿰뚫기", desc: "일직선 위의 적을 전부 관통한다" },
   ember: { name: "불씨", desc: "목표를 태워 한동안 계속 피해를 준다" },
   frost_nova: { name: "서리 발톱", desc: "주변의 적을 얼려 묶어 둔다" },
+  guard: { name: "감싸기", desc: "주변 우리 편에게 보호막을 씌운다" },
+  gouge: { name: "급소치기", desc: "한 마리를 깊게 찌르고 잠시 재운다" },
+  volley: { name: "화살비", desc: "적 전체에게 화살을 흩뿌린다" },
+  mend: { name: "핥아주기", desc: "가장 다친 우리 편의 상처를 아물린다" },
+  swarm: { name: "떼부르기", desc: "작은 그림자 셋을 불러 앞으로 보낸다" },
+  bulwark: { name: "버팀목", desc: "커다란 그림자 하나를 세워 막아 낸다" },
+  echo: { name: "되살리기", desc: "쓰러진 우리 편의 모습으로 한 번 더 세운다" },
 };
 
 /** 스킬 한 번이 만들어내는 결과. battle.ts가 실제 피해 적용과 연출을 맡는다. */
@@ -64,6 +72,27 @@ export interface SkillResult {
   stuns: { target: Cat; ms: number }[];
   /** 지속 피해를 걸 대상 */
   dots: { target: Cat; dps: number; ms: number }[];
+  /**
+   * 회복시킬 우리 편.
+   *
+   * 이 게임에 **회복이 없었다.** 여덟 스킬이 전부 적을 어떻게 할지만 정했고,
+   * 그래서 전투가 시작되면 팀의 총 체력은 내려가기만 했다. 지키는 쪽 축이
+   * 생기면 "누구를 살릴까"가 배치와 구매에 새로 걸린다.
+   */
+  heals: { target: Cat; amount: number }[];
+  /** 보호막을 씌울 우리 편. 회복과 달리 미리 걸어 두는 것이다. */
+  shields: { target: Cat; amount: number }[];
+  /**
+   * 불러낼 소환수.
+   *
+   * **여기서는 무엇을 부를지만 적고 실제 생성은 `battle.ts`가 한다.**
+   * 소환은 `state.summons`를 건드려야 하는데 이 모듈은 `RunState`를 모른다 —
+   * 그 경계를 지켜야 헤드리스 시뮬과 브라우저가 같은 코드를 돈다.
+   *
+   * `from`이 `"fallen"`이면 쓰러진 우리 편을 본떠 그 자리에 세운다.
+   * 쓰러진 이가 없으면 시전자를 본뜬다.
+   */
+  summons: { spec: SummonSpec; from: "self" | "fallen" }[];
   /** 발동 시점에 시전자가 되돌려받는 마나 */
   manaRefund: number;
   /** 연출용 — 여러 발을 쏘는 스킬인지 */
@@ -71,10 +100,22 @@ export interface SkillResult {
 }
 
 function empty(): SkillResult {
-  return { hits: [], stuns: [], dots: [], manaRefund: 0, shots: [] };
+  return {
+    hits: [],
+    stuns: [],
+    dots: [],
+    heals: [],
+    shields: [],
+    summons: [],
+    manaRefund: 0,
+    shots: [],
+  };
 }
 
 const AURA = 1.6;
+
+/** 화살비가 한 번에 덮는 최대 마릿수. 상한이 없으면 판이 커질수록 값이 폭주한다. */
+const VOLLEY_TARGETS = 4;
 
 /** 시전자 주변 반경 안의 적. */
 function nearby(caster: Cat, foes: Cat[], radius: number): Cat[] {
@@ -158,8 +199,82 @@ export function runSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): 
       r.shots = [target];
       break;
     }
+
+    // ── 직업당 세 번째 고양이 ─────────────────────────
+    //
+    // 앞의 여섯과 메커니즘이 겹치지 않게 골랐다. 특히 `guard`·`mend`는 이
+    // 게임에 없던 **지키는 쪽**이다 — 그 전까지 스킬 여덟이 전부 적을 어떻게
+    // 할지만 정했다.
+    case "guard": {
+      // 자기 주변 우리 편에게 보호막. 앞에서 버티는 전사가 뒤를 덮는 그림이다.
+      // 시전자 자신도 `allies`에 들어 있으므로 같이 받는다.
+      const amount = Math.max(1, Math.round(caster.maxHp * 0.22));
+      for (const a of nearby(caster, allies, AURA)) r.shields.push({ target: a, amount });
+      break;
+    }
+    case "gouge": {
+      // 급소. 회전베기·대지 강타가 광역인 것과 달리 **한 마리를 지목해 끊는다.**
+      // 그림자 일격이 가장 약한 적을 마무리하는 것과 달리 지금 때리던 상대다 —
+      // 즉 앞에 선 위험한 하나를 잠깐 멈추는 쪽에 가깝다.
+      r.hits.push({ target, mul: 2.0 });
+      r.stuns.push({ target, ms: 900 });
+      break;
+    }
+    case "volley": {
+      // 목표 주변에 넓게 흩뿌린다. 꿰뚫기가 일직선이라 줄 선 적에게 강한 반면
+      // 이쪽은 뭉친 덩어리에 강하다.
+      //
+      // **처음에는 적 전체였는데 그게 판을 망가뜨렸다.** 다른 광역기는 전부
+      // 반경 1.6 안인데 이것만 무제한이라, 적이 쓰면 우리 열 마리가 한 번에
+      // 맞았다 — 도달 웨이브 중앙값이 11에서 9로, p25가 8에서 3으로 내려갔다.
+      // 넷으로 묶는다. 상한이 있어야 판 크기가 커져도 값이 안 폭주한다.
+      const near = [...nearby(target, foes, AURA * 1.7)]
+        .sort(
+          (a, b) =>
+            fieldDistance(target, a) - fieldDistance(target, b) ||
+            (a.uid < b.uid ? -1 : 1),
+        )
+        .slice(0, VOLLEY_TARGETS);
+      const list = near.length > 0 ? near : [target];
+      for (const f of list) r.hits.push({ target: f, mul: 0.75 });
+      r.shots = list;
+      break;
+    }
+    case "mend": {
+      // 가장 많이 다친 우리 편 하나를 아물린다. 비율로 고르는 이유는 절대량으로
+      // 고르면 체력이 큰 전사만 계속 받기 때문이다.
+      // 동점은 uid로 갈라 헤드리스 시뮬과 브라우저가 같은 대상을 고르게 한다.
+      const hurt = [...allies].sort(
+        (a, b) => a.hp / a.maxHp - b.hp / b.maxHp || (a.uid < b.uid ? -1 : 1),
+      )[0];
+      // 만피면 아무것도 하지 않는다 — `castSkill`이 이 빈 결과를 보고
+      // 마나를 안 깎고 평타로 떨어뜨린다.
+      if (hurt && hurt.hp < hurt.maxHp) {
+        r.heals.push({ target: hurt, amount: Math.max(1, Math.round(caster.atk * 2.4)) });
+      }
+      break;
+    }
+
+    // ── 소환사 ────────────────────────────────────────
+    //
+    // 셋 다 몸을 내보내지만 값이 어디에 있는지가 다르다 — 숫자, 내구, 되부름.
+    // 실제 생성은 `battle.ts`가 한다(`RunState`가 필요해서다).
+    case "swarm": {
+      r.summons.push({ spec: SWARM_PACK, from: "self" });
+      break;
+    }
+    case "bulwark": {
+      // 큰 것 하나. 보호막은 `battle.ts`가 소환된 몸에 바로 걸어 준다 —
+      // 여기서는 아직 그 몸이 없으므로 `shields`에 담을 수가 없다.
+      r.summons.push({ spec: BULWARK_UNIT, from: "self" });
+      break;
+    }
+    case "echo": {
+      // 쓰러진 우리 편의 모습으로, 쓰러진 그 자리에서. 없으면 자기 복제다.
+      r.summons.push({ spec: ECHO_UNIT, from: "fallen" });
+      break;
+    }
   }
 
-  void allies;
   return r;
 }

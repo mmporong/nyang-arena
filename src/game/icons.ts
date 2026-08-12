@@ -46,6 +46,7 @@ const ICON_NAMES = [
   "cls-rogue",
   "cls-archer",
   "cls-mage",
+  "cls-summoner",
   "relic-iron_collar",
   "relic-shadow_claw",
   "relic-hawk_eye",
@@ -54,6 +55,9 @@ const ICON_NAMES = [
   "relic-the_swarm",
   "relic-crown",
   "relic-rainbow_bell",
+  "relic-mirror_charm",
+  "relic-kitten_basket",
+  "relic-hollow_bell",
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];

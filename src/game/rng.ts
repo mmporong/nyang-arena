@@ -27,14 +27,56 @@ export function rngCalls(): number {
   return calls;
 }
 
+/** mulberry32 한 걸음. 전역 스트림과 독립 스트림이 같은 식을 쓴다. */
+function step(s: number): { next: number; value: number } {
+  const next = (s + 0x6d2b79f5) >>> 0;
+  let t = next;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return { next, value: ((t ^ (t >>> 14)) >>> 0) / 4294967296 };
+}
+
 /** mulberry32. 32비트 상태로 충분히 고르고, 의존성 없이 몇 줄이면 된다. */
 export function rng(): number {
   calls += 1;
-  state = (state + 0x6d2b79f5) >>> 0;
-  let t = state;
-  t = Math.imul(t ^ (t >>> 15), t | 1);
-  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  const r = step(state);
+  state = r.next;
+  return r.value;
+}
+
+/**
+ * **전역 스트림과 무관한 독립 난수기.**
+ *
+ * 왜 필요한가. 전역 스트림은 런당 하나인데, 전투의 회피 판정이 공격 횟수만큼
+ * 난수를 먹는다. 그래서 정책이 조금만 달라도 소비 횟수가 갈리고, **그 뒤에
+ * 생성되는 지도가 통째로 달라진다.** 같은 시드로 두 정책을 비교해도 짝비교가
+ * 아니라 독립 표본이 되는 것이다 — 결정 축 셋의 잡음 밴드가 넓은 이유가
+ * 여기 있다(지도 1.5/0.7/0.8, 배치 0.8/1.2/0.6, 유물 2.5/3.4/2.8).
+ *
+ * 지도를 이 줄기로 옮기면 같은 시드는 정책과 무관하게 **같은 지도**를 낸다.
+ * 통계에서 말하는 공통 난수(common random numbers)이고, 판수를 늘리는 것보다
+ * 훨씬 싸게 분산을 줄인다.
+ */
+export function makeRng(seed: number): () => number {
+  let s = seed >>> 0 || 1;
+  return () => {
+    const r = step(s);
+    s = r.next;
+    return r.value;
+  };
+}
+
+/**
+ * 시드와 갈래 번호를 섞어 서로 다른 줄기를 만든다.
+ *
+ * 그냥 더하면 (시드 1, 스테이지 2)와 (시드 2, 스테이지 1)이 같은 줄기가 된다.
+ * 황금비 상수를 곱해 흩어 놓는다.
+ */
+export function mixSeed(seed: number, branch: number): number {
+  let h = (seed >>> 0) ^ Math.imul(branch + 1, 0x9e3779b9);
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
 }
 
 /**

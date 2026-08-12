@@ -11,11 +11,22 @@
  * 여기서는 수십만 스텝을 본다. 처음 깨진 자리에서 시드와 웨이브를 함께
  * 남기므로 재현이 바로 된다.
  */
-import { stepBattle } from "../src/game/battle.ts";
+import { stepBattle, SUMMON_CAP } from "../src/game/battle.ts";
+import * as RUN from "../src/game/run.ts";
 import { newRun, startBattle, unitCap, currentKind } from "../src/game/run.ts";
 import { BOARD_COLS, BOARD_ROWS, livingCats } from "../src/game/types.ts";
 import { isBossStep, STAGE_STEPS } from "../src/game/map.ts";
 import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
+/**
+ * 소환 사양 **전부**에서 뽑는다. 전에는 유물 둘(분신·새끼)만 봤는데, 소환사
+ * 셋이 들어오면서 그 계산에 안 들어갔다 — 지금은 전부 20초 미만이라 우연히
+ * 통과했을 뿐이고, 유물 쪽 수명을 낮추면 거짓 실패가 났다.
+ */
+const MAX_SUMMON_LIFE_MS = Math.max(
+  ...Object.values(RUN)
+    .filter((v) => v && typeof v === "object" && typeof v.lifeMs === "number")
+    .map((v) => v.lifeMs),
+);
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
@@ -34,8 +45,38 @@ function fail(name, detail) {
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 
 function check(s, where) {
-  const all = [...s.ally, ...s.enemy].filter(Boolean);
+  const all = [...s.ally, ...s.enemy, ...s.summons].filter(Boolean);
   const uids = new Set();
+
+  // 소환수는 전투 안에서만 산다. 밖으로 새면 다음 판이 지난 판의 분신과
+  // 함께 시작하고, 그 분신은 이미 사라진 주인을 uid로 가리킨다.
+  if (s.phase !== "battle" && s.summons.length > 0) {
+    fail("전투 밖에 소환수가 남았다", `${where} ${s.summons.length}마리`);
+  }
+  for (const side of ["ally", "enemy"]) {
+    const n = s.summons.filter((c) => c.side === side).length;
+    if (n > SUMMON_CAP) fail("소환수가 상한을 넘었다", `${where} ${side} ${n}/${SUMMON_CAP}`);
+  }
+  for (const sm of s.summons) {
+    if (!sm.summon) fail("소환수인데 summon이 비었다", `${where} ${sm.breed.name}`);
+    else if (sm.summon.lifeMs > MAX_SUMMON_LIFE_MS) {
+      fail("소환수 수명이 한도를 넘는다", `${where} ${sm.summon.lifeMs}ms`);
+    }
+    // 진영은 둘 다 정상으로 둔다. 지금 악몽 명단에는 소환사가 없어 적
+    // 소환수는 안 생기지만, 나중에 생겨도 이 검사가 그대로 맞아야 한다.
+    // 대신 **보드와 진영이 어긋나면 안 된다**: 전투 계산이 `side`로 편을
+    // 가르므로, 여기가 틀어지면 적 소환수가 우리를 위해 싸운다.
+    if (sm.side !== "ally" && sm.side !== "enemy") {
+      fail("소환수 진영이 이상하다", `${where} ${sm.side}`);
+    }
+    if (!(sm.sizeMul > 0 && sm.sizeMul < 1)) {
+      fail("소환수가 작지 않다", `${where} sizeMul=${sm.sizeMul}`);
+    }
+    // 보드에 끼어 있으면 보유 한도·시너지·전멸 판정에 섞인다.
+    if (s.ally.includes(sm) || s.enemy.includes(sm)) {
+      fail("소환수가 보드에 들어갔다", `${where} ${sm.uid}`);
+    }
+  }
 
   for (const c of all) {
     const who = `${c.breed.name}(${c.side})`;

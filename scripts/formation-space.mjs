@@ -32,7 +32,7 @@ import { stepBattle } from "../src/game/battle.ts";
 import { makeCat, newRun, startBattle } from "../src/game/run.ts";
 import { BOSS_BREEDS, BOSS_RADIUS, bossKit } from "../src/game/bosses.ts";
 import { breedById } from "../src/game/breeds.ts";
-import { BOARD_COLS, emptyBoard, livingCats } from "../src/game/types.ts";
+import { BOARD_COLS, emptyBoard, livingCats, CLASS_LABEL } from "../src/game/types.ts";
 import { BALANCE } from "../src/game/balance.ts";
 import { makeBossBot } from "./bot-policy.mjs";
 
@@ -155,7 +155,7 @@ const FORMATIONS = {
 /** 보스 원형 셋. 체력·공격력을 같게 주고 이동 속도·사거리·기믹만 다르게 둔다. */
 const ARCHETYPES = BOSS_BREEDS.map((b) => ({
   breed: b,
-  label: `${b.name}(${{ warrior: "전사", rogue: "도적", mage: "마법사" }[b.cls] ?? b.cls})`,
+  label: `${b.name}(${CLASS_LABEL[b.cls]})`,
 }));
 
 /**

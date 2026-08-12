@@ -90,6 +90,19 @@ export interface RelicEffect {
   value: number;
 }
 
+/**
+ * **규칙 보너스.** 스탯 배수가 아니라 판의 규칙을 바꾼다.
+ *
+ * 여기까지 오게 된 이유가 있다. 유물 여덟 장이 전부 `atk_mul`·`hp_mul`·
+ * `atkspd_mul`·`evade_add`뿐이었고, 그건 **고양이를 사고 강화하는 것과 같은
+ * 축**이다. 같은 축에서 경쟁하면 유물을 골라도 총합이 비슷해져서 격차가
+ * 안 벌어진다 — 배율을 1.15~1.45로 쓸어 봐도 3.2~4.0을 오갔을 뿐이다.
+ * 손잡이를 더 돌리는 대신 축을 하나 늘린다.
+ */
+export type RelicRule =
+  /** 전투가 시작될 때 가장 앞선 고양이가 소환수를 부른다 */
+  | { kind: "summon"; spec: "mirror" | "kitten" };
+
 export interface Relic {
   readonly id: string;
   readonly name: string;
@@ -97,10 +110,20 @@ export interface Relic {
   readonly want: string;
   /** 대가를 사람 말로. */
   readonly toll: string;
+  /**
+   * 얻는 것을 사람 말로. **규칙 유물만 쓴다.**
+   *
+   * 스탯 유물은 '세진다'가 자명해서 카드가 조건과 대가만 보여줬다. 규칙
+   * 유물은 무엇이 일어나는지가 자명하지 않다 — 안 적으면 '다섯 마리 이하로
+   * 다니고 체력을 12% 잃는' 손해만 보이는 카드가 된다.
+   */
+  readonly gain?: string;
   readonly cost: number;
   readonly condition: RelicCondition;
-  /** 조건을 채웠을 때만 붙는다 */
-  readonly boon: RelicEffect;
+  /** 조건을 채웠을 때만 붙는다. 규칙 유물은 대신 boonRule을 쓴다. */
+  readonly boon?: RelicEffect;
+  /** 조건을 채웠을 때만 작동하는 규칙 보너스 */
+  readonly boonRule?: RelicRule;
   /** 조건과 무관하게 항상 붙는다 */
   readonly bane: RelicEffect;
 }
@@ -211,6 +234,76 @@ export const RELICS: readonly Relic[] = [
     boon: { key: "evade_add", value: 0.26 },
     bane: { key: "atkspd_mul", value: 0.9 },
   },
+  {
+    /**
+     * 다섯 번째 직업의 몫. 나머지 넷과 같은 꼴(직업 3마리 조건 + 스탯 보너스)로
+     * 맞췄다 — 소환사만 직업 유물이 없으면 그 직업으로 몰빵할 이유가 없고,
+     * `relic-space`의 몰빵 정책 다섯 중 하나가 빈손으로 도는 셈이 된다.
+     *
+     * 보너스를 공격 속도로 준 이유: 소환사의 값은 자기 평타가 아니라 **소환
+     * 주기**다. 마나가 평타로 차므로 손이 빨라지면 몸을 더 자주 내보낸다.
+     * 공격력을 주면 여덟 직업 중 가장 낮은 DPS를 조금 올릴 뿐이다.
+     */
+    id: "hollow_bell",
+    name: "빈 종",
+    want: "소환사 3마리 이상",
+    toll: "체력 20% 감소",
+    cost: 10,
+    condition: { kind: "class_count", cls: "summoner", min: 3 },
+    boon: { key: "atkspd_mul", value: 1.45 },
+    bane: { key: "hp_mul", value: 0.8 },
+  },
+  {
+    /**
+     * 규칙 유물 1호. 스탯 배수가 아니라 판 위의 몸을 늘린다.
+     *
+     * **처음에는 조건이 "다섯 마리 이하"였다.** 실측에서 보유 마릿수가
+     * 웨이브 1~16 내내 한도와 같았으므로(98~100%), 적게 데리고 다니는 것에
+     * 처음으로 값을 매기려는 의도였다. **재보니 안 됐다** — 다섯 마리로
+     * 묶은 정책은 평균 8.6웨이브로 직업 몰빵(14.5)에 5.9웨이브 뒤졌고,
+     * 분신이 주는 것은 +1.1이라 그 간격의 5분의 1도 못 메운다. 유물 하나로
+     * 살릴 수 있는 전략이 아니었고, 그러면 그 카드는 사면 손해인 카드다.
+     * 실제로 대가까지 얹으면 8.68 → 8.42로 오히려 내려갔다.
+     *
+     * 그래서 조건을 **실제로 쓰는 진형**으로 바꿨다. 분신은 맞아 주는 몸이라
+     * 맞는 자리에 서야 값을 하고, 그 자리가 곧 앞줄이다.
+     *
+     * 넷인 이유는 앞발 맹세(`lone_hunter`)가 이미 셋을 쓰기 때문이다. 조건이
+     * 똑같으면 한쪽을 위해 짠 진형이 다른 쪽을 공짜로 켜고, 그러면 조건을
+     * '살 수 있으면서 공짜가 아닌 것'으로 갈아엎은 취지가 그만큼 희석된다.
+     *
+     * 분신은 화력이 아니다(`MIRROR_IMAGE` 참고). 그래서 이 유물은 스탯
+     * 유물과 겹치지 않는다 — 다만 **겹치지 않는 것과 격차를 벌리는 것은
+     * 다른 일이고, 유물 축은 아직 미달이다.**
+     */
+    id: "mirror_charm",
+    name: "분신 부적",
+    want: "앞줄에 근접 4마리",
+    gain: "맨 앞 고양이가 분신 둘을 부른다",
+    toll: "체력 12% 감소",
+    cost: 11,
+    condition: { kind: "front_melee", min: 4 },
+    boonRule: { kind: "summon", spec: "mirror" },
+    bane: { key: "hp_mul", value: 0.88 },
+  },
+  {
+    /**
+     * 뒷줄 원거리를 세 마리 이상 세우면 새끼가 한 마리 붙는다.
+     *
+     * 새끼는 분신보다 작고 오래 간다. 뒷줄이 두꺼울수록 앞이 얇아지므로,
+     * 그 얇아진 앞을 대신 채우는 성격이다 — 조건과 보상이 같은 방향을
+     * 가리키면 유물이 그냥 보너스가 되고, 반대를 가리켜야 결정이 된다.
+     */
+    id: "kitten_basket",
+    name: "새끼 바구니",
+    want: "뒷줄에 원거리 3마리",
+    gain: "맨 앞 고양이가 새끼를 부른다",
+    toll: "공격력 10% 감소",
+    cost: 9,
+    condition: { kind: "back_ranged", min: 3 },
+    boonRule: { kind: "summon", spec: "kitten" },
+    bane: { key: "atk_mul", value: 0.9 },
+  },
 ];
 
 export function relicById(id: string): Relic | null {
@@ -231,7 +324,12 @@ export function checkRelicTable(): string[] {
     if (r.bane.value <= 0 || r.bane.value >= 1) {
       problems.push(`${r.id}: 대가 값이 불이익이 아님 (${r.bane.value})`);
     }
-    if (r.boon.key !== "evade_add" && r.boon.value <= 1) {
+    if (!r.boon && !r.boonRule) {
+      problems.push(`${r.id}: 보너스가 없다 (boon도 boonRule도 없음)`);
+    }
+    // 규칙 유물은 무엇이 일어나는지 카드가 말해야 한다. 안 그러면 손해만 적힌 카드가 된다.
+    if (r.boonRule && !r.gain) problems.push(`${r.id}: 규칙 유물인데 gain이 없다`);
+    if (r.boon && r.boon.key !== "evade_add" && r.boon.value <= 1) {
       problems.push(`${r.id}: 보너스 값이 이익이 아님 (${r.boon.value})`);
     }
     if (r.cost <= 0) problems.push(`${r.id}: 비용이 0 이하`);
