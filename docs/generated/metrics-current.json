@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "aa321e8",
+    "commit": "a63999f",
     "dirty": true,
     "reproducible": false,
     "node": "v22.23.2",
@@ -25,34 +25,34 @@
     "p25": 8,
     "median": 10,
     "p75": 13,
-    "max": 25,
-    "mean": 10.79,
+    "max": 30,
+    "mean": 10.71,
     "hitMaxWave": 0
   },
   "waveKinds": {
     "mixed": {
-      "tried": 610,
-      "passPct": 84.8,
+      "tried": 620,
+      "passPct": 85.2,
       "p50Sec": 4,
-      "p90Sec": 6.6
+      "p90Sec": 6.8
     },
     "rush": {
-      "tried": 593,
-      "passPct": 93.3,
+      "tried": 600,
+      "passPct": 92.3,
       "p50Sec": 4.5,
-      "p90Sec": 8.2
+      "p90Sec": 8.6
     },
     "snipe": {
-      "tried": 948,
-      "passPct": 87.6,
-      "p50Sec": 6.1,
-      "p90Sec": 11
+      "tried": 914,
+      "passPct": 88.1,
+      "p50Sec": 6,
+      "p90Sec": 10.7
     },
     "boss": {
-      "tried": 1085,
-      "passPct": 95.5,
-      "p50Sec": 25.3,
-      "p90Sec": 39.4
+      "tried": 1080,
+      "passPct": 95.1,
+      "p50Sec": 25.8,
+      "p90Sec": 40.6
     }
   },
   "balance": {
@@ -66,7 +66,7 @@
     "dodgeCharges": 2
   },
   "build": {
-    "bundleBytes": 112590
+    "bundleBytes": 112434
   },
   "openIssues": [
     {
