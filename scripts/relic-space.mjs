@@ -14,7 +14,17 @@ import { stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
 import { arrangeForRelics, makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
-const RUNS = Number(process.argv[2] ?? 300);
+const RUNS = Number(process.argv[2] ?? 2000);
+/**
+ * 시드 오프셋. **잡음 바닥을 재려고 넣었다.**
+ *
+ * 유물 목록을 건드리면 오퍼 생성이 난수를 다르게 먹어 같은 시드가 완전히
+ * 다른 판이 된다. 그래서 '유물 안 삼'처럼 유물을 한 장도 안 사는 정책의
+ * 평균조차 변경마다 11.3~12.7로 흔들렸다. 겹치지 않는 시드 블록으로 같은
+ * 코드를 두 번 돌리면, 그 흔들림 중 **코드와 무관한 몫**이 얼마인지 나온다.
+ * 그 폭보다 작은 차이는 근거로 쓰지 않는다.
+ */
+const SEED0 = Number(process.argv[3] ?? 0);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
 const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
@@ -35,6 +45,34 @@ const focus = (cls) => (offers) => {
 
 const byCost = (a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
 
+/**
+ * 소수정예 — **다섯 마리에서 영입을 멈춘다.**
+ *
+ * 다른 정책이 못 보는 것을 보려고 넣었다. 실측에서 보유 마릿수가 웨이브
+ * 1~16 내내 한도와 같았고(98~100%), 여섯 정책이 전부 한도까지 채웠다.
+ * 그러면 '적게 데리고 다니기'를 조건으로 삼는 유물은 **한 번도 켜지지
+ * 않고**, 켜지지 않는 것의 값은 잴 수 없다.
+ *
+ * 재지 못한 것을 깊이로 주장하지 않는다는 원칙의 반대편이다 — 새 축을
+ * 만들었으면 그 축을 밟는 정책도 같이 만들어야 측정이 정직해진다.
+ *
+ * **결과는 부정이었고, 그래서 목록에서 뺐다.** 평균 8.6으로 직업
+ * 몰빵(14.5)에 5.9웨이브 뒤진다. 그냥 나쁜 정책이라, 목록에 두면
+ * '최선과 최악의 격차'만 3.3 → 5.9로 부풀린다 — 지도 축에서 순위
+ * 통계를 전략으로 읽었던 것과 같은 함정이다. 나쁜 선택지를 더해서
+ * 넓어진 폭은 깊이가 아니다. 되살리려면 `POLICIES`에 다시 넣으면 된다.
+ */
+const fewElite = (offers, s) => {
+  const owned = s.ally.filter(Boolean).length;
+  const pool = owned >= 5 ? offers.filter((o) => o.kind !== "recruit") : offers;
+  return (
+    pool.find((o) => o.kind === "relic") ??
+    pool.filter((o) => o.kind === "upgrade").sort(byCost)[0] ??
+    [...pool].sort(byCost)[0] ??
+    null
+  );
+};
+
 const POLICIES = {
   "유물 안 삼": (a) => [...a].filter((o) => o.kind !== "relic").sort(byCost)[0],
   "균형 (가장 비싼 것)": (a) => [...a].sort(byCost)[0],
@@ -42,6 +80,7 @@ const POLICIES = {
   "도적 몰빵": focus("rogue"),
   "궁수 몰빵": focus("archer"),
   "마법사 몰빵": focus("mage"),
+  "소환사 몰빵": focus("summoner"),
 };
 
 function play(pick, seed) {
@@ -82,14 +121,14 @@ function play(pick, seed) {
 
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 
-console.log(`런 ${RUNS}회 · 배치·개입 정책 고정 · 구매 전략만 변경 · 시드 1~${RUNS}\n`);
+console.log(`런 ${RUNS}회 · 배치·개입 정책 고정 · 구매 전략만 변경 · 시드 ${SEED0 + 1}~${SEED0 + RUNS}\n`);
 console.log("전략                   최소  p10  p25  중앙값  p75  p90  최대   평균");
 const means = {};
 /** 시드 순서를 유지한 원본. 정렬본으로는 시드별 짝비교를 할 수 없다. */
 const bySeed = {};
 for (const [name, pick] of Object.entries(POLICIES)) {
   const raw = [];
-  for (let i = 0; i < RUNS; i++) raw.push(play(pick, i + 1));
+  for (let i = 0; i < RUNS; i++) raw.push(play(pick, SEED0 + i + 1));
   bySeed[name] = raw;
   const out = [...raw].sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;
@@ -118,7 +157,19 @@ for (const [name, pick] of Object.entries(POLICIES)) {
  * 있는 값이 아니다 — 여기서 재는 것은 "고를 값이 있는가"이지 "얼마나 낼 수
  * 있는가"가 아니다.
  */
-const focusNames = ["전사 몰빵", "도적 몰빵", "궁수 몰빵", "마법사 몰빵"];
+/**
+ * 몰빵 정책 이름. **`POLICIES`에서 뽑는다 — 손으로 적으면 안 된다.**
+ *
+ * 전에는 네 직업을 손으로 적어 뒀는데, 다섯 번째 직업(소환사)을 `POLICIES`에
+ * 넣고 이 줄을 못 고쳤다. 그래서 소환사 몰빵은 **돌기는 하는데 승수 집계에도
+ * 신탁에도, 그리고 관문 판정(`bestFocus`)에도 한 번도 안 들어갔다** — 표에는
+ * 뜨는데 "어느 몰빵이 이겼나"의 합이 RUNS와 맞아떨어져서 눈으로는 안 걸린다.
+ *
+ * 게임 쪽은 `everyClass`/`CLASS_ORDER`로 같은 실수를 타입이 막지만
+ * (`src/game/types.ts`), 하네스는 `.mjs`라 그 보호가 안 닿는다. 그러니 여기서는
+ * 목록을 손으로 적지 않는 것이 유일한 방어다.
+ */
+const focusNames = Object.keys(POLICIES).filter((n) => n.endsWith(" 몰빵"));
 const wins = new Map(focusNames.map((n) => [n, 0]));
 let oracleSum = 0;
 for (let i = 0; i < RUNS; i++) {
@@ -152,9 +203,30 @@ console.log(
 const vals = Object.values(means);
 const spread = Math.max(...vals) - Math.min(...vals);
 const noRelic = means["유물 안 삼"] ?? 0;
-const bestFocus = Math.max(...["전사", "도적", "궁수", "마법사"].map((c) => means[`${c} 몰빵`] ?? 0));
+const bestFocus = Math.max(...focusNames.map((n) => means[n] ?? 0));
 console.log(`\n최선과 최악의 격차: ${spread.toFixed(1)}웨이브`);
 console.log(`유물을 안 사는 것(${noRelic.toFixed(1)}) 대비 최고 몰빵(${bestFocus.toFixed(1)}): ${(bestFocus - noRelic).toFixed(1)}웨이브`);
+// **잡음 바닥.** 같은 코드를 겹치지 않는 시드 블록 셋에 300판씩 돌린 결과다
+// (시드 1~300 · 301~600 · 601~900). 코드가 한 줄도 안 바뀌었는데 이만큼
+// 흔들린다 — 명단이나 유물 목록을 건드리면 오퍼 생성이 난수를 다르게 먹어
+// 같은 시드가 완전히 다른 판이 되기 때문이다.
+//
+//   고양이 8종:  3.3 / 3.0 / 3.5   (폭 0.5)
+//   고양이 12종: 2.5 / 3.4 / 2.8   (폭 0.9)
+//
+// 두 밴드가 크게 겹치므로 **8종에서 12종으로 늘린 것이 이 축을 바꿨다고 말할
+// 수 없다.** 평균은 3.3에서 2.9로 내려갔지만 그 차이가 폭 안이다.
+//
+// 이것이 과거 보너스 배율 스윕(1.15~1.45)이 3.2~4.0을 무작위로 오간 이유다.
+// 그 폭 전체가 잡음 안이었고, 거기서 고른 값에는 근거가 없었다.
+// **0.5웨이브 미만의 차이는 근거로 쓰지 말 것.** 그보다 작은 것을 보려면
+// 시드를 늘려서(`npm run relics 900`) 다시 잴 것.
+console.log(
+  "  (잡음 바닥: 2000판에서 폭 0.2 — 같은 코드·다른 시드 블록으로 2.7 / 2.9 / 2.9.\n" +
+    "   300판에서는 2.8 / 2.1 / 2.9로 폭 0.8이었다. 즉 이 축의 실제 값은 2.8쯤이고\n" +
+    "   기준 4.0에 확실히 못 미친다 — 예전 배율 스윕이 3.2~4.0을 오간 것은 전부\n" +
+    "   300판의 잡음이었다)",
+);
 /**
  * 기준 4.0웨이브. 개입 축을 재조정할 때 빌드가 살아 있는지 지키는 관문이다 —
  * 실행 실력이 빌드 결정을 덮으면 안 된다는 것이 이 숫자의 존재 이유다.

@@ -17,7 +17,13 @@ import { stepBattle } from "../src/game/battle.ts";
 import { newRun, startBattle } from "../src/game/run.ts";
 import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
-const RUNS = Number(process.argv[2] ?? 300);
+const RUNS = Number(process.argv[2] ?? 1500);
+/**
+ * 시드 오프셋. 잡음 바닥을 재려고 넣었다 — `relic-space`·`placement-space`와
+ * 같은 이유다. 판정이 기준에 걸쳐 있을 때 그것이 신호인지 잡음인지는
+ * 겹치지 않는 시드 블록으로 같은 코드를 다시 돌려야만 갈린다.
+ */
+const SEED0 = Number(process.argv[3] ?? 0);
 const MAX_WAVE = 60;
 
 function play(pick, seed) {
@@ -69,7 +75,7 @@ for (const [name, pick] of Object.entries(MAP_POLICIES)) {
   const tally = { battle: 0, elite: 0, shop: 0, boss: 0 };
   perSeed[name] = [];
   for (let i = 0; i < RUNS; i++) {
-    const r = play(pick, i + 1);
+    const r = play(pick, SEED0 + i + 1);
     out.push(r.wave);
     perSeed[name][i] = r.wave;
     for (const k of Object.keys(tally)) tally[k] += r.seen[k];
@@ -88,6 +94,12 @@ for (const [name, pick] of Object.entries(MAP_POLICIES)) {
 const vals = Object.values(means);
 const spread = Math.max(...vals) - Math.min(...vals);
 console.log(`\n최선과 최악의 격차: ${spread.toFixed(1)}웨이브`);
+console.log(
+  "  (잡음 바닥: 1500판에서 폭 0.4 — 같은 코드·다른 시드 블록으로 0.5 / 0.8 / 0.9.\n" +
+    "   300판일 때는 0.7 / 1.9 / 0.6으로 폭 1.3이었고, 그 폭이 기준 1.5를 넘나들어\n" +
+    "   **시드 블록 하나만 보면 통과로 읽히는 판**이 실제로 나왔다. 그래서 기본을\n" +
+    "   1500판으로 올렸다. 판수를 줄여 재면 그만큼 판정을 믿을 수 없다)",
+);
 
 /**
  * 평균만 보면 "정찰이 제일 낫다"로 끝나고, 그게 사실이면 지도는 결정이 아니라

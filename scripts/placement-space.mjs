@@ -15,7 +15,14 @@ import { buyOffer, moveCat, newRun, startBattle } from "../src/game/run.ts";
 import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 import { BOARD_COLS , livingCats } from "../src/game/types.ts";
 
-const RUNS = Number(process.argv[2] ?? 300);
+const RUNS = Number(process.argv[2] ?? 1200);
+/**
+ * 시드 오프셋. 잡음 바닥을 재려고 넣었다 — `relic-space.mjs`와 같은 이유다.
+ * 유물 목록처럼 무관해 보이는 것을 건드려도 오퍼 생성이 난수를 다르게 먹어
+ * 같은 시드가 다른 판이 된다. 겹치지 않는 블록으로 같은 코드를 두 번 돌려
+ * 코드와 무관한 흔들림이 얼마인지부터 보고, 그보다 작은 차이는 안 믿는다.
+ */
+const SEED0 = Number(process.argv[3] ?? 0);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
 const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
@@ -123,7 +130,7 @@ console.log("배치                    최소   p10   p25  중앙값   p75   p90
 const means = {};
 for (const [name, arrange] of Object.entries(ARRANGERS)) {
   const out = [];
-  for (let i = 0; i < RUNS; i++) out.push(play(arrange, i + 1));
+  for (let i = 0; i < RUNS; i++) out.push(play(arrange, SEED0 + i + 1));
   out.sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;
   means[name] = avg;
@@ -157,6 +164,11 @@ const depth = bestPlace - auto;
 
 console.log(`\n폭   (최선 ${bestPlace.toFixed(1)} − 고의적 최악 ${Math.min(...vals).toFixed(1)}) = ${spread.toFixed(1)}웨이브`);
 console.log(`깊이 (최선 ${bestPlace.toFixed(1)} − 자동 배치 ${auto.toFixed(1)}) = ${depth.toFixed(1)}웨이브`);
+console.log(
+  "  (잡음 바닥: 1200판에서 0.7 / 1.0 / 0.7 — 기준 1.5에 한참 못 미친다.\n" +
+    "   폭은 3블록에서 뽑은 거친 추정이라 그 자체의 오차가 크다. 300판일 때도\n" +
+    "   0.9 / 1.1 / 1.0이었으니 값 자체는 판수에 크게 안 흔들리는 축이다)",
+);
 
 /**
  * 관문은 **폭**으로 잡는다. 이 시험의 임무는 "배치가 결정인가"를 증명하는 것이

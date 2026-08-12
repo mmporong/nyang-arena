@@ -15,6 +15,12 @@ import { buyOffer, newRun, relicActive, rerollOffers, startBattle, currentKind }
 import { livingCats } from "../src/game/types.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
+/**
+ * 시드 오프셋. 잡음 바닥을 재려고 넣었다 — 결정 축 셋과 같은 이유다.
+ * 특히 아래 궁합(팀 성격 x 웨이브 성격)은 표본 150 미만 칸을 통째로
+ * 버리므로, 어느 칸이 문턱을 넘느냐에 따라 값이 크게 튄다.
+ */
+const SEED0 = Number(process.argv[3] ?? 0);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
 const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
@@ -148,7 +154,7 @@ function playOne(seed) {
 }
 
 const results = [];
-for (let i = 0; i < RUNS; i++) results.push(playOne(i + 1));
+for (let i = 0; i < RUNS; i++) results.push(playOne(SEED0 + i + 1));
 results.sort((a, b) => a - b);
 
 const q = (p) => results[Math.min(results.length - 1, Math.floor(results.length * p))];
