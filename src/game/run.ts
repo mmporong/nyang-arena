@@ -508,6 +508,7 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     combo: 0,
     sizeMul: 1,
     summon: null,
+    taunt: false,
   };
 }
 
@@ -532,6 +533,8 @@ export interface SummonSpec {
    * 사양을 더할 때 전투 코드도 같이 고쳐야 한다는 것이 타입에 안 드러난다.
    */
   readonly shieldFrac?: number;
+  /** 적이 이것을 먼저 노리는가. `Cat.taunt` 참고 */
+  readonly taunt?: boolean;
 }
 
 /**
@@ -609,15 +612,25 @@ export const BULWARK_UNIT: SummonSpec = {
   shieldFrac: 0.5,
 };
 
-/** 되살리기 — 쓰러진 아군의 모습으로, 쓰러진 그 자리에서 한 번 더 선다. */
-export const ECHO_UNIT: SummonSpec = {
-  id: "echo",
-  label: "메아리",
-  atkMul: 0.6,
-  hpMul: 0.5,
-  sizeMul: 0.72,
-  lifeMs: 9000,
+/**
+ * 미끼 — 때리지는 못하고 **적의 눈을 끈다.**
+ *
+ * 공격력을 거의 0으로 둔 것이 핵심이다. 화력이 붙으면 그냥 몸 하나 더가 되어
+ * 떼부르기·버팀목과 같은 축이 된다. 이 소환수의 값은 **적의 공격 대상을
+ * 바꾸는 것** 하나뿐이고, 그래서 도발이 꺼지면 아무 값이 없다.
+ *
+ * 체력은 버팀목보다 낮다. 오래 버티는 것은 버팀목의 몫이고, 이쪽은 짧게
+ * 시선을 훔쳐 그 사이에 우리 뒷줄이 때린다.
+ */
+export const LURE_UNIT: SummonSpec = {
+  id: "lure",
+  label: "미끼",
+  atkMul: 0.12,
+  hpMul: 0.55,
+  sizeMul: 0.8,
+  lifeMs: 8000,
   count: 1,
+  taunt: true,
 };
 
 /**
@@ -638,6 +651,7 @@ export function makeSummon(owner: Cat, spec: SummonSpec, index: number): Cat {
   // 항상 1이지만, 나중에 생기면 분신만 뒤처지는 것이 조용한 어긋남이 된다.
   cat.speedMul = owner.speedMul;
   cat.sizeMul = spec.sizeMul;
+  cat.taunt = spec.taunt === true;
   cat.summon = { ownerUid: owner.uid, lifeMs: spec.lifeMs };
   cat.fx = owner.fx + Math.cos(angle) * 0.7;
   cat.fy = owner.fy + Math.sin(angle) * 0.7;

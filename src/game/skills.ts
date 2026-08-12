@@ -1,5 +1,5 @@
 import { fieldDistance, type Cat, type PassiveId, type SkillId } from "./types.ts";
-import { BULWARK_UNIT, ECHO_UNIT, SWARM_PACK, type SummonSpec } from "./run.ts";
+import { BULWARK_UNIT, LURE_UNIT, SWARM_PACK, type SummonSpec } from "./run.ts";
 
 /**
  * 스킬 여덟 개. 직업이 같아도 메커니즘이 겹치지 않게 짰다.
@@ -56,7 +56,7 @@ export const SKILLS: Record<SkillId, SkillMeta> = {
   mend: { name: "핥아주기", desc: "가장 다친 우리 편의 상처를 아물린다" },
   swarm: { name: "떼부르기", desc: "작은 그림자 셋을 불러 앞으로 보낸다" },
   bulwark: { name: "버팀목", desc: "커다란 그림자 하나를 세워 막아 낸다" },
-  echo: { name: "되살리기", desc: "쓰러진 우리 편의 모습으로 한 번 더 세운다" },
+  lure: { name: "미끼 세우기", desc: "적의 눈을 끄는 허깨비를 세운다" },
 };
 
 /** 스킬 한 번이 만들어내는 결과. battle.ts가 실제 피해 적용과 연출을 맡는다. */
@@ -88,11 +88,8 @@ export interface SkillResult {
    * **여기서는 무엇을 부를지만 적고 실제 생성은 `battle.ts`가 한다.**
    * 소환은 `state.summons`를 건드려야 하는데 이 모듈은 `RunState`를 모른다 —
    * 그 경계를 지켜야 헤드리스 시뮬과 브라우저가 같은 코드를 돈다.
-   *
-   * `from`이 `"fallen"`이면 쓰러진 우리 편을 본떠 그 자리에 세운다.
-   * 쓰러진 이가 없으면 시전자를 본뜬다.
    */
-  summons: { spec: SummonSpec; from: "self" | "fallen" }[];
+  summons: { spec: SummonSpec }[];
   /** 발동 시점에 시전자가 되돌려받는 마나 */
   manaRefund: number;
   /** 연출용 — 여러 발을 쏘는 스킬인지 */
@@ -260,18 +257,19 @@ export function runSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): 
     // 셋 다 몸을 내보내지만 값이 어디에 있는지가 다르다 — 숫자, 내구, 되부름.
     // 실제 생성은 `battle.ts`가 한다(`RunState`가 필요해서다).
     case "swarm": {
-      r.summons.push({ spec: SWARM_PACK, from: "self" });
+      r.summons.push({ spec: SWARM_PACK });
       break;
     }
     case "bulwark": {
       // 큰 것 하나. 보호막은 `battle.ts`가 소환된 몸에 바로 걸어 준다 —
       // 여기서는 아직 그 몸이 없으므로 `shields`에 담을 수가 없다.
-      r.summons.push({ spec: BULWARK_UNIT, from: "self" });
+      r.summons.push({ spec: BULWARK_UNIT });
       break;
     }
-    case "echo": {
-      // 쓰러진 우리 편의 모습으로, 쓰러진 그 자리에서. 없으면 자기 복제다.
-      r.summons.push({ spec: ECHO_UNIT, from: "fallen" });
+    case "lure": {
+      // 때리지 못하는 대신 **적의 눈을 끈다.** 떼부르기·버팀목이 몸의 숫자와
+      // 내구로 버티는 것과 달리, 이쪽은 누가 맞을지를 바꾼다.
+      r.summons.push({ spec: LURE_UNIT });
       break;
     }
   }

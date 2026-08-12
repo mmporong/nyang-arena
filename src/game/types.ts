@@ -181,7 +181,7 @@ export type SkillId =
   // 서로 다르다** — 숫자로 밀지, 큰 것 하나로 버틸지, 쓰러진 자리에서 되부를지.
   | "swarm"
   | "bulwark"
-  | "echo";
+  | "lure";
 
 export const BOARD_COLS = 5;
 export const BOARD_ROWS = 5;
@@ -351,6 +351,18 @@ export interface Cat {
    * 없는 쪽으로 실패한다.
    */
   summon: { ownerUid: string; lifeMs: number } | null;
+  /**
+   * 도발. 참이면 적이 이것을 **먼저** 노린다.
+   *
+   * 게임에 없던 축이다 — 그 전까지 타겟은 거리와 몰림으로만 정해졌고
+   * (`pickTarget`), 누가 맞을지를 고를 방법이 없었다. 소환사가 화력 최하인
+   * 대신 판을 버티게 하는 직업이라면, "몸이 대신 맞는다"를 실제로 만드는
+   * 장치가 필요하다.
+   *
+   * 지금은 미끼 소환수만 켠다. 수명이 다하면 소환수째로 사라지므로 따로
+   * 끄는 처리가 없다.
+   */
+  taunt: boolean;
 }
 
 export type Board = (Cat | null)[];

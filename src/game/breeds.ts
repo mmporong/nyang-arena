@@ -123,9 +123,9 @@ export const BREEDS: readonly Breed[] = [
     manaPerAttack: 34, skill: "bulwark", passive: null, cost: 4,
   },
   {
-    id: 31, name: "메아리", color: "crimson", cls: "summoner", kind: "ranged",
+    id: 31, name: "허깨비", color: "crimson", cls: "summoner", kind: "ranged",
     hp: 90, atk: 15, atkInterval: 680, range: 2.7, moveSpeed: 1.0,
-    manaPerAttack: 34, skill: "echo", passive: null, cost: 3,
+    manaPerAttack: 34, skill: "lure", passive: null, cost: 3,
   },
 ];
 

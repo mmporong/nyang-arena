@@ -86,6 +86,18 @@ const SEPARATION = 1.0;
 const CROWD_PENALTY = 0.7;
 
 /**
+ * 도발이 타겟 점수에서 깎는 값(칸).
+ *
+ * `pickTarget`은 **거리 + 몰림**으로만 고른다. 미끼는 여기서 거리를 그만큼
+ * 당겨 온 것처럼 보이게 만든다 — 무한이 아니라 유한한 값인 것이 중요하다.
+ * 무한이면 판 반대편의 미끼에게도 전부 달려가 진형이 통째로 무너지고,
+ * 그러면 도발이 "누가 맞을지 바꾸는 것"이 아니라 "적을 끌고 다니는 것"이
+ * 된다. 판의 최대 거리가 11칸쯤이므로 4는 "가까운 것들 사이에서는 이기고
+ * 판 건너편까지는 못 끄는" 크기다.
+ */
+const TAUNT_PULL = 4;
+
+/**
  * 예고가 터질 때의 연출 색. 전투 모듈이 테마를 임포트하지 않도록 리터럴로 둔다.
  *
  * 예고 색과 반드시 같아야 한다 — 붉은 장판이 뜨고 초록이 터지면 방금 무엇을
@@ -275,7 +287,7 @@ export function pickTarget(attacker: Cat, foes: Cat[], claimed?: Map<string, num
   let bestScore = Number.POSITIVE_INFINITY;
   for (const f of foes) {
     const crowd = claimed?.get(f.uid) ?? 0;
-    const score = fieldDistance(attacker, f) + crowd * CROWD_PENALTY;
+    const score = fieldDistance(attacker, f) + crowd * CROWD_PENALTY - (f.taunt ? TAUNT_PULL : 0);
     if (score < bestScore || (score === bestScore && best !== null && f.uid < best.uid)) {
       bestScore = score;
       best = f;
@@ -371,29 +383,12 @@ function castSkill(
    * 검사는 `runSkill`의 **의도**만 보므로 여기까지 와야 **결과**를 안다.
    */
   const born: Cat[] = [];
-  for (const { spec, from } of res.summons) {
-    /**
-     * 본뜰 원형.
-     *
-     * `"fallen"`이면 **쓰러진 우리 편**을 본떠 그 자리에 세운다. 살아 있는
-     * 것 중에 고르면 그냥 복제가 되어 되살린다는 성격이 사라진다. 아직
-     * 아무도 안 쓰러졌으면 시전자를 본뜬다.
-     *
-     * 동점은 uid로 갈라 헤드리스 시뮬과 브라우저가 같은 것을 고르게 한다.
-     */
-    let model = caster;
-    if (from === "fallen") {
-      const board = caster.side === "ally" ? state.ally : state.enemy;
-      const fallen = board
-        .filter((c): c is Cat => c !== null && !c.alive)
-        .sort((a, b) => b.maxHp - a.maxHp || (a.uid < b.uid ? -1 : 1))[0];
-      if (fallen) model = fallen;
-    }
-    const made = summon(state, caster, spec, model);
+  for (const { spec } of res.summons) {
+    const made = summon(state, caster, spec);
     if (made === 0) continue;
     for (const sm of state.summons.slice(-made)) {
-      // 버팀목은 세우면서 보호막까지 두른다. 시전 시점에는 그 몸이 아직
-      // 없으므로 `runSkill`의 `shields`로는 표현할 수 없다.
+      // 버팀목처럼 세우면서 보호막을 두르는 사양이 있다. 시전 시점에는 그 몸이
+      // 아직 없으므로 `runSkill`의 `shields`로는 표현할 수 없다.
       if (spec.shieldFrac) sm.shield = Math.max(sm.shield, Math.round(sm.maxHp * spec.shieldFrac));
       born.push(sm);
     }
