@@ -249,6 +249,18 @@ function fight(formation, archetype, seed, intervene, hp) {
    * 게임의 `inTelegraph`를 그대로 쓰므로 기하가 갈라질 여지도 없다.
    */
   let exposedCats = 0;
+  /**
+   * **취약도로 가중한 노출.** 마리수로만 세면 감싸기의 값이 원리적으로 안 보인다 —
+   * 체력 190인 전사와 90인 마법사를 똑같이 한 마리로 세니, 약한 것을 안쪽에
+   * 숨기는 배치가 표에 안 나타난다.
+   *
+   * 가중치는 **그 고양이가 잃을 체력 비율**이다. 예고 피해가
+   * `maxHp*frac*(1-share) + flat*share`이므로 비율로 고치면
+   * `frac*(1-share) + flat*share/maxHp` — 즉 `share`가 0보다 클 때만 체력이
+   * 갈린다. `share`가 0이면 모든 고양이가 같은 비율을 잃어 가중이 무의미하고,
+   * 그것이 이 게임에서 배치가 약한 이유 중 하나다(`telegraphFlatShare` 주석).
+   */
+  let exposedWeighted = 0;
   let firedCount = 0;
   /** 패턴별 노출 — 어느 모양이 대형을 가르는지 보려면 갈라 세야 한다. */
   const byPat = {};
@@ -288,6 +300,18 @@ function fight(formation, archetype, seed, intervene, hp) {
         if (tg.mode === "gather" ? !inside : inside) {
           exposedCats += 1;
           byPat[key].exposed += 1;
+          // 잃을 체력 비율. 상수항은 대형 비교에서 상쇄되므로 변동항만 남긴다.
+          /**
+           * 실제 피해 공식과 같은 모양으로 센다(`telegraphHit`).
+           *   피해 = maxHp*frac*(1-share) + boss.atk*flatMul*(frac/telegraphDmg)*share
+           * 이것을 maxHp로 나눈 **잃는 비율**이 곧 취약도 가중치다.
+           * `share`가 0이면 모두 `frac`으로 같아져 가중이 무의미해진다 —
+           * 그게 지금 상태이고, 배치가 약한 이유 중 하나다.
+           */
+          const share = BALANCE.telegraphFlatShare;
+          const bossAtk = bossNow ? bossNow.atk : 0;
+          const flat = bossAtk * BALANCE.telegraphFlatMul;
+          exposedWeighted += (1 - share) + (share * flat) / Math.max(1, c.maxHp);
         }
       }
     }
@@ -334,6 +358,7 @@ function fight(formation, archetype, seed, intervene, hp) {
     allyLeft,
     hpKept: lastHpFrac,
     exposed: firedCount > 0 ? exposedCats / firedCount : 0,
+    exposedW: firedCount > 0 ? exposedWeighted / firedCount : 0,
     spread0,
     spreadFire: firedCount > 0 ? spreadSum / firedCount : 0,
     byPat,
@@ -347,7 +372,7 @@ function survivors(formation, arch, intervene, hp, runs) {
 
 /** 승률과 함께 **어떻게 끝났는지**를 모은다. */
 function detail(formation, arch, intervene, hp, runs) {
-  const acc = { n: 0, win: 0, wipe: 0, timeout: 0, sec: 0, seen: 0, eaten: 0, bossLeft: 0, allyLeft: 0, hpKept: 0, exposed: 0, spread0: 0, spreadFire: 0, byPat: {} };
+  const acc = { n: 0, win: 0, wipe: 0, timeout: 0, sec: 0, seen: 0, eaten: 0, bossLeft: 0, allyLeft: 0, hpKept: 0, exposed: 0, exposedW: 0, spread0: 0, spreadFire: 0, byPat: {} };
   for (let i = 0; i < runs; i++) {
     const r = fight(formation, arch, i + 1, intervene, hp);
     if (r === null) continue;
@@ -362,6 +387,7 @@ function detail(formation, arch, intervene, hp, runs) {
     acc.allyLeft += r.allyLeft;
     acc.hpKept += r.hpKept;
     acc.exposed += r.exposed;
+    acc.exposedW += r.exposedW;
     acc.spread0 += r.spread0;
     acc.spreadFire += r.spreadFire;
     for (const [k, v] of Object.entries(r.byPat)) {
@@ -382,6 +408,7 @@ function detail(formation, arch, intervene, hp, runs) {
     allyLeft: acc.allyLeft / d,
     hpKeptPct: (acc.hpKept / d) * 100,
     exposed: acc.exposed / d,
+    exposedW: acc.exposedW / d,
     spread0: acc.spread0 / d,
     spreadFire: acc.spreadFire / d,
     byPat: Object.fromEntries(
@@ -566,7 +593,7 @@ function print(title, rows) {
         `  ${fname.padEnd(20)} ${l.padEnd(16)} ` +
           `전멸 ${d.wipePct.toFixed(0).padStart(3)}% · 시간초과 ${d.timeoutPct.toFixed(0).padStart(3)}% · ` +
           `${d.sec.toFixed(1).padStart(5)}초 · 예고 ${d.seen.toFixed(1).padStart(4)}/${d.eaten.toFixed(1).padStart(4)} · ` +
-          `노출 ${d.exposed.toFixed(2)}마리/예고 · 퍼짐 시작 ${d.spread0.toFixed(2)} → 예고때 ${d.spreadFire.toFixed(2)}`,
+          `노출 ${d.exposed.toFixed(2)}마리(가중 ${d.exposedW.toFixed(2)})/예고 · 퍼짐 시작 ${d.spread0.toFixed(2)} → 예고때 ${d.spreadFire.toFixed(2)}`,
       );
     }
   }
