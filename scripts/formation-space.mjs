@@ -250,6 +250,8 @@ function fight(formation, archetype, seed, intervene, hp) {
    */
   let exposedCats = 0;
   let firedCount = 0;
+  /** 패턴별 노출 — 어느 모양이 대형을 가르는지 보려면 갈라 세야 한다. */
+  const byPat = {};
   // 대형이 유지되는가 — 시작과 예고 시점의 퍼짐(무게중심까지 평균 거리)
   const spreadAt = (cats) => {
     if (cats.length === 0) return 0;
@@ -270,9 +272,23 @@ function fight(formation, archetype, seed, intervene, hp) {
     if (firing && before && before.length > 0) {
       firedCount += 1;
       spreadSum += spreadAt(before);
+      /**
+       * 발구르기는 `shape`가 원형이라 그냥 세면 원형과 섞인다. 보스 발밑에
+       * 생기는지로 갈라낸다 — 그게 이 패턴의 정의다.
+       */
+      const bossNow = s.enemy.find((c) => c?.alive && c.radius > 0);
+      const atBoss =
+        bossNow && Math.hypot(tg.fx - bossNow.fx, tg.fy - bossNow.fy) < 0.05;
+      const key =
+        tg.mode === "gather" ? "gather" : tg.shape === "circle" && atBoss ? "stomp" : tg.shape;
+      byPat[key] ??= { n: 0, exposed: 0 };
+      byPat[key].n += 1;
       for (const c of before) {
         const inside = inTelegraph(tg, c.fx, c.fy);
-        if (tg.mode === "gather" ? !inside : inside) exposedCats += 1;
+        if (tg.mode === "gather" ? !inside : inside) {
+          exposedCats += 1;
+          byPat[key].exposed += 1;
+        }
       }
     }
     if (s.phase === "battle") {
@@ -320,6 +336,7 @@ function fight(formation, archetype, seed, intervene, hp) {
     exposed: firedCount > 0 ? exposedCats / firedCount : 0,
     spread0,
     spreadFire: firedCount > 0 ? spreadSum / firedCount : 0,
+    byPat,
   };
 }
 
@@ -330,7 +347,7 @@ function survivors(formation, arch, intervene, hp, runs) {
 
 /** 승률과 함께 **어떻게 끝났는지**를 모은다. */
 function detail(formation, arch, intervene, hp, runs) {
-  const acc = { n: 0, win: 0, wipe: 0, timeout: 0, sec: 0, seen: 0, eaten: 0, bossLeft: 0, allyLeft: 0, hpKept: 0, exposed: 0, spread0: 0, spreadFire: 0 };
+  const acc = { n: 0, win: 0, wipe: 0, timeout: 0, sec: 0, seen: 0, eaten: 0, bossLeft: 0, allyLeft: 0, hpKept: 0, exposed: 0, spread0: 0, spreadFire: 0, byPat: {} };
   for (let i = 0; i < runs; i++) {
     const r = fight(formation, arch, i + 1, intervene, hp);
     if (r === null) continue;
@@ -347,6 +364,11 @@ function detail(formation, arch, intervene, hp, runs) {
     acc.exposed += r.exposed;
     acc.spread0 += r.spread0;
     acc.spreadFire += r.spreadFire;
+    for (const [k, v] of Object.entries(r.byPat)) {
+      acc.byPat[k] ??= { n: 0, exposed: 0 };
+      acc.byPat[k].n += v.n;
+      acc.byPat[k].exposed += v.exposed;
+    }
   }
   const d = Math.max(1, acc.n);
   return {
@@ -362,6 +384,9 @@ function detail(formation, arch, intervene, hp, runs) {
     exposed: acc.exposed / d,
     spread0: acc.spread0 / d,
     spreadFire: acc.spreadFire / d,
+    byPat: Object.fromEntries(
+      Object.entries(acc.byPat).map(([k, v]) => [k, v.n > 0 ? v.exposed / v.n : 0]),
+    ),
   };
 }
 
@@ -522,6 +547,17 @@ function print(title, rows) {
    * **왜 그 승률인지**를 칸마다 편다. 승률만 보면 0%가 전멸인지 시간초과인지
    * 알 수 없고, 그 둘은 고칠 곳이 완전히 다르다.
    */
+  console.log(`\n  [패턴별 노출] 예고 모양마다 잘못 선 마리수 — 어느 모양이 대형을 가르나`);
+  for (const l of labels) {
+    const pats = new Set();
+    for (const byArch of Object.values(rows)) for (const k of Object.keys(byArch[l].byPat)) pats.add(k);
+    for (const pat of [...pats].sort()) {
+      const line = Object.entries(rows)
+        .map(([f, byArch]) => `${f.split(" ")[0]} ${(byArch[l].byPat[pat] ?? 0).toFixed(2)}`)
+        .join(" · ");
+      console.log(`  ${l.padEnd(14)} ${pat.padEnd(7)} ${line}`);
+    }
+  }
   console.log(`\n  [상세] 전멸% · 시간초과% · 전투초 · 예고 본/맞은 · 보스잔여% · 생존마리`);
   for (const [fname, byArch] of Object.entries(rows)) {
     for (const l of labels) {

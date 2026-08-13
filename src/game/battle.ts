@@ -944,8 +944,27 @@ function stepToward(cat: Cat, target: Cat, stepMs: number): void {
 
   cat.fx += (dx / d) * travel;
   cat.fy += (dy / d) * travel;
+  holdLane(cat, stepMs);
   cat.pose = "run";
   cat.poseTimer = 0;
+}
+
+/**
+ * 자기 줄로 되돌린다. **전진은 안 건드리고 옆으로 흐르는 것만 붙잡는다.**
+ *
+ * 이게 없으면 배치가 전투 몇 초 만에 지워진다 — 모두가 목표를 향해 직선으로
+ * 걸으므로 시작 자리와 무관하게 같은 모양으로 수렴한다(`BALANCE.lanePull`
+ * 주석의 실측 참고). 그러면 플레이어가 고른 대형이 예고 시점에는 남아 있지
+ * 않고, 배치가 결정이 아니라 장식이 된다.
+ *
+ * 벤치(`cell < 0`)에 있거나 소환수처럼 자기 자리가 뜻이 없는 경우는 건드리지
+ * 않는다. 소환수는 주인의 셀을 물려받으므로 그 줄로 끌면 주인 자리로 빨려간다.
+ */
+function holdLane(cat: Cat, stepMs: number): void {
+  if (BALANCE.lanePull <= 0 || cat.summon || cat.cell < 0) return;
+  const home = cellToField(cat.side, cat.cell);
+  const pull = Math.min(1, BALANCE.lanePull * (stepMs / 1000));
+  cat.fy += (home.fy - cat.fy) * pull;
 }
 
 /** 같은 편끼리 뭉치지 않도록 살짝 밀어낸다. 길찾기가 아니라 겹침 방지다. */
@@ -1325,10 +1344,22 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
 
   if (mode === "gather") {
     const c = centroid(foes);
+    /**
+     * 안전지대를 **팀 쪽에 가깝게** 둔다.
+     *
+     * 중간(0.5)에 두었더니 뭉쳐 있든 흩어져 있든 **아무도 그 안에 없었다.**
+     * 그러면 모이기가 대형을 전혀 안 가른다 — 뭉침을 보상해야 할 패턴인데
+     * 실측에서 분산이 서리귀(모이기 2/4)까지 이겼다(3.06 vs 3.50).
+     *
+     * 0.25면 뭉친 팀은 상당수가 이미 안에 있고, 흩어진 팀은 바깥 것들이
+     * 남는다. 그래도 완전히 팀 위에 두지는 않는다 — 그러면 뭉치기만 하면
+     * 공짜로 통과라 **개입할 이유가 사라진다.** 여전히 몇 걸음은 움직여야 한다.
+     */
+    const GATHER_BIAS = 0.25;
     return {
       ...base,
-      fx: (c.fx + boss.fx) / 2,
-      fy: (c.fy + boss.fy) / 2,
+      fx: c.fx + (boss.fx - c.fx) * GATHER_BIAS,
+      fy: c.fy + (boss.fy - c.fy) * GATHER_BIAS,
       dirX: 0,
       dirY: 0,
       // 흩어짐 원형(1.6)보다 넓다. 모이라고 해 놓고 못 모이면 규칙이 아니라 벌이다.
@@ -1357,7 +1388,17 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
     fy: boss.fy,
     dirX: dx / len,
     dirY: dy / len,
-    arg: shape === "line" ? 0.75 : 0.7,
+    /**
+     * 직선은 **폭(칸)**, 부채꼴은 **반각(라디안)**이다. 단위가 달라 헷갈리기 쉽다.
+     *
+     * 부채꼴이 0.7rad였다 — 반각 40도면 전체 80도라 보스에서 팀을 향해 부챗살을
+     * 펴면 사실상 전원을 덮는다. 실측으로 6마리 중 5~6마리를 항상 맞혔고,
+     * 그래서 **다른 모든 패턴의 신호를 묻어버렸다.** 대형을 어떻게 잡아도
+     * 부채꼴 한 방이면 같은 결과다.
+     *
+     * 0.35rad(반각 20도, 전체 40도)면 축에서 벗어난 것은 빠져나간다.
+     */
+    arg: shape === "line" ? 0.75 : 0.35,
     reach: shape === "line" ? 14 : 5.5,
   };
 }

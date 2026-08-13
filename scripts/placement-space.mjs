@@ -11,7 +11,8 @@
  * 실행: npm run placement
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, moveCat, newRun, startBattle } from "../src/game/run.ts";
+import { buyOffer, moveCat, newRun, startBattle, bossIndexAt } from "../src/game/run.ts";
+import { bossForIndex } from "../src/game/bosses.ts";
 import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 import { BOARD_COLS , livingCats } from "../src/game/types.ts";
 
@@ -75,6 +76,26 @@ const ARRANGERS = {
       ...ranged.map((_, i) => front[i % front.length]),
       ...melee.map((_, i) => back[i % back.length]),
     ]);
+  },
+
+  /**
+   * **다음 보스를 보고 대형을 고른다.** 상황을 읽는 유일한 정책이다.
+   *
+   * 나머지 넷은 판 내내 같은 대형을 쓴다. 구매 축에서 똑같은 실수를 했다가
+   * 로스터를 읽는 정책을 넣으니 0.9가 2.5로 바뀌었다 — **재는 정책이 없으면
+   * 있는 깊이도 0으로 나온다.**
+   *
+   * 어느 보스에 어느 대형인지는 `npm run formation`이 실측한 값이다
+   * (예고당 잘못 선 마리수, 낮을수록 유리):
+   *   무쇠발톱  분산 2.46 · 정석 3.17
+   *   살금이    정석 1.82 · 분산 2.00
+   *   서리귀    분산 1.31 · 정석 2.71
+   */
+  "보스 읽고 고름": (state) => {
+    const boss = bossForIndex(bossIndexAt(state));
+    // 살금이(10)만 모이기 위주라 뭉쳐 서는 쪽이 낫다 — 그때는 기본 배치를 쓴다.
+    if (boss?.id === 10) return;
+    ARRANGERS["세로로 분산"](state);
   },
 
   "세로로 분산": (state) => {
