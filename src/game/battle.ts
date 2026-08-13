@@ -1323,8 +1323,11 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
   if (foes.length === 0) return null;
   const kit = bossKit(boss.breed.id);
   const pattern = kit.patterns[idx % kit.patterns.length]!;
-  const mode: TelegraphMode = pattern === "gather" ? "gather" : "avoid";
-  const shape: TelegraphShape = pattern === "gather" || pattern === "stomp" ? "circle" : pattern;
+  const mode: TelegraphMode = pattern === "gather" || pattern === "hearth" ? "gather" : "avoid";
+  const shape: TelegraphShape =
+    pattern === "gather" || pattern === "stomp" || pattern === "hearth" || pattern === "quake"
+      ? "circle"
+      : pattern;
   const base = { shape, mode, fuse: TELEGRAPH_FUSE_MS, fuseMax: TELEGRAPH_FUSE_MS };
 
   /**
@@ -1338,6 +1341,38 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
    * 이것만 자리가 고정이라 **보스에게서 얼마나 떨어져 서느냐**가 답이 된다.
    * 반경을 넓게 잡는 이유는 근접이 붙어 있는 거리를 확실히 덮기 위해서다.
    */
+  /**
+   * 화톳불(`hearth`)과 땅울림(`quake`) — **세로 자리가 판에 고정된 예고.**
+   *
+   * 나머지는 전부 팀을 따라온다(원형·부채꼴은 무게중심, 직선은 가장 먼 아군,
+   * 모이기는 그 중간). 표적이 팀 자신이면 **어디에 서 있든 같은 비율로
+   * 걸린다** — 그게 배치가 결정이 아니었던 뿌리다.
+   *
+   * 가로(fx)는 고정할 수 없다. 근접은 사거리 0.8, 원거리는 2.8에서 멈추므로
+   * 가로 위치는 대형이 아니라 직업이 정한다. **세로(fy)는 순수하게 배치다** —
+   * 어느 행에 서느냐는 플레이어가 고른 것뿐이다. 그래서 세로만 판 한가운데로
+   * 고정하고 가로는 전선을 따라간다.
+   *
+   * 둘은 서로 반대다. 화톳불은 가운데 행이 안전지대라 **뭉치기**를, 땅울림은
+   * 가운데 행이 위험지대라 **가장자리로 흩어지기**를 보상한다. 이 게임에
+   * 뭉치기를 보상하는 것이 모이기(움직이는 보스에게만 작동한다)뿐이었는데
+   * 화톳불이 그 자리를 채운다.
+   */
+  if (pattern === "hearth" || pattern === "quake") {
+    const c = centroid(foes);
+    const midY = (BOARD_ROWS - 1) / 2;
+    return {
+      ...base,
+      fx: c.fx,
+      fy: midY,
+      dirX: 0,
+      dirY: 0,
+      // 화톳불은 모이기와 같은 이유로 넓다 — 모이라고 해 놓고 못 모이면 벌이다.
+      arg: pattern === "hearth" ? 1.9 : 1.5,
+      reach: 0,
+    };
+  }
+
   if (pattern === "stomp") {
     return { ...base, fx: boss.fx, fy: boss.fy, dirX: 0, dirY: 0, arg: 2.4, reach: 0 };
   }

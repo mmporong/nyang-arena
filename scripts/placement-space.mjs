@@ -57,6 +57,9 @@ const CENTER_OUT = [2, 1, 3, 0, 4];
 /** 열 0이 우리 뒷줄, 열 4가 적과 맞닿는 앞줄이다. */
 const cellsIn = (col) => CENTER_OUT.map((r) => r * BOARD_COLS + col);
 
+/** (행, 열) → 셀 번호. formation-space의 cell()과 같은 규칙이다. */
+const c2 = (row, col) => row * BOARD_COLS + col;
+
 const ARRANGERS = {
   "그대로 (bestFreeCell)": null,
 
@@ -79,23 +82,38 @@ const ARRANGERS = {
   },
 
   /**
+   * 감싸기 — 원거리를 가운데 두고 근접이 둘러싼다.
+   * `formation-space.mjs`의 같은 이름 대형과 자리를 맞춘다.
+   */
+  "감싸기 (원거리 보호)": (state) => {
+    const u = livingUnits(state);
+    const melee = u.filter((c) => c.breed.kind === "melee");
+    const ranged = u.filter((c) => c.breed.kind === "ranged");
+    const ring = [c2(1, 2), c2(2, 3), c2(3, 2), c2(0, 2), c2(4, 2), c2(2, 4)];
+    const core = [c2(1, 1), c2(2, 1), c2(3, 1), c2(0, 1), c2(4, 1), c2(2, 0)];
+    put(state, [...melee, ...ranged], [
+      ...melee.map((_, i) => ring[i % ring.length]),
+      ...ranged.map((_, i) => core[i % core.length]),
+    ]);
+  },
+
+  /**
    * **다음 보스를 보고 대형을 고른다.** 상황을 읽는 유일한 정책이다.
    *
-   * 나머지 넷은 판 내내 같은 대형을 쓴다. 구매 축에서 똑같은 실수를 했다가
+   * 나머지는 판 내내 같은 대형을 쓴다. 구매 축에서 똑같은 실수를 했다가
    * 로스터를 읽는 정책을 넣으니 0.9가 2.5로 바뀌었다 — **재는 정책이 없으면
    * 있는 깊이도 0으로 나온다.**
    *
-   * 어느 보스에 어느 대형인지는 `npm run formation`이 실측한 값이다
-   * (예고당 잘못 선 마리수, 낮을수록 유리):
-   *   무쇠발톱  분산 2.46 · 정석 3.17
-   *   살금이    정석 1.82 · 분산 2.00
-   *   서리귀    분산 1.31 · 정석 2.71
+   * 매핑은 `npm run formation`의 실측이다(예고당 잘못 선 마리수, 낮을수록 유리):
+   *   무쇠발톱  분산 2.00 · 뭉침 2.67 · 감싸기 2.83 · 정석 2.85
+   *   살금이    정석 1.82 · 감싸기 1.83 · 뭉침 2.00 · 분산 2.02
+   *   서리귀    감싸기 2.33 · 정석 2.48 · 분산 2.72 · 뭉침 2.83
    */
   "보스 읽고 고름": (state) => {
     const boss = bossForIndex(bossIndexAt(state));
-    // 살금이(10)만 모이기 위주라 뭉쳐 서는 쪽이 낫다 — 그때는 기본 배치를 쓴다.
-    if (boss?.id === 10) return;
-    ARRANGERS["세로로 분산"](state);
+    if (boss?.id === 9) return ARRANGERS["세로로 분산"](state); // 무쇠발톱 → 분산
+    if (boss?.id === 11) return ARRANGERS["감싸기 (원거리 보호)"](state); // 서리귀 → 감싸기
+    // 살금이(10)는 정석이 최선이고 그게 기본 배치와 같은 꼴이다.
   },
 
   "세로로 분산": (state) => {

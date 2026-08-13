@@ -54,7 +54,7 @@ export interface BossKit {
    * 생기는 원형이다 — 다른 넷이 전부 팀을 따라오는 것과 달리 이것만 자리가
    * 고정이라, **보스에게서 얼마나 떨어져 서느냐**가 대형의 결정이 된다.
    */
-  readonly patterns: readonly (TelegraphShape | "gather" | "stomp")[];
+  readonly patterns: readonly (TelegraphShape | "gather" | "stomp" | "hearth" | "quake")[];
   /** 문턱 몇 개마다 순간이동하는가. 0이면 안 한다 */
   readonly teleportEvery: number;
   /** 취약 창이 열리는 체력 비율 */
@@ -87,7 +87,7 @@ export interface BossKit {
 export const BOSS_KITS: Record<number, BossKit> = {
   // 무쇠발톱 — 육중하게 **발밑을 구른다.** 발구르기·원형 위주라 답은 흩어지기.
   //   느리게 걸어오므로 거리를 벌 시간이 있다.
-  9: { power: 1.0, patterns: ["stomp", "circle", "stomp", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
+  9: { power: 1.0, patterns: ["quake", "stomp", "quake", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
   // 살금이 — 자리를 옮기며 **안전한 자리를 연다.** 모이기 위주라 답은 뭉치기.
   //   순간이동이 안전지대를 매번 다른 곳에 열어 주므로 모이기가 여기서만 산다.
   // teleportEvery를 1로 뒀더니 근접이 영영 못 붙어 W10 통과율이 1.1%였다.
@@ -96,7 +96,7 @@ export const BOSS_KITS: Record<number, BossKit> = {
   // 서리귀 — 제자리에서 **원형만 던진다.** 답은 흩어지기이고, 무쇠발톱과 답은
   //   같지만 창이 늦게 열리고 길다 — 오래 버티고 한 번에 몰아치는 보스.
   //   모이기를 빼는 이유는 제자리 보스에게서 그 패턴이 아무것도 안 가르기 때문이다.
-  11: { power: 1.0, patterns: ["circle", "cone", "circle", "line"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
+  11: { power: 1.0, patterns: ["hearth", "circle", "hearth", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
 };
 
 export function bossKit(breedId: number): BossKit {
