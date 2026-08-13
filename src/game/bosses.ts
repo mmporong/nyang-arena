@@ -47,7 +47,14 @@ export interface BossKit {
    * `"gather"`는 원형이되 **안으로 들어가야 하는** 예고다. 흩어짐만 있으면
    * 예고가 뜰 때마다 그냥 누르면 되므로 판단이 없다.
    */
-  readonly patterns: readonly (TelegraphShape | "gather")[];
+  /**
+   * 예고 패턴 차례.
+   *
+   * `gather`는 안에 있어야 하고 나머지는 피해야 한다. `stomp`는 **보스 발밑**에
+   * 생기는 원형이다 — 다른 넷이 전부 팀을 따라오는 것과 달리 이것만 자리가
+   * 고정이라, **보스에게서 얼마나 떨어져 서느냐**가 대형의 결정이 된다.
+   */
+  readonly patterns: readonly (TelegraphShape | "gather" | "stomp")[];
   /** 문턱 몇 개마다 순간이동하는가. 0이면 안 한다 */
   readonly teleportEvery: number;
   /** 취약 창이 열리는 체력 비율 */
@@ -56,16 +63,33 @@ export interface BossKit {
   readonly vulnerableMs: number;
 }
 
+/**
+ * 보스마다 **다른 대형을 요구한다.**
+ *
+ * 예고 모양이 답을 정한다(`makeTelegraph` 참고).
+ * - `circle`(피하기)은 **무게중심**에 생긴다 → 뭉쳐 있으면 통째로 맞는다. 답은 분산
+ * - `gather`는 무게중심과 보스의 중간에 생기고 **안에 있어야** 한다 → 답은 뭉침
+ * - `line`은 **가장 먼 아군**을 향해 쏜다 → 뒷줄 원거리가 표적. 답은 감싸기
+ * - `cone`은 무게중심을 향한다 → 그 축에 늘어서 있으면 손해
+ *
+ * 전에는 셋이 이 모양들을 고루 섞어 써서 **어느 보스에나 같은 대형이 최선**이었다
+ * (측정: 뭉침/정석/뭉침, 지킨 체력 폭 8.6%p). 답이 안 갈리면 "다음 보스를 보고
+ * 대형을 고른다"가 결정이 아니라 장식이다.
+ *
+ * 이제 셋이 각자 한 모양에 기울어 있다. 기울이되 다른 모양도 하나씩 남겨 둔다 —
+ * 한 모양만 쓰면 대형 하나로 완전히 봉인되어 그것대로 결정이 사라진다.
+ */
 export const BOSS_KITS: Record<number, BossKit> = {
-  // 무쇠발톱 — 교과서. 세 패턴을 다 보여주고 절반에서 한 번 크게 연다.
-  9: { power: 1.0, patterns: ["circle", "line", "gather", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
-  // 살금이 — 계속 자리를 옮긴다. 근접이 붙기 어렵고 예고 기준점이 매번 바뀐다.
+  // 무쇠발톱 — 육중하게 **발밑을 구른다.** 발구르기 위주라 답은 멀찍이 서기.
+  //   느리게 걸어오므로 거리를 벌 시간이 있다. 근접을 앞에 붙일수록 손해다.
+  9: { power: 1.0, patterns: ["stomp", "circle", "stomp", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
+  // 살금이 — 자리를 옮겨 **가장 먼 것을 노린다.** 직선 위주라 답은 뒷줄 감싸기.
   //   대신 창이 일찍 열리고 짧다. 준비된 팀이 짧은 창을 잡는 보스.
   // teleportEvery를 1로 뒀더니 근접이 영영 못 붙어 W10 통과율이 1.1%였다.
   // 순간이동은 "붙었다 놓쳤다"의 리듬이어야지 추격전이 되면 안 된다.
-  10: { power: 0.85, patterns: ["cone", "gather", "line"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
-  // 서리귀 — 제자리에서 원형만 던진다. 흩어지기가 유일한 답이고,
-  //   대신 창이 늦게 열리지만 길다. 오래 버티고 한 번에 몰아치는 보스.
+  10: { power: 0.85, patterns: ["line", "cone", "line", "gather"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
+  // 서리귀 — 제자리에서 **안전한 자리를 연다.** 모이기 위주라 답은 뭉치기.
+  //   창이 늦게 열리지만 길다. 오래 버티고 한 번에 몰아치는 보스.
   11: { power: 1.0, patterns: ["gather", "circle", "gather", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
 };
 

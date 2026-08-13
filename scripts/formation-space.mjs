@@ -28,7 +28,7 @@
  *
  * 실행: npm run formation
  */
-import { stepBattle } from "../src/game/battle.ts";
+import { stepBattle, inTelegraph } from "../src/game/battle.ts";
 import { makeCat, newRun, startBattle } from "../src/game/run.ts";
 import { BOSS_BREEDS, BOSS_RADIUS, bossKit } from "../src/game/bosses.ts";
 import { breedById } from "../src/game/breeds.ts";
@@ -236,10 +236,45 @@ function fight(formation, archetype, seed, intervene, hp) {
    * 루프를 빠져나온 뒤에 재면 언제나 100%다(실제로 그렇게 읽혔다).
    */
   let lastHpFrac = 1;
+  /**
+   * **노출** — 예고가 터지는 순간 잘못된 자리에 있던 마릿수를 센다.
+   *
+   * 체력으로 재려던 것을 접었다. 예고 피해를 낮추면 호위와의 난전이 체력을 더
+   * 깎아 노출이 아니라 백병전을 재게 되고, 올리면 고양이가 죽기 시작해 다시
+   * 절벽이다 — 실제로 배수 0.15에서는 뭉침/분산/뭉침, 0.4에서는 감싸기/분산/
+   * 뭉침으로 **답이 배수에 따라 바뀌었다.** 어느 쪽도 대형 자체를 잰 것이 아니다.
+   *
+   * 여기서는 피해를 아예 거치지 않는다. `avoid`는 안에 있으면 잘못이고
+   * `gather`는 밖에 있으면 잘못이다 — 그 마릿수가 곧 대형의 성적이다.
+   * 게임의 `inTelegraph`를 그대로 쓰므로 기하가 갈라질 여지도 없다.
+   */
+  let exposedCats = 0;
+  let firedCount = 0;
+  // 대형이 유지되는가 — 시작과 예고 시점의 퍼짐(무게중심까지 평균 거리)
+  const spreadAt = (cats) => {
+    if (cats.length === 0) return 0;
+    const cx = cats.reduce((a, c) => a + c.fx, 0) / cats.length;
+    const cy = cats.reduce((a, c) => a + c.fy, 0) / cats.length;
+    return cats.reduce((a, c) => a + Math.hypot(c.fx - cx, c.fy - cy), 0) / cats.length;
+  };
+  const spread0 = spreadAt(livingCats(s.ally));
+  let spreadSum = 0;
   for (let g = 0; g < 4000; g++) {
     if (s.phase !== "battle") break;
     if (respond) respond(s);
+    // 이번 스텝에 터질 예고를 터지기 직전에 잡는다.
+    const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
+    const firing = tg && tg.fuse <= 100;
+    const before = firing ? livingCats(s.ally) : null;
     stepBattle(s, 100);
+    if (firing && before && before.length > 0) {
+      firedCount += 1;
+      spreadSum += spreadAt(before);
+      for (const c of before) {
+        const inside = inTelegraph(tg, c.fx, c.fy);
+        if (tg.mode === "gather" ? !inside : inside) exposedCats += 1;
+      }
+    }
     if (s.phase === "battle") {
       let left = 0;
       let max = 0;
@@ -282,6 +317,9 @@ function fight(formation, archetype, seed, intervene, hp) {
     bossLeft: bossNow ? Math.max(0, bossNow.hp) / Math.max(1, bossNow.maxHp) : 0,
     allyLeft,
     hpKept: lastHpFrac,
+    exposed: firedCount > 0 ? exposedCats / firedCount : 0,
+    spread0,
+    spreadFire: firedCount > 0 ? spreadSum / firedCount : 0,
   };
 }
 
@@ -292,7 +330,7 @@ function survivors(formation, arch, intervene, hp, runs) {
 
 /** 승률과 함께 **어떻게 끝났는지**를 모은다. */
 function detail(formation, arch, intervene, hp, runs) {
-  const acc = { n: 0, win: 0, wipe: 0, timeout: 0, sec: 0, seen: 0, eaten: 0, bossLeft: 0, allyLeft: 0, hpKept: 0 };
+  const acc = { n: 0, win: 0, wipe: 0, timeout: 0, sec: 0, seen: 0, eaten: 0, bossLeft: 0, allyLeft: 0, hpKept: 0, exposed: 0, spread0: 0, spreadFire: 0 };
   for (let i = 0; i < runs; i++) {
     const r = fight(formation, arch, i + 1, intervene, hp);
     if (r === null) continue;
@@ -306,6 +344,9 @@ function detail(formation, arch, intervene, hp, runs) {
     acc.bossLeft += r.bossLeft;
     acc.allyLeft += r.allyLeft;
     acc.hpKept += r.hpKept;
+    acc.exposed += r.exposed;
+    acc.spread0 += r.spread0;
+    acc.spreadFire += r.spreadFire;
   }
   const d = Math.max(1, acc.n);
   return {
@@ -318,6 +359,9 @@ function detail(formation, arch, intervene, hp, runs) {
     bossLeftPct: (acc.bossLeft / d) * 100,
     allyLeft: acc.allyLeft / d,
     hpKeptPct: (acc.hpKept / d) * 100,
+    exposed: acc.exposed / d,
+    spread0: acc.spread0 / d,
+    spreadFire: acc.spreadFire / d,
   };
 }
 
@@ -445,16 +489,16 @@ function print(title, rows) {
   const labels = ARCHETYPES.map((a) => a.label);
   console.log(`\n${title}`);
   console.log(`${"대형".padEnd(22)}${labels.map((l) => l.padStart(16)).join("")}   최선-최악`);
-  console.log(`${"".padEnd(22)}${labels.map(() => "지킨 체력".padStart(16)).join("")}`);
+  console.log(`${"".padEnd(22)}${labels.map(() => "예고당 잘못선 마리".padStart(16)).join("")}`);
   for (const [fname, byArch] of Object.entries(rows)) {
-    const vals = labels.map((l) => byArch[l].hpKeptPct);
+    const vals = labels.map((l) => byArch[l].exposed);
     const spread = Math.max(...vals) - Math.min(...vals);
     console.log(
       `${fname.padEnd(22)}` +
         labels
-          .map((l, i) => `${vals[i].toFixed(1)}%`.padStart(16))
+          .map((l, i) => `${vals[i].toFixed(2)}마리`.padStart(16))
           .join("") +
-        `   ${spread.toFixed(1)}%p`,
+        `   ${spread.toFixed(2)}마리`,
     );
   }
   // 보스마다 어느 대형이 이겼나. 여기가 이 스크립트의 질문이다.
@@ -462,10 +506,11 @@ function print(title, rows) {
   const best = {};
   for (const l of labels) {
     let bn = null;
-    let bv = -1;
+    // **노출은 낮을수록 좋다.** 최선은 최소값이다.
+    let bv = Infinity;
     for (const [fname, byArch] of Object.entries(rows)) {
-      if (byArch[l].hpKeptPct > bv) {
-        bv = byArch[l].hpKeptPct;
+      if (byArch[l].exposed < bv) {
+        bv = byArch[l].exposed;
         bn = fname;
       }
     }
@@ -485,7 +530,7 @@ function print(title, rows) {
         `  ${fname.padEnd(20)} ${l.padEnd(16)} ` +
           `전멸 ${d.wipePct.toFixed(0).padStart(3)}% · 시간초과 ${d.timeoutPct.toFixed(0).padStart(3)}% · ` +
           `${d.sec.toFixed(1).padStart(5)}초 · 예고 ${d.seen.toFixed(1).padStart(4)}/${d.eaten.toFixed(1).padStart(4)} · ` +
-          `보스잔여 ${d.bossLeftPct.toFixed(0).padStart(3)}% · 지킨체력 ${d.hpKeptPct.toFixed(1)}%`,
+          `노출 ${d.exposed.toFixed(2)}마리/예고 · 퍼짐 시작 ${d.spread0.toFixed(2)} → 예고때 ${d.spreadFire.toFixed(2)}`,
       );
     }
   }
@@ -525,7 +570,7 @@ if (process.env.CURVE) {
  * 보정을 안 한다. 보정은 절벽 위에 기준점을 세우려는 시도였고, 그 위에서는
  * 같은 배수가 3.0마리와 5.2마리를 내놨다.
  */
-const EXPOSE_MUL = 0.15;
+const EXPOSE_MUL = process.env.EXPOSE ? Number(process.env.EXPOSE) : 0.15;
 const EXPOSE = Object.fromEntries(ARCHETYPES.map((a) => [a.label, { failed: false, mul: EXPOSE_MUL }]));
 console.log(
   `\n예고 피해를 x${EXPOSE_MUL}로 낮춰 **노출만** 잰다 (아무도 죽지 않는 구간)` +
@@ -563,13 +608,13 @@ console.log(`  보스마다 최선 대형이 갈리는가   개입 없음 ${dist
  */
 const spreadOf = (rows) =>
   ARCHETYPES.map((a) => {
-    const vals = Object.values(rows).map((r) => r[a.label].hpKeptPct);
+    const vals = Object.values(rows).map((r) => r[a.label].exposed);
     return Math.max(...vals) - Math.min(...vals);
   });
 const so = spreadOf(off);
 const sn = spreadOf(on);
 const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
-console.log(`  대형이 만드는 체력 폭(평균)     개입 없음 ${avg(so).toFixed(1)}%p / 개입 있음 ${avg(sn).toFixed(1)}%p`);
+console.log(`  대형이 만드는 노출 폭(평균)     개입 없음 ${avg(so).toFixed(2)}마리 / 개입 있음 ${avg(sn).toFixed(2)}마리`);
 
 /**
  * **포화 검사.** 판정 줄이 초록불이어도 표가 0%·100%로 붙어 있으면 아무 말도
@@ -581,7 +626,7 @@ console.log(`  대형이 만드는 체력 폭(평균)     개입 없음 ${avg(so
  * 있는지**를 먼저 찍는다.
  */
 const cells = [...Object.values(off), ...Object.values(on)].flatMap((r) =>
-  Object.values(r).map((d) => d.hpKeptPct),
+  Object.values(r).map((d) => (d.exposed / TEAM_SIZE) * 100),
 );
 const sat = cells.filter((v) => v <= SAT_LO || v >= SAT_HI).length;
 const satPct = (sat / cells.length) * 100;
@@ -596,7 +641,7 @@ if (satPct > 30) {
   process.exitCode = 1;
 }
 
-if (avg(so) < 5) {
+if (avg(so) < 0.5) {
   console.log("\n판정: 대형 자체가 노출을 안 가른다 — 개입 이전에 수치(이동속도·사거리·기믹)를 벌려야 한다");
   process.exitCode = 1;
 } else if (avg(sn) < avg(so) * 0.5) {

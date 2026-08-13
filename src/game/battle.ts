@@ -1305,8 +1305,23 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
   const kit = bossKit(boss.breed.id);
   const pattern = kit.patterns[idx % kit.patterns.length]!;
   const mode: TelegraphMode = pattern === "gather" ? "gather" : "avoid";
-  const shape: TelegraphShape = pattern === "gather" ? "circle" : pattern;
+  const shape: TelegraphShape = pattern === "gather" || pattern === "stomp" ? "circle" : pattern;
   const base = { shape, mode, fuse: TELEGRAPH_FUSE_MS, fuseMax: TELEGRAPH_FUSE_MS };
+
+  /**
+   * 발구르기 — **보스 발밑**에 생긴다.
+   *
+   * 다른 예고는 전부 팀을 따라온다(원형·부채꼴은 무게중심, 직선은 가장 먼
+   * 아군, 모이기는 그 중간). 표적이 팀 자신이면 **어디에 서 있든 같은 비율로
+   * 걸린다** — 측정에서 대형을 어떻게 바꿔도 예고당 3.5~4.1마리가 잘못된 자리에
+   * 있었고 폭이 0.5마리뿐이었다. 대형이 결정이 아니었던 진짜 이유가 이것이다.
+   *
+   * 이것만 자리가 고정이라 **보스에게서 얼마나 떨어져 서느냐**가 답이 된다.
+   * 반경을 넓게 잡는 이유는 근접이 붙어 있는 거리를 확실히 덮기 위해서다.
+   */
+  if (pattern === "stomp") {
+    return { ...base, fx: boss.fx, fy: boss.fy, dirX: 0, dirY: 0, arg: 2.4, reach: 0 };
+  }
 
   if (mode === "gather") {
     const c = centroid(foes);
