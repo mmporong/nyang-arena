@@ -31,6 +31,8 @@ const MAX_WAVE = 60;
 const mapPick = MAP_POLICIES["무작위"];
 
 const finals = [];
+/** 한 판의 **전투 시간 합계**(초). 상점·지도에서 고르는 시간은 안 들어간다. */
+const sessionSec = [];
 const tried = new Map();
 const lost = new Map();
 const dur = new Map();
@@ -44,6 +46,7 @@ for (let seed = 1; seed <= RUNS; seed++) {
   const respond = makeBossBot();
   const shop = { rerolls: 0, lastWave: 0 };
   let kind = null;
+  let runSec = 0;
   let guard = 0;
   while (guard++ < MAX_WAVE * 4000) {
     if (s.phase === "gameover") {
@@ -79,12 +82,15 @@ for (let seed = 1; seed <= RUNS; seed++) {
       const list = dur.get(kind) ?? [];
       list.push(s.battleElapsed / 1000);
       dur.set(kind, list);
+      runSec += s.battleElapsed / 1000;
     }
   }
   finals.push(Math.min(s.wave, MAX_WAVE));
+  sessionSec.push(runSec);
 }
 
 finals.sort((a, b) => a - b);
+sessionSec.sort((a, b) => a - b);
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 const passRate = (k) => {
   const t = tried.get(k) ?? 0;
@@ -159,6 +165,15 @@ const metrics = {
     max: finals[finals.length - 1],
     mean: Number((finals.reduce((a, b) => a + b, 0) / finals.length).toFixed(2)),
     hitMaxWave: finals.filter((w) => w >= MAX_WAVE).length,
+  },
+  /**
+   * 한 판의 전투 시간 합계. 세션 길이를 말할 때 쓰는 값이다 — 다만 상점·지도에서
+   * **고르는 시간은 안 들어간다.** 그쪽은 사람마다 다르고 하네스가 즉시 고른다.
+   */
+  session: {
+    battleSecP25: Number(pct(sessionSec, 0.25).toFixed(1)),
+    battleSecMedian: Number(pct(sessionSec, 0.5).toFixed(1)),
+    battleSecP75: Number(pct(sessionSec, 0.75).toFixed(1)),
   },
   waveKinds: Object.fromEntries(
     ["mixed", "rush", "snipe", "boss"].map((k) => [
@@ -266,6 +281,14 @@ const md = `<!-- 이 파일은 npm run metrics가 생성한다. 손으로 고치
 | 최소 | p25 | 중앙값 | p75 | 최대 | 평균 | ${MAX_WAVE}웨이브 도달 |
 |---|---|---|---|---|---|---|
 | ${d.min} | ${d.p25} | **${d.median}** | ${d.p75} | ${d.max} | ${d.mean} | ${d.hitMaxWave}건 |
+
+## 한 판 전투 시간 합계
+
+상점·지도에서 고르는 시간은 빠져 있다 — 하네스가 즉시 고르기 때문이다.
+
+| p25 | 중앙값 | p75 |
+|---|---|---|
+| ${metrics.session.battleSecP25}초 | **${(metrics.session.battleSecMedian / 60).toFixed(1)}분** (${metrics.session.battleSecMedian}초) | ${metrics.session.battleSecP75}초 |
 
 ## 웨이브 성격별
 
