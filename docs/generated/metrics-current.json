@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "fd120c7",
-    "dirty": true,
-    "reproducible": false,
+    "commit": "b9f775d",
+    "dirty": false,
+    "reproducible": true,
     "node": "v22.23.2",
     "seeds": {
       "from": 1,
@@ -28,6 +28,11 @@
     "max": 33,
     "mean": 11.19,
     "hitMaxWave": 0
+  },
+  "session": {
+    "battleSecP25": 89.8,
+    "battleSecMedian": 143.6,
+    "battleSecP75": 191.1
   },
   "waveKinds": {
     "mixed": {
