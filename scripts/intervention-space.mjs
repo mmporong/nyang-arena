@@ -127,11 +127,16 @@ function play(policy, seed) {
         upFor = 0;
       }
       wasUp = up;
-      // 창이 열리면 무조건 연타한다. 창 자체가 3초로 제한돼 있으므로
-      // '얼마나 누를까'는 결정이 아니고 '놓치지 않는가'만 남는다.
-      if (windowOpen(s)) {
-        if (policy.strike) s.pending.push({ kind: "strike" });
-      } else if (up) {
+      /**
+       * 예고가 먼저, 취약 창은 그다음 — resolveIntent와 같은 순서다.
+       * 예전에는 "창이 열리면 무조건 연타한다"가 앞에 있었는데, US-102가
+       * 그 전제를 뒤집었다: 창이 열려 있어도 예고가 활성이면 버튼은 회피다.
+       * 이 순서가 갈라지면 서문의 파리티 계약("봇은 브라우저와 같은 경로로
+       * 개입한다")이 깨져 여기서 잰 수치가 사람이 겪는 값이 아니게 된다.
+       * 종류를 직접 지정하는 것은 유지한다 — 거꾸로 읽기 같은 나쁜 정책을
+       * 일부러 돌리는 것이 이 하네스의 임무라서다.
+       */
+      if (up) {
         upFor += 1;
         if (s.dodgeCharges > 0 && policy.dodge(upFor, seen)) {
           const need = telegraphMode(s);
@@ -147,6 +152,8 @@ function play(policy, seed) {
                   : "dodge";
           s.pending.push({ kind });
         }
+      } else if (windowOpen(s)) {
+        if (policy.strike) s.pending.push({ kind: "strike" });
       }
     }
 

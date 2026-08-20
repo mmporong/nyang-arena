@@ -24,8 +24,14 @@ export function makeBossBot() {
   let seen = 0;
 
   return function respond(s) {
+    /**
+     * 버튼 규칙의 사본을 두지 않는다 — 전에는 취약 창이면 `strike`를 직접
+     * 밀었는데, resolveIntent가 "예고 > 취약"으로 바뀌자 **플레이어가 낼 수
+     * 없는 정책**을 재는 봇이 됐다(리뷰 적발). `act`로 밀면 해석은 언제나
+     * 게임과 동일하고, 사람 흉내(반응 지연·놓침)는 예고 쪽 분기만 맡는다.
+     */
     if (s.enemy.some((c) => c?.alive && c.vulnerableMs > 0)) {
-      s.pending.push({ kind: "strike" });
+      s.pending.push({ kind: "act" });
       return;
     }
     const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;

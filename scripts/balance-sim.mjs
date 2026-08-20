@@ -121,22 +121,28 @@ function playOne(seed) {
     //
     // 다만 사람처럼 조금 늦고 가끔 놓친다 — 완벽하게 반응하는 봇은 상한이지
     // 기준선이 아니다.
-    const open = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
-    if (open) {
-      s.pending.push({ kind: "strike" });
-    } else {
-      const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
-      if (tg && s.dodgeCharges > 0) {
-        sinceTelegraph = tg === lastTelegraph ? sinceTelegraph + 1 : 0;
-        if (tg !== lastTelegraph) telegraphSeen += 1;
-        lastTelegraph = tg;
-        // 네 번에 한 번은 놓치고, 두 틱 늦게 반응한다.
-        if (telegraphSeen % 4 !== 3 && sinceTelegraph >= 2) {
-          s.pending.push({ kind: tg.mode === "gather" ? "gather" : "dodge" });
-        }
-      } else {
-        lastTelegraph = null;
+    /**
+     * 버튼 규칙과 같은 우선순위 — **예고가 먼저, 취약 창은 그다음.**
+     * 전에는 창이 열리면 무조건 strike를 밀었는데, resolveIntent가 "예고 >
+     * 취약"으로 바뀐 뒤에도 이 사본만 옛 순서로 남아 **플레이어가 낼 수 없는
+     * 정책**을 재고 있었다(리뷰 적발 — 봇을 어떻게 바꿔도 sim이 한 자리도 안
+     * 움직인다는 교차 실험으로 이 사본의 존재가 드러났다). 예고 반응은
+     * 사람 흉내(네 번에 한 번 놓침·두 틱 지연)를 유지하고, 예고가 없을 때만
+     * 연타한다 — act로 밀면 해석은 게임과 동일하다.
+     */
+    const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
+    if (tg && s.dodgeCharges > 0) {
+      sinceTelegraph = tg === lastTelegraph ? sinceTelegraph + 1 : 0;
+      if (tg !== lastTelegraph) telegraphSeen += 1;
+      lastTelegraph = tg;
+      // 네 번에 한 번은 놓치고, 두 틱 늦게 반응한다.
+      if (telegraphSeen % 4 !== 3 && sinceTelegraph >= 2) {
+        s.pending.push({ kind: "act" });
       }
+    } else {
+      if (!tg) lastTelegraph = null;
+      const open = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+      if (open) s.pending.push({ kind: "act" });
     }
 
     // 전투가 끝나는 틱에는 battleElapsed가 리셋될 수 있으므로 직전 값을 들고 있는다.
