@@ -1,6 +1,13 @@
 import { clearBattleFx, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
-import { mapNodeRects, offerRects, render, rerollRect, type DragState } from "./game/render.ts";
+import {
+  mapNodeRects,
+  offerRects,
+  render,
+  rerollRect,
+  spawnBuyTween,
+  type DragState,
+} from "./game/render.ts";
 import {
   buyOffer,
   chooseNode,
@@ -9,6 +16,7 @@ import {
   moveCat,
   newRun,
   rerollOffers,
+  setNotice,
   startBattle,
   type RunState,
 } from "./game/run.ts";
@@ -255,15 +263,27 @@ function musicFor(s: RunState): "prepare" | "boss" | "outro" {
  */
 function buyWithFx(offer: NonNullable<RunState["offers"][number]>): boolean {
   const before = state.ally.map((c) => (c ? { uid: c.uid, level: c.level } : null));
+  // buyOffer가 성공하면 이 슬롯을 null로 비운다. 트윈이 어디서 출발했는지는
+  // 그 전에 잡아 둬야 한다.
+  const slot = state.offers.indexOf(offer);
   if (!buyOffer(state, offer)) return false;
-  state.notice = "";
+  setNotice(state, "");
+  // 유물처럼 보드 칸이 안 바뀌는 구매도 있다 — 그런 카드는 보드 한가운데를
+  // 향해 날아간다(spawnBuyTween이 처리한다).
+  let landedCell: number | null = null;
   state.ally.forEach((c, i) => {
     if (!c) return;
     const was = before[i];
     const { fx, fy } = cellToField("ally", i);
-    if (!was || was.uid !== c.uid) spawnArrivalFx(fx, fy);
-    else if (c.level > was.level) spawnLevelUpFx(fx, fy, c.level);
+    if (!was || was.uid !== c.uid) {
+      spawnArrivalFx(fx, fy);
+      landedCell = i;
+    } else if (c.level > was.level) {
+      spawnLevelUpFx(fx, fy, c.level);
+      landedCell = i;
+    }
   });
+  if (slot >= 0) spawnBuyTween(offer, slot, landedCell);
   return true;
 }
 
@@ -312,7 +332,7 @@ canvas.addEventListener("pointerdown", (e) => {
       const cx = n.rect.x + n.rect.w / 2;
       const cy = n.rect.y + n.rect.h / 2;
       if (Math.hypot(x - cx, y - cy) > n.rect.w / 2 + 6) continue;
-      if (!chooseNode(state, n.idx)) state.notice = "그 길로는 갈 수 없어요";
+      if (!chooseNode(state, n.idx)) setNotice(state, "그 길로는 갈 수 없어요");
       return;
     }
     return;
@@ -327,7 +347,7 @@ canvas.addEventListener("pointerdown", (e) => {
      * 카드 자리는 **빈 자리여도 탭을 삼킨다.**
      *
      * 전에는 `offer &&`가 조건에 있어서, 이미 산 자리를 누르면 아래로 흘러
-     * 보드 검사에 닿았다. 화면에는 "샀음" 판이 그려져 있는데 그 위를 누르면
+     * 보드 검사에 닿았다. 화면에는 빈 카드 틀이 그려져 있는데 그 위를 누르면
      * 뒤에 있는 고양이가 잡히는 셈이다. 구매·배치가 한 화면이 되면서 그
      * 뒤에 실제로 보드가 있게 됐다.
      */
@@ -339,7 +359,7 @@ canvas.addEventListener("pointerdown", (e) => {
       // buyOffer가 실패 사유별로 notice를 세팅한다. 덮어쓰면 거짓 안내가 뜬다.
       // (보드 만석인데 "생선이 부족합니다"가 뜨던 버그)
       if (offer && !buyWithFx(offer) && state.gold < offer.cost) {
-        state.notice = "생선이 조금 모자라요";
+        setNotice(state, "생선이 조금 모자라요");
       }
       return;
     }
@@ -488,7 +508,7 @@ window.addEventListener("keydown", (e) => {
       if (slot > 2) return;
       const offer = state.offers[slot];
       if (!offer) return;
-      if (!buyWithFx(offer) && state.gold < offer.cost) state.notice = "생선이 조금 모자라요";
+      if (!buyWithFx(offer) && state.gold < offer.cost) setNotice(state, "생선이 조금 모자라요");
       return;
     }
   }

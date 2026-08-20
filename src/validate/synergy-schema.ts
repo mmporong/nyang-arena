@@ -21,7 +21,16 @@ import { BOARD_COLS, type CatColor } from "../game/types.ts";
  * front/back 조건은 배치를 요구한다. 구성(무엇을 사는가)과 배치(어디에 놓는가)가
  * 따로 놀지 않게 하려는 것이다.
  */
-export const TRIGGERS = ["same_color_3", "same_breed_2", "front_melee_2", "back_ranged_2"] as const;
+export const TRIGGERS = [
+  "same_color_3",
+  "same_breed_2",
+  "front_melee_2",
+  "back_ranged_2",
+  // 중간 난이도를 위해 신설했다. 2마리 배치 조건은 자동 배치가 거의 채워
+  // 주지만(실측 78.7%), 3마리째부터는 그 직업군을 실제로 사 모아야 한다.
+  "front_melee_3",
+  "back_ranged_3",
+] as const;
 export type Trigger = (typeof TRIGGERS)[number];
 
 export const EFFECT_KEYS = ["atk_mul", "hp_mul", "evade_add", "atkspd_mul"] as const;
@@ -203,12 +212,79 @@ export function synergyProgress(trigger: Trigger, units: BoardUnit[]): { have: n
       return { have: units.filter((u) => u.col === FRONT_COL && u.kind === "melee").length, need: 2 };
     case "back_ranged_2":
       return { have: units.filter((u) => u.col === BACK_COL && u.kind === "ranged").length, need: 2 };
+    case "front_melee_3":
+      return { have: units.filter((u) => u.col === FRONT_COL && u.kind === "melee").length, need: 3 };
+    case "back_ranged_3":
+      return { have: units.filter((u) => u.col === BACK_COL && u.kind === "ranged").length, need: 3 };
   }
 }
 
 export function isTriggered(trigger: Trigger, units: BoardUnit[]): boolean {
   const { have, need } = synergyProgress(trigger, units);
   return have >= need;
+}
+
+/**
+ * 목표 난이도 — **실측 라벨**이다. 계산 모형이 아니다.
+ *
+ * 모형을 두 번 세웠고 두 번 다 실측이 부정했다. 처음엔 "배치 제약이 있으면
+ * 빡빡하다"(요구 마릿수 × 배치 제약)로 봤는데 front/back이 오히려 제일 쉬웠다 —
+ * `bestFreeCell`이 근접은 앞줄, 원거리는 뒷줄에 기본으로 앉히기 때문이다.
+ * 다음엔 "요구 마릿수 × 매칭 후보군 크기"로 다시 세웠는데(breed 15종이라
+ * same_breed_2를 중간으로 예측), 이것도 실측이 부정했다 — 500런에서
+ * front/back_2 78.7% ≈ same_breed_2 79.6%로 통계적 동률이었다. 상점 오퍼가
+ * 품종을 반복해서 내밀기 때문에 "15종 중 같은 것"이 모형 생각만큼 좁지 않다.
+ *
+ * 그래서 라벨을 실측에 직접 묶는다. Record라 트리거를 늘리면 컴파일러가
+ * 누락을 잡고, 수치가 의심되면 리뷰 계측 스크립트로 다시 잰다(500런 ·
+ * 전투 시작 시점 활성 기준). 로스터·상점·자동 배치가 바뀌면 재측정할 것.
+ */
+const TRIGGER_DIFFICULTY: Record<Trigger, Difficulty> = {
+  front_melee_2: "easy", // 실측 78.7%
+  back_ranged_2: "easy", // 실측 78.7%
+  same_breed_2: "easy", // 실측 79.6% — 두 모형 모두 이걸 중간으로 잘못 예측했다
+  front_melee_3: "medium", // 신설 후 실측 47.6% (500런) — easy와 hard 사이 층
+  back_ranged_3: "medium", // 신설 후 실측 47.6% (front와 합산 표본)
+  same_color_3: "hard", // 실측 34.8%
+};
+
+export type Difficulty = "easy" | "medium" | "hard";
+
+export function triggerDifficulty(trigger: Trigger): Difficulty {
+  return TRIGGER_DIFFICULTY[trigger];
+}
+
+/** 효과 키별 기준값. atk_mul 등은 배수라 1이 기준이고, evade_add는 더하는 값이라 0이 기준이다. */
+const EFFECT_BASELINE: Record<EffectKey, number> = {
+  atk_mul: 1,
+  hp_mul: 1,
+  atkspd_mul: 1,
+  evade_add: 0,
+};
+
+/** 난이도별 보상 배율. 어려운 목표가 쉬운 목표와 같은 보상이면 어려운 쪽을 볼 이유가 없다. */
+const DIFFICULTY_EFFECT_MUL: Record<Difficulty, number> = {
+  easy: 0.75,
+  medium: 1,
+  hard: 1.3,
+};
+
+/**
+ * 규칙의 효과 크기를 난이도에 맞게 다시 잰다.
+ *
+ * 기준값에서 벗어난 몫(=진짜 보너스)만 배율을 걸고, `EFFECT_RANGE`로 다시
+ * 클램프한다 — 하드 클램프는 LLM 출력 안전장치이므로 난이도 조정이 그 경계를
+ * 넘어서는 안 된다.
+ */
+export function scaleEffectForDifficulty(
+  effect: SynergyRule["effect"],
+  difficulty: Difficulty,
+): SynergyRule["effect"] {
+  const base = EFFECT_BASELINE[effect.key];
+  const mul = DIFFICULTY_EFFECT_MUL[difficulty];
+  const scaled = base + (effect.value - base) * mul;
+  const [lo, hi] = EFFECT_RANGE[effect.key];
+  return { key: effect.key, value: Number(clamp(scaled, lo, hi).toFixed(3)) };
 }
 
 /** 화면에 띄울 조건 문구. */
@@ -221,6 +297,10 @@ export function triggerLabel(trigger: Trigger): string {
     case "front_melee_2":
       return "앞줄 근접";
     case "back_ranged_2":
+      return "뒷줄 원거리";
+    case "front_melee_3":
+      return "앞줄 근접";
+    case "back_ranged_3":
       return "뒷줄 원거리";
   }
 }

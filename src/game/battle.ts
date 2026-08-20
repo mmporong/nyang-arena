@@ -1,5 +1,5 @@
 import { BALANCE } from "./balance.ts";
-import { BOSS_ANCHORS, BOSS_THRESHOLDS, bossKit, TELEGRAPH_FUSE_MS } from "./bosses.ts";
+import { BOSS_ANCHORS, BOSS_BREEDS, BOSS_THRESHOLDS, bossKit, TELEGRAPH_FUSE_MS } from "./bosses.ts";
 import { rng } from "./rng.ts";
 import {
   BOARD_COLS,
@@ -156,7 +156,9 @@ export type FxKind =
   | "streak" // 짧은 돌진 자국 (그림자 일격)
   | "spark" // 튀는 불똥 (타격 지점)
   | "ember" // 위로 떠오르는 불티 (불씨)
-  | "frost"; // 얼음 결정 (빙결)
+  | "frost" // 얼음 결정 (빙결)
+  | "burst" // 장판 모양 그대로 채워지는 섬광 (예고 발동)
+  | "bossdeath"; // 보스가 죽는 순간의 확장 링 3겹
 
 export interface Fx {
   kind: FxKind;
@@ -170,6 +172,20 @@ export interface Fx {
   life: number;
   maxLife: number;
   color: string;
+  /** `bossdeath` 전용 — 우두머리 처치인가. 렌더의 흔들림 진폭이 갈린다. */
+  stageBoss?: boolean;
+  /**
+   * `burst` 전용 — 예고 장판의 모양을 그대로 옮겨 적는다.
+   *
+   * `Telegraph`와 필드 이름을 맞췄다. `fireTelegraph`가 터지는 예고에서 그대로
+   * 복사해 넣으므로, 렌더러가 원형·직선·부채꼴 채우기를 `drawTelegraphs`와
+   * 같은 식으로 그릴 수 있다.
+   */
+  shape?: TelegraphShape;
+  dirX?: number;
+  dirY?: number;
+  arg?: number;
+  reach?: number;
 }
 
 export const fxs: Fx[] = [];
@@ -286,6 +302,9 @@ export function pickTarget(attacker: Cat, foes: Cat[], claimed?: Map<string, num
   let best: Cat | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
   for (const f of foes) {
+    // 순간이동 부재("gone") 중인 보스는 실제로 거기 없다 — 후보에서 뺀다.
+    // `foes`가 이 하나뿐이면 이번 스텝은 아무도 못 찾는다(호출부가 감당한다).
+    if (f.blink && f.blink.phase === "gone") continue;
     const crowd = claimed?.get(f.uid) ?? 0;
     const score = fieldDistance(attacker, f) + crowd * CROWD_PENALTY - (f.taunt ? TAUNT_PULL : 0);
     if (score < bestScore || (score === bestScore && best !== null && f.uid < best.uid)) {
@@ -304,6 +323,15 @@ function comboSpeed(cat: Cat): number {
 
 /** 실제 피해 적용. 보호막을 먼저 깎는다. */
 function damage(target: Cat, amount: number, crit: boolean): void {
+  /**
+   * 순간이동 부재("gone") 중인 보스는 아예 없는 것으로 친다.
+   *
+   * `pickTarget`이 이미 후보에서 뺐으니 평타·도탄은 여기 안 들어오지만,
+   * 지속 피해(`tickEffects`의 `dot`)는 대상을 다시 고르지 않고 이미 걸린
+   * 대상을 그대로 때린다 — 그 경로까지 막아야 "때릴 수 없다"가 어디서나
+   * 같은 말이 된다.
+   */
+  if (target.blink && target.blink.phase === "gone") return;
   let left = Math.round(amount);
   if (target.shield > 0) {
     const absorbed = Math.min(target.shield, left);
@@ -342,6 +370,71 @@ function damage(target: Cat, amount: number, crit: boolean): void {
     // 죽으면 달리기도 끝난다. `tickDashes`는 살아 있는 것만 도는 탓에, 여기서
     // 안 지우면 목표가 시체에 붙어 다음 전투까지 따라간다.
     target.dash = null;
+    /**
+     * 보스가 죽어도 예고·순간이동 페이드를 지우지 않으면 흔적이 남는다.
+     *
+     * `tickBoss`는 맨 위에서 `if (!boss.alive) return;`이라 죽은 보스는 다시는
+     * 자기 상태를 정리하지 못한다. 예고를 안 지우면 죽은 보스 밑에 빨간 장판이
+     * 영원히 그려지고(실제로 있었던 버그), `blink`를 안 지우면 순간이동 중에
+     * 죽었을 때 반쯤 사라진 채로 화면에 얼어붙는다.
+     */
+    target.telegraph = null;
+    target.blink = null;
+    // 저격수(미니 보스)는 뺀다 — 확장 링 3겹·화면 흔들림은 진짜 레이드 보스의
+    // 처치에만 어울리는 무게다.
+    if (isRaidBoss(target)) spawnBossDeathFx(target);
+  }
+}
+
+/**
+ * 진짜 레이드 보스인가.
+ *
+ * `BOSS_BREEDS` 소속 여부로 가른다. 저격수(`SNIPER_BREED`, id 12)도 반경이
+ * 있고 `bossKit`도 갖지만 `BOSS_BREEDS` 배열엔 없다 — 저격 웨이브의 예고편일
+ * 뿐이라 보스 처치 연출을 받을 만큼 무게가 있는 존재가 아니다.
+ * `scripts/invariants.mjs`가 보스를 가르는 것과 같은 기준이다(`id <= 11`).
+ */
+function isRaidBoss(cat: Cat): boolean {
+  return BOSS_BREEDS.some((b) => b.id === cat.breed.id);
+}
+
+/** 보스 처치 연출 길이(ms). render.ts는 이 kind의 Fx가 살아 있는 동안만 화면을 흔든다. */
+export const BOSS_DEATH_FX_MS = 620;
+
+/**
+ * 보스 처치 연출 — 확장 링 3겹 + 파편.
+ *
+ * 화면 흔들림은 여기서 만들지 않는다. battle.ts는 카메라를 모르는 채로 있어야
+ * 헤드리스 하네스가 이 함수를 그대로 돌릴 수 있다 — 흔들림은 render.ts가
+ * `bossdeath` kind의 Fx가 살아 있는지만 보고 그린다.
+ */
+function spawnBossDeathFx(boss: Cat): void {
+  pushFx({
+    kind: "bossdeath",
+    fx: boss.fx,
+    fy: boss.fy,
+    tx: 0,
+    ty: 0,
+    radius: boss.radius,
+    angle: 0,
+    life: BOSS_DEATH_FX_MS,
+    color: FX_DANGER,
+    // 흔들림 진폭이 이걸 읽는다. state.step은 처치 직후 올라가므로 못 쓴다.
+    stageBoss: boss.stageBoss === true,
+  });
+  // 파편. 기존 spawnArrivalFx와 같은 모양의 방사형 스파크라 낯설지 않다.
+  for (let i = 0; i < 14; i++) {
+    pushFx({
+      kind: "spark",
+      fx: boss.fx,
+      fy: boss.fy,
+      tx: 0,
+      ty: 0,
+      radius: 1.1,
+      angle: (i / 14) * Math.PI * 2,
+      life: 480,
+      color: i % 2 === 0 ? "#F4E3C1" : FX_DANGER,
+    });
   }
 }
 
@@ -690,7 +783,8 @@ const ACT_COOLDOWN_MS = 1000;
 const DODGE_MARGIN = 0.6;
 
 function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | null {
-  const risky = (fx: number, fy: number) => zones.some((z) => inTelegraph(z, fx, fy));
+  const risky = (fx: number, fy: number) =>
+    zones.some((z) => inTelegraph(z, fx, fy, BALANCE.telegraphBodyPad));
   if (!risky(cat.fx, cat.fy)) return null; // 안전하면 움직이지 않는다
 
   // 오른쪽 상한이 없었다. 판 끝(fx 11.8)에 선 고양이가 오른쪽으로 피하면
@@ -763,7 +857,7 @@ function doGather(state: RunState): boolean {
   for (const c of allyBodies(state)) {
     // 흩어짐과 같은 이유. 달리는 중인 고양이는 이미 대답한 것이다.
     if (c.dash) continue;
-    if (inTelegraph(target, c.fx, c.fy)) continue;
+    if (inTelegraph(target, c.fx, c.fy, BALANCE.telegraphBodyPad)) continue;
     // 장판 중심 쪽으로 당긴다. 가장자리에 걸치면 판정이 아슬아슬해지므로
     // 반경의 60% 안쪽으로 넣는다.
     const dx = target.fx - c.fx;
@@ -1439,19 +1533,37 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
 }
 
 /** 이 좌표가 예고 범위 안인가. 판정은 전부 정준 좌표에서 한다. */
-export function inTelegraph(t: Telegraph, fx: number, fy: number): boolean {
+/**
+ * `pad` — 판정에 더하는 몸 반경(칸). 피해·회피·모임이 전부 같은 값을 넘겨야
+ * 화면과 판정이 같은 말을 한다. 기본 0은 측정 스크립트용(중심점 기준).
+ */
+export function inTelegraph(t: Telegraph, fx: number, fy: number, pad = 0): boolean {
   const rx = fx - t.fx;
   const ry = fy - t.fy;
-  if (t.shape === "circle") return Math.hypot(rx, ry) <= t.arg;
+  const d = Math.hypot(rx, ry);
+  if (t.shape === "circle") return d <= t.arg + pad;
 
   const along = rx * t.dirX + ry * t.dirY;
-  if (along < 0 || along > t.reach) return false;
-  if (t.shape === "line") return Math.abs(rx * t.dirY - ry * t.dirX) <= t.arg;
+  if (t.shape === "line") {
+    if (along < -pad || along > t.reach + pad) return false;
+    return Math.abs(rx * t.dirY - ry * t.dirX) <= t.arg + pad;
+  }
 
-  // 부채꼴: 시작점에 붙어 있으면 각도가 의미 없으므로 무조건 맞는다.
-  const d = Math.hypot(rx, ry);
+  /**
+   * 부채꼴. 사거리는 `along`(방향 성분)이 아니라 **거리**로 자른다 — 렌더가
+   * `ctx.arc(0,0,reach,-arg,arg)`로 원호를 그리므로, along으로 자르면
+   * 가장자리에서 판정이 그림보다 1/cos(arg)만큼 밖으로 삐져나온다(그림 밖인데
+   * 맞는 구역). 판정이 그림을 따라간다.
+   */
+  if (d > t.reach + pad) return false;
+  // 시작점 뒤쪽: 꼭짓점에 몸이 걸친 경우만 인정한다.
+  if (along < 0) return d <= pad;
+  // 시작점에 붙어 있으면 각도가 의미 없으므로 무조건 맞는다.
   if (d < 1e-6) return true;
-  return Math.acos(Math.min(1, Math.max(-1, along / d))) <= t.arg;
+  const ang = Math.acos(Math.min(1, Math.max(-1, along / d)));
+  // 몸 반경을 각도로 환산해 더한다(반지름 d에서 pad칸이 가리는 각).
+  const angPad = pad > 0 ? Math.asin(Math.min(1, pad / d)) : 0;
+  return ang <= t.arg + angPad;
 }
 
 /**
@@ -1475,6 +1587,19 @@ function telegraphHit(target: Cat, boss: Cat, frac: number): number {
   return Math.max(1, Math.round(pct * (1 - share) + flat * share));
 }
 
+/**
+ * 예고에 맞은 자리에 튀는 스파크.
+ *
+ * 보스에서 밀려난 방향으로 튄다 — 폭발의 중심이 어디인지가 스파크 방향에서
+ * 읽힌다. `angle`은 위치에서 그대로 계산하므로 rng()를 쓰지 않는다. battle.ts는
+ * 헤드리스 하네스가 그대로 돌리는 코드라, 순수 연출이라도 공유 시드를 쓰면
+ * 시드 하나로 재현해야 하는 다른 검사(회피율 등)의 뽑기 순서가 밀린다.
+ */
+function fireTelegraphHitFx(target: Cat, boss: Cat, hue: string): void {
+  const away = Math.atan2(target.fy - boss.fy, target.fx - boss.fx);
+  pushFx({ kind: "spark", fx: target.fx, fy: target.fy, tx: 0, ty: 0, radius: 0.6, angle: away, life: 260, color: hue });
+}
+
 function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
   const t = boss.telegraph;
   if (!t) return;
@@ -1483,6 +1608,33 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
   const frac =
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
     bossKit(boss.breed.id).power;
+  const hue = t.mode === "gather" ? FX_GATHER : FX_DANGER;
+
+  /**
+   * 장판 전체가 짧게 번쩍인다.
+   *
+   * 전에는 발동 순간에 그리던 것이 작은 고리 하나뿐이었다 — 예고선이 스르륵
+   * 사라지는 것과 크게 안 갈려서 "터졌다"가 아니라 "꺼졌다"로 읽혔다. `burst`는
+   * `drawTelegraphs`가 장판을 그리는 것과 같은 모양(원·직선·부채꼴)을 그대로
+   * 채워 넣으므로, 방금 위험했던 그 자리가 정확히 빛나고 사라진다.
+   */
+  pushFx({
+    kind: "burst",
+    fx: t.fx,
+    fy: t.fy,
+    tx: 0,
+    ty: 0,
+    radius: 0,
+    angle: 0,
+    life: BURST_LIFE_MS,
+    color: hue,
+    shape: t.shape,
+    dirX: t.dirX,
+    dirY: t.dirY,
+    arg: t.arg,
+    reach: t.reach,
+  });
+
   if (t.mode === "gather") {
     /**
      * 청록 원은 **대피소**다. 안에 있으면 안 맞고, 밖에 있으면 맞는다 —
@@ -1499,42 +1651,45 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
      * 다음 원형 예고가 통째로 덮는다 — 그래서 아래에서 moveLock을 풀어 곧바로
      * 흩어질 수 있게 한다. 대가는 피해가 아니라 **다음 한 수**가 진다.
      */
-    const outside = foes.filter((f) => !inTelegraph(t, f.fx, f.fy));
+    const outside = foes.filter((f) => !inTelegraph(t, f.fx, f.fy, BALANCE.telegraphBodyPad));
     if (outside.length > 0) tally.telegraphsEaten += 1;
-    for (const f of outside) damage(f, telegraphHit(f, boss, frac), false);
+    for (const f of outside) {
+      damage(f, telegraphHit(f, boss, frac), false);
+      fireTelegraphHitFx(f, boss, hue);
+    }
     // 뭉침이 끝나면 곧바로 흩어질 수 있어야 한다. 묶어 두면 다음 원형 예고가
     // 무게중심을 노려 통째로 맞고, 그러면 모인 것이 벌이 된다.
     for (const f of foes) f.moveLock = 0;
   } else {
     let caught = 0;
     for (const f of foes) {
-      if (!inTelegraph(t, f.fx, f.fy)) continue;
+      if (!inTelegraph(t, f.fx, f.fy, BALANCE.telegraphBodyPad)) continue;
       caught += 1;
       // 최대 체력 대비 비율이라 웨이브·팀 구성과 무관하게 "뭉치면 아프다"가 성립한다.
       damage(f, telegraphHit(f, boss, frac), false);
+      fireTelegraphHitFx(f, boss, hue);
     }
     // 한 마리라도 걸리면 실패로 친다. "몇 마리 맞았나"는 팀 크기에 따라 달라져
     // 판끼리 비교가 안 되지만, "피했나 못 피했나"는 언제나 같은 뜻이다.
     if (caught > 0) tally.telegraphsEaten += 1;
   }
-  pushFx({
-    kind: "ring",
-    fx: t.shape === "circle" ? t.fx : t.fx + t.dirX * t.reach * 0.4,
-    fy: t.shape === "circle" ? t.fy : t.fy + t.dirY * t.reach * 0.4,
-    tx: 0,
-    ty: 0,
-    radius: t.shape === "circle" ? t.arg : 1.4,
-    angle: 0,
-    life: 420,
-    color: t.mode === "gather" ? FX_GATHER : FX_DANGER,
-  });
 }
 
 /**
- * 보스를 다음 자리로 옮긴다.
+ * 순간이동 페이드 세 단계의 길이(ms). 셋을 합치면 순간이동 한 번이 약 1.1초다.
+ * `out`·`in`은 render.ts가 알파를 계산할 때도 쓰므로 내보낸다.
+ */
+export const BLINK_OUT_MS = 350;
+const BLINK_GONE_MS = 400;
+export const BLINK_IN_MS = 350;
+
+/**
+ * 보스의 다음 순간이동을 시작한다.
  *
- * 근접은 다시 걸어가야 하고, 뒤이어 뜨는 예고의 기준점도 바뀐다. 전투 전에
- * 한 번 정한 배치가 끝까지 유효하지 않게 만드는 장치다.
+ * 전에는 좌표를 그 자리에서 바로 바꿨다 — 판정은 맞지만 화면에서는 "그냥 딴 데
+ * 가 있네"였다. 지금은 `blink`에 목적지만 적어 두고 **즉시 옮기지 않는다.**
+ * 실제 좌표 이동은 부재("gone")가 시작되는 순간 `tickBlink`가 한다 — 근접은
+ * 다시 걸어가야 하고, 뒤이어 뜨는 예고의 기준점도 그 새 자리로 바뀐다.
  */
 function teleportBoss(boss: Cat, idx: number): void {
   const a = BOSS_ANCHORS[idx % BOSS_ANCHORS.length];
@@ -1542,28 +1697,89 @@ function teleportBoss(boss: Cat, idx: number): void {
   const to = cellToField("enemy", a.row * BOARD_COLS + a.col);
   if (Math.abs(to.fx - boss.fx) < 0.1 && Math.abs(to.fy - boss.fy) < 0.1) return;
 
-  // 사라지는 자리와 나타나는 자리 양쪽에 표시한다. 둘 다 없으면 순간이동이
-  // "갑자기 딴 데 있네"로만 읽히고 무슨 일이 일어났는지 전달되지 않는다.
-  for (const at of [{ fx: boss.fx, fy: boss.fy }, to]) {
+  boss.blink = { phase: "out", ms: BLINK_OUT_MS, to };
+  // 사라지는 자리를 표시한다. 나타나는 자리는 실제로 도착하는 순간(`tickBlink`가
+  // 좌표를 옮길 때) 표시한다 — 미리 찍으면 아직 오지도 않은 자리가 위험한지
+  // 아닌지 먼저 알려주는 꼴이 된다.
+  pushFx({
+    kind: "ring",
+    fx: boss.fx,
+    fy: boss.fy,
+    tx: 0,
+    ty: 0,
+    radius: boss.radius,
+    angle: 0,
+    life: BLINK_OUT_MS + 80,
+    color: FX_DANGER,
+  });
+}
+
+/**
+ * 순간이동 페이드를 한 스텝 진행한다.
+ *
+ * **`stepBattle`의 고정 스텝(`dt`)으로만 불러야** 헤드리스 시뮬과 브라우저가
+ * 같은 결과를 낸다 — `performance.now()` 같은 벽시계 값을 쓰면 프레임 간격이
+ * 다른 두 환경이 서로 다른 순간에 단계를 넘긴다. `dt`는 `SIM_STEP_MS`(100ms)를
+ * 못 넘으므로 한 번의 호출로 최대 한 단계만 넘어간다 — 반복문이 필요 없다.
+ *
+ * 단계가 바뀔 때 남은 시간을 다음 단계로 carry하지 않는다. 다른 시간 축
+ * 상태들(`flash`, `moveLock` 등)과 같은 규칙이고, 순수 연출이라 몇십 ms의
+ * 오차는 눈에 띄지 않는다.
+ */
+function tickBlink(boss: Cat, dt: number): void {
+  const b = boss.blink;
+  if (!b) return;
+  b.ms -= dt;
+  if (b.ms > 0) return;
+  if (b.phase === "out") {
+    b.phase = "gone";
+    b.ms = BLINK_GONE_MS;
+    // 도착하는 자리를 여기서 표시한다 — 좌표를 옮기는 바로 그 순간이라
+    // "사라지는 자리·나타나는 자리 양쪽 표시"라는 원래 의도가 유지된다.
+    // 부재("gone")와 페이드인("in")을 합친 시간만큼 살려 둔다.
+    boss.fx = b.to.fx;
+    boss.fy = b.to.fy;
     pushFx({
       kind: "ring",
-      fx: at.fx,
-      fy: at.fy,
+      fx: boss.fx,
+      fy: boss.fy,
       tx: 0,
       ty: 0,
       radius: boss.radius,
       angle: 0,
-      life: 420,
+      life: BLINK_GONE_MS + BLINK_IN_MS,
       color: FX_DANGER,
     });
+  } else if (b.phase === "gone") {
+    b.phase = "in";
+    b.ms = BLINK_IN_MS;
+  } else {
+    boss.blink = null;
   }
-  boss.fx = to.fx;
-  boss.fy = to.fy;
 }
 
 /** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
 function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   if (!boss.alive) return;
+
+  /**
+   * 순간이동 페이드가 진행 중이면 그것만 본다.
+   *
+   * 부재("gone") 동안 예고까지 걸리면 "안 보이는데 장판은 있다"는 모순이
+   * 생긴다. 그래서 취약 창·예고 로직 전체를 건너뛴다 — 페이드가 끝나야
+   * 비로소 정상적인 보스 로직으로 돌아간다.
+   */
+  if (boss.blink) {
+    tickBlink(boss, dt);
+    if (boss.blink) return; // 아직 진행 중이면 이번 스텝은 여기서 끝난다.
+    // 막 도착했다 — 미뤄 둔 예고를 이제 이 자리에서 건다("연출이 끝난
+    // 자리에서 예고"). thresholdIdx는 페이드를 시작할 때부터 그대로였으므로
+    // 이 예고가 원래 걸렸어야 할 패턴과 정확히 같다.
+    boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
+    boss.thresholdIdx += 1;
+    return;
+  }
+
   const kit = bossKit(boss.breed.id);
 
   // 취약 창이 열려 있는 동안에는 예고를 걸지 않는다. 이 3초가 플레이어의 차례다.
@@ -1610,6 +1826,10 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
 
   if (kit.teleportEvery > 0 && boss.thresholdIdx % kit.teleportEvery === 0) {
     teleportBoss(boss, Math.floor(boss.thresholdIdx / Math.max(1, kit.teleportEvery)));
+    // 페이드가 시작됐으면 예고는 그게 끝난 뒤(이 함수 위쪽의 `blink` 분기)에
+    // 건다. 목적지가 이미 지금 자리와 같아 `teleportBoss`가 아무 것도 안
+    // 했으면(`blink`가 안 생겼으면) 그대로 이어서 평소처럼 예고를 건다.
+    if (boss.blink) return;
   }
   boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
   boss.thresholdIdx += 1;
@@ -1737,6 +1957,9 @@ export function stepBattle(state: RunState, dtMs: number): void {
       if (!cat.alive) continue;
       // 기절·빙결 중에는 이동도 공격도 못 한다. 쿨다운도 멈춘다.
       if (cat.stun > 0) continue;
+      // 순간이동 페이드 중인 보스는 아무 행동도 안 한다. 흐려지는 동안에도
+      // 이동·공격을 계속하면 "사라지고 있는데 여전히 때린다"는 모순이 생긴다.
+      if (cat.blink) continue;
 
       // 적은 분신도 노린다 — 그게 분신의 값이다. 노려지지 않으면 그냥
       // 화면에 있는 장식이고, 맞아 주는 몸이라는 성격이 사라진다.
@@ -1747,7 +1970,17 @@ export function stepBattle(state: RunState, dtMs: number): void {
       // 아군 쪽은 원래부터 `livingCats(state.enemy)`를 매번 불렀다.
       const enemies = cat.side === "ally" ? foeBodies(state) : allyBodies(state);
       const target = pickTarget(cat, enemies, claimed);
-      if (!target) break;
+      /**
+       * 예전에는 여기가 `break`였다 — `foes`/`allies`가 실전멸 판정을 통과한
+       * 뒤라 항상 후보가 있었으니(전멸이면 이 루프 진입 전에 이미 끝난다)
+       * 도달할 일이 없는 자리였다. 지금은 다르다: 남은 적이 순간이동 부재
+       * ("gone") 중인 보스 하나뿐이면 `pickTarget`이 아무도 못 찾는다. 그건
+       * "적이 없다"가 아니라 "지금은 못 때린다"는 뜻이므로 이 행동자만 쉬고
+       * 나머지는 계속 행동해야 한다.
+       */
+      if (!target) continue;
+      // 보스가 지금 무엇을 노리는지는 render가 표식을 그릴 때 읽는다.
+      if (cat.side === "enemy" && cat.radius > 0) cat.targetRef = target.uid;
       claimed.set(target.uid, (claimed.get(target.uid) ?? 0) + 1);
 
       cat.cooldown -= step;

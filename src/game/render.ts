@@ -1,4 +1,6 @@
 import {
+  BLINK_IN_MS,
+  BLINK_OUT_MS,
   damagePops,
   fxs,
   POP_LIFE_MS,
@@ -9,7 +11,7 @@ import {
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { bossHint, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
+import { bossHint, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted } from "./audio.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
@@ -467,6 +469,75 @@ function hudChip(
   }
 }
 
+/**
+ * 생선 카운터 롤업.
+ *
+ * 값이 바뀐 순간 스냅하면 "얼마나 늘었는지"가 안 보인다 — 보스 처치처럼
+ * 한 번에 크게 뛰는 순간일수록 스냅이 더 어색하다. `chipTrail`(보스
+ * 체력바)과 같은 이유로 모듈 전역에 둔다. 프레임 사이에 이어져야
+ * 굴러가는 것으로 보인다.
+ */
+let goldShown = -1; // -1은 "아직 첫 프레임을 못 봤다"는 뜻. 첫 프레임부터 굴리면 0에서 시작 생선까지 굴러가는 이상한 그림이 된다.
+let goldFrom = 0;
+let goldTo = 0;
+let goldStartedAt = 0;
+const GOLD_ROLLUP_MS = 420;
+
+interface GoldPop {
+  amount: number;
+  startedAt: number;
+}
+const goldPops: GoldPop[] = [];
+const GOLD_POP_MS = 900;
+
+/** 매 프레임 실제 값과 견줘 롤업을 다시 걸고, 늘었으면 뜨는 글자를 하나 더한다. */
+function trackGold(gold: number): void {
+  if (goldShown < 0) {
+    goldShown = gold;
+    goldFrom = gold;
+    goldTo = gold;
+    return;
+  }
+  if (gold === goldTo) return;
+  if (gold > goldTo) {
+    goldPops.push({ amount: gold - goldTo, startedAt: performance.now() });
+    if (goldPops.length > 6) goldPops.shift();
+  }
+  goldFrom = goldShown;
+  goldTo = gold;
+  goldStartedAt = performance.now();
+}
+
+/** 지금 화면에 보일 값. ease-out으로 목표를 향해 굴러간다. */
+function currentGoldShown(): number {
+  const t = Math.min(1, (performance.now() - goldStartedAt) / GOLD_ROLLUP_MS);
+  goldShown = Math.round(goldFrom + (goldTo - goldFrom) * easeOutCubic(t));
+  return goldShown;
+}
+
+/** "+N" 이 카운터 위로 살짝 떠오르며 페이드아웃한다. 생선 그림 대신 숫자만 — 자리가 좁다. */
+function drawGoldPops(ctx: CanvasRenderingContext2D, chip: Rect): void {
+  const now = performance.now();
+  for (let i = goldPops.length - 1; i >= 0; i--) {
+    const p = goldPops[i]!;
+    const t = (now - p.startedAt) / GOLD_POP_MS;
+    if (t >= 1) {
+      goldPops.splice(i, 1);
+      continue;
+    }
+    const y = chip.y + chip.h * 0.68 - t * chip.h * 1.5;
+    const alpha = 1 - t * t;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    uiText(ctx, `+${p.amount}`, chip.x + chip.w / 2, y, Math.max(11, chip.h * 0.32), T.fish, {
+      align: "center",
+      weight: 800,
+      outline: true,
+    });
+    ctx.restore();
+  }
+}
+
 function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const r = L.hud;
   const third = r.w / 3;
@@ -478,16 +549,21 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     T.text,
     "left",
   );
+
+  trackGold(s.gold);
+  const goldChip: Rect = { x: r.x + third, y: r.y, w: third, h: r.h };
   hudChip(
     ctx,
-    { x: r.x + third, y: r.y, w: third, h: r.h },
+    goldChip,
     // 캡션을 비운다. 생선 그림이 곧 이름이라 글자까지 붙이면 같은 말을 두 번 한다.
     "",
-    String(s.gold),
+    String(currentGoldShown()),
     T.fish,
     "center",
     true,
   );
+  drawGoldPops(ctx, goldChip);
+
   hudChip(
     ctx,
     { x: r.x + third * 2, y: r.y, w: third, h: r.h },
@@ -688,6 +764,22 @@ function drawCat(
   const y = cy - size / 2 - L.cell * 0.03;
 
   /**
+   * 순간이동 페이드. `out`은 옅어지고, `gone`은 안 보이고, `in`은 다시 짙어진다.
+   *
+   * `gone` 동안은 통째로 그리지 않고 여기서 끝낸다 — 부재는 배틀 상태에서는
+   * "그 자리에 도착해 있음"인데(`tickBlink`가 좌표를 이미 옮겨 뒀다), 화면에서는
+   * "아직 아무도 없음"이어야 한다. 체력 바만 빈 자리에 떠 있으면 더 어색하므로
+   * 몸과 함께 전부 숨긴다 — 자리 표시는 `fxs`의 고리·파티클이 대신한다.
+   */
+  const blink = cat.blink;
+  const blinkFade =
+    !blink ? 1
+    : blink.phase === "out" ? Math.max(0, Math.min(1, blink.ms / BLINK_OUT_MS))
+    : blink.phase === "gone" ? 0
+    : Math.max(0, Math.min(1, 1 - blink.ms / BLINK_IN_MS));
+  if (blinkFade <= 0.02) return;
+
+  /**
    * 발밑 표식. 그림자이면서 **진영 표시**다.
    *
    * 전에는 검은 타원 하나였다. 그런데 양쪽이 같은 스프라이트를 쓰고 전투가
@@ -701,12 +793,12 @@ function drawCat(
     const ally = cat.side === "ally";
     const ring = ally ? T.ally : T.enemy;
     ctx.save();
-    ctx.globalAlpha = dimmed ? 0.12 : 0.34;
+    ctx.globalAlpha = (dimmed ? 0.12 : 0.34) * blinkFade;
     ctx.beginPath();
     ctx.ellipse(cx, cy + size * 0.44, size * 0.32, size * 0.11, 0, 0, Math.PI * 2);
     ctx.fillStyle = "#000";
     ctx.fill();
-    ctx.globalAlpha = dimmed ? 0.2 : 0.85;
+    ctx.globalAlpha = (dimmed ? 0.2 : 0.85) * blinkFade;
     ctx.beginPath();
     ctx.ellipse(cx, cy + size * 0.44, size * 0.3, size * 0.1, 0, 0, Math.PI * 2);
     ctx.strokeStyle = ring;
@@ -714,7 +806,7 @@ function drawCat(
     ctx.stroke();
     // 적은 고리를 점선으로 끊는다. 색을 못 봐도 무늬로 갈린다.
     if (!ally) {
-      ctx.globalAlpha = dimmed ? 0.2 : 0.9;
+      ctx.globalAlpha = (dimmed ? 0.2 : 0.9) * blinkFade;
       ctx.beginPath();
       ctx.ellipse(cx, cy + size * 0.44, size * 0.3, size * 0.1, 0, -0.5, 0.5);
       ctx.strokeStyle = T.inkDeep;
@@ -735,6 +827,9 @@ function drawCat(
   // 반투명은 "실체가 덜한 것"으로 곧장 읽히고, 색조를 돌리는 것과 달리
   // 어느 품종인지는 그대로 남는다.
   else if (cat.summon) ctx.globalAlpha = 0.62;
+  // 순간이동 페이드는 위 조건과 무관하게 항상 곱한다 — out/in 단계는
+  // `cat.alive`가 그대로 true라 위 분기 어느 것도 안 걸릴 수 있다.
+  ctx.globalAlpha *= blinkFade;
 
   const img = spriteFor(cat.breed.id, cat.pose);
   if (img) {
@@ -909,6 +1004,49 @@ function drawCat(
       "center",
       false,
     );
+  }
+}
+
+/** `targetRef`가 가리키는 아군을 찾는다. 진짜 고양이와 소환수 양쪽에 있을 수 있다. */
+function findAllyByUid(s: RunState, uid: string): Cat | undefined {
+  for (const c of s.ally) if (c && c.uid === uid) return c;
+  for (const c of s.summons) if (c.uid === uid) return c;
+  return undefined;
+}
+
+/**
+ * 보스가 지금 노리는 대상 머리 위에 표식을 그린다.
+ *
+ * 보스(반경이 있는 개체)만 그린다 — 일반 적까지 전부 표시하면 화면이
+ * 시끄러워진다. `targetRef`는 `pickTarget`이 이번 스텝에 고른 결과를 그대로
+ * 옮겨 적은 값이라 판정에는 관여하지 않는다(`battle.ts`) — 지워도 전투 결과는
+ * 같다. 색은 진영색(`T.enemy`)을 쓴다 — 판 위 고채도는 위험·모임·취약
+ * 셋뿐이라는 원칙(`theme.ts`)을 이 표식도 지켜야 한다.
+ */
+function drawBossTargetMark(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  for (const boss of s.enemy) {
+    if (!boss || !boss.alive || boss.radius <= 0 || !boss.targetRef) continue;
+    // 부재("gone") 중에는 노리는 대상도 없다 — 실제로 아무 것도 안 하고 있다.
+    if (boss.blink && boss.blink.phase === "gone") continue;
+    const target = findAllyByUid(s, boss.targetRef);
+    if (!target || !target.alive) continue;
+
+    const { x: cx, y: cy } = fieldToScreen(L, target.fx, target.fy);
+    const { bh, by } = healthBarGeom(L, target.side, target.radius, cy, target.sizeMul);
+    const w = Math.max(6, bh * 1.6);
+    const my = by - bh * 1.6;
+
+    ctx.save();
+    ctx.strokeStyle = T.enemy;
+    ctx.lineWidth = Math.max(1.5, bh * 0.5);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx - w, my + w * 0.7);
+    ctx.lineTo(cx, my);
+    ctx.lineTo(cx + w, my + w * 0.7);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -1114,6 +1252,24 @@ function seed(f: Fx, x: number, y: number, cell: number): void {
         return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - u * 0.3, g: u * 0.09, life: 280, max: 280, size: 1 };
       });
       break;
+    case "burst":
+      // 장판 전체가 번쩍이는 순간의 잔불. 짧고 굵게 튄다 — 오래 남으면 벡터
+      // 겹이 이미 사라진 뒤에도 그 자리가 위험해 보인다.
+      push(10, (i) => {
+        const a = (Math.PI * 2 * i) / 10 + rnd(-0.25, 0.25);
+        const sp = rnd(0.5, 1.4) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.6, g: u * 0.06, life: 300, max: 300, size: i % 2 ? 1 : 2 };
+      });
+      break;
+    case "bossdeath":
+      // 확장 링 3겹과 같이 퍼지는 굵은 파편. 보스 처치가 지금까지 중 가장
+      // 무거운 사건이므로 파티클도 이 게임에서 가장 크게 뿌린다.
+      push(30, (i) => {
+        const a = (Math.PI * 2 * i) / 30 + rnd(-0.15, 0.15);
+        const sp = rnd(1.0, 2.6) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.65, g: u * 0.05, life: 620, max: 620, size: i % 3 ? 1 : 2 };
+      });
+      break;
   }
   // 한 프레임에 스킬이 여럿 터져도 상한을 넘지 않게 한다.
   if (particles.length > 520) particles.splice(0, particles.length - 520);
@@ -1291,6 +1447,56 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
           ctx.beginPath();
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
+          ctx.stroke();
+        }
+        break;
+      }
+      case "burst": {
+        /**
+         * 예고 장판과 똑같은 모양을 채워 넣는다 — `drawTelegraphs`가 원형·직선·
+         * 부채꼴을 그리는 것과 같은 기하다. 해칭·동심원 같은 무늬는 없다.
+         * 이건 판단할 시간이 있는 예고가 아니라 이미 끝난 순간의 섬광이라,
+         * 읽을거리가 아니라 한 번 확 채워졌다 빠지면 된다.
+         */
+        ctx.globalAlpha = qa(0.85 * (1 - t) ** 1.6);
+        ctx.fillStyle = f.color;
+        const shape = f.shape ?? "circle";
+        if (shape === "circle") {
+          const r = (f.arg ?? 1) * pitch;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          const ang = Math.atan2(f.dirY ?? 0, f.dirX ?? 1);
+          const reach = (f.reach ?? 0) * pitch;
+          ctx.translate(p.x, p.y);
+          ctx.rotate(ang);
+          ctx.beginPath();
+          if (shape === "line") {
+            const half = (f.arg ?? 0.5) * pitch;
+            ctx.rect(0, -half, reach, half * 2);
+          } else {
+            const half = f.arg ?? 0.35;
+            ctx.moveTo(0, 0);
+            ctx.arc(0, 0, reach, -half, half);
+            ctx.closePath();
+          }
+          ctx.fill();
+        }
+        break;
+      }
+      case "bossdeath": {
+        // 확장 링 세 겹. 겹마다 시작을 살짝 늦춰(lag) 뒤따라오는 파문으로
+        // 보이게 한다 — 동시에 세 개를 그리면 그냥 굵은 원 하나로 뭉쳐 보인다.
+        ctx.strokeStyle = f.color;
+        for (let k = 0; k < 3; k++) {
+          const lag = k * 0.16;
+          if (t < lag) continue;
+          const kt = Math.min(1, (t - lag) / (1 - lag));
+          ctx.globalAlpha = qa(0.85 * (1 - kt) ** 1.2);
+          ctx.lineWidth = Math.max(1, L.cell * 0.08 * (1 - kt * 0.5) * S);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, (f.radius + 0.7 + k * 1.0) * pitch * (0.15 + kt * 1.1), 0, Math.PI * 2);
           ctx.stroke();
         }
         break;
@@ -1818,27 +2024,21 @@ function drawOffers(
     const rad = Math.min(cr.w, cr.h) * 0.13;
 
     // 산 자리는 비워 둔다. 카드가 사라지면서 남은 것이 넓어지면 손이 헛나간다.
+    //
+    // **정적 텍스트 판("샀음")은 그리지 않는다.** TFT·슬레이더스파이어·발라트로·
+    // 하스스톤 전장·백팩배틀즈 다섯 모두 빈 슬롯에 "품절" 류 글자를 안 찍는다 —
+    // 구매 피드백은 글자가 아니라 카드가 사라지는 **동작**이 진다(그 동작은
+    // `drawBuyTweens`가 맡는다). 여기 남는 건 빈 테두리뿐이라, 채움을 어둡게
+    // 눌러 "지금 비었다"는 것 자체가 눈에 들어오게 한다.
     if (!o) {
       roundRect(ctx, cr, rad);
-      ctx.fillStyle = "rgba(239,224,198,0.02)";
+      ctx.fillStyle = "rgba(12,8,6,0.28)";
       ctx.fill();
       ctx.setLineDash([4, 5]);
       ctx.strokeStyle = "rgba(239,224,198,0.10)";
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.setLineDash([]);
-      uiText(
-        ctx,
-        "샀음",
-        cr.x + cr.w / 2,
-        cr.y + cr.h / 2,
-        Math.max(11, cr.w * 0.1),
-        "rgba(156,139,118,0.55)",
-        {
-          align: "center",
-          weight: 600,
-        },
-      );
       return;
     }
 
@@ -2008,6 +2208,97 @@ function drawOffers(
   });
 }
 
+/** 0~1 진행도를 완만하게 접는다. 등장·소멸 트윈 여럿이 같이 쓴다. */
+function easeOutCubic(t: number): number {
+  const p = Math.min(1, Math.max(0, t));
+  return 1 - Math.pow(1 - p, 3);
+}
+
+/**
+ * 구매 트윈 하나. 카드가 슬롯에서 사라지는 대신 아군 보드 쪽으로 날아가며
+ * 지워지는 동안의 상태다.
+ *
+ * **판정과는 무관한 연출 상태다.** `main.ts`의 `buyWithFx`가 `buyOffer`(실제
+ * 구매, run.ts)를 먼저 반영한 다음 여기 등록만 한다. 헤드리스 시뮬은 이
+ * 배열의 존재조차 모르므로 결과에 영향이 없다.
+ *
+ * 자리는 좌표가 아니라 **슬롯 인덱스·도착 셀**로 들고 있는다. 화면 크기가
+ * 트윈 도중 바뀌어도(회전·주소창 접힘) 매 프레임 `offerRects`/`cellRect`로
+ * 다시 구하므로 좌표가 안 어긋난다.
+ */
+interface BuyTween {
+  slot: number;
+  /** null이면 유물처럼 특정 칸이 안 생기는 구매다 — 보드 한가운데로 향한다. */
+  cell: number | null;
+  breedId: number | null;
+  accent: string;
+  startedAt: number;
+}
+
+const buyTweens: BuyTween[] = [];
+/** 150~250ms 중간값. 너무 길면 다음 카드를 가리고, 너무 짧으면 어디로 갔는지 안 읽힌다. */
+const BUY_TWEEN_MS = 210;
+
+/**
+ * 카드를 하나 산 순간 부른다. `main.ts`의 `buyWithFx`가 유일한 호출부다.
+ *
+ * 색·그림은 여기서 정한다 — `drawOffers`가 카드에 쓰는 것과 같은 규칙
+ * (유물은 생선색, 강화는 금색, 나머지는 직업색)이라 호출부가 그 규칙을
+ * 몰라도 된다.
+ */
+export function spawnBuyTween(offer: Offer, slot: number, cell: number | null): void {
+  const accent =
+    offer.kind === "relic" ? T.fish : offer.kind === "upgrade" ? T.gold : offer.breed ? CLASS_COLOR[offer.breed.cls] : T.fish;
+  buyTweens.push({
+    slot,
+    cell,
+    breedId: offer.breed ? offer.breed.id : null,
+    accent,
+    startedAt: performance.now(),
+  });
+}
+
+/** 진행 중인 구매 트윈을 그리고, 끝난 것은 지운다. */
+function drawBuyTweens(ctx: CanvasRenderingContext2D, L: Layout): void {
+  if (buyTweens.length === 0) return;
+  const now = performance.now();
+  const rects = offerRects(L);
+  for (let i = buyTweens.length - 1; i >= 0; i--) {
+    const tw = buyTweens[i]!;
+    const t = (now - tw.startedAt) / BUY_TWEEN_MS;
+    const from = rects[tw.slot];
+    if (t >= 1 || !from) {
+      buyTweens.splice(i, 1);
+      continue;
+    }
+
+    const to = tw.cell === null ? L.allyBoard : cellRect(L, "ally", tw.cell);
+    const e = easeOutCubic(t);
+    const fromCx = from.x + from.w / 2;
+    const fromCy = from.y + from.h / 2;
+    const cx = fromCx + (to.x + to.w / 2 - fromCx) * e;
+    const cy = fromCy + (to.y + to.h / 2 - fromCy) * e;
+    // 초반에 살짝 부풀었다가 도착할수록 줄어든다 — 튕겨 나가는 느낌.
+    const scale = t < 0.35 ? 1 + (t / 0.35) * 0.18 : 1.18 - ((t - 0.35) / 0.65) * 0.7;
+    // 절반 넘게 갈 때까지는 또렷하다가 도착 직전에 스러진다.
+    const alpha = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
+    const size = Math.min(from.w, from.h) * scale;
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    const img = tw.breedId !== null ? spriteFor(tw.breedId, "idle") : null;
+    if (img) {
+      ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+    } else {
+      // 유물·강화 카드는 그림이 없다. 직업색 대신 카드 색조로 남긴다.
+      roundRect(ctx, { x: cx - size / 2, y: cy - size / 2, w: size, h: size }, size * 0.22);
+      ctx.fillStyle = hexA(tw.accent, 0.6);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
 /**
  * 카드 머리줄 문구.
  *
@@ -2020,7 +2311,9 @@ function offerHeadline(s: RunState): string {
   const team = `우리 편 ${owned}/${cap}`;
 
   if (s.offers.every((o) => o === null)) {
-    return `${team} · 다 샀어요 — 자리를 다듬고 ${s.wave === 1 ? "가볼까요" : "다음 걸음으로"}`;
+    // 웨이브 1만 "가볼까요"(질문형)였고 나머지는 "다음 걸음으로"(명사형)였다.
+    // 같은 행동을 웨이브 번호에 따라 다르게 부르면 그게 같은 버튼인지 헷갈린다.
+    return `${team} · 다 샀어요 — 자리를 다듬고 다음 걸음으로`;
   }
   if (owned >= cap) return `${team} · 자리가 다 찼어요. 강화하거나 바꿔 넣어요`;
   if (s.wave === 1) return `${team} · 쓰고 가도, 그냥 가도 괜찮아요`;
@@ -2479,6 +2772,24 @@ function mapBox(L: Layout): Rect {
   return { x: L.w / 2 - w / 2, y: top, w, h };
 }
 
+/** 봉우리 셋 달린 왕관. 지도의 스테이지 우두머리 칸에만 씌운다. */
+function drawCrown(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, color: string): void {
+  const h = w * 0.62;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx - w / 2, cy);
+  ctx.lineTo(cx - w / 2, cy - h * 0.5);
+  ctx.lineTo(cx - w * 0.24, cy - h * 0.18);
+  ctx.lineTo(cx, cy - h);
+  ctx.lineTo(cx + w * 0.24, cy - h * 0.18);
+  ctx.lineTo(cx + w / 2, cy - h * 0.5);
+  ctx.lineTo(cx + w / 2, cy);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: DragState): void {
   if (s.phase !== "map") return;
   /**
@@ -2570,7 +2881,10 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     const alpha = pickable ? 1 : taken ? 0.62 : done ? 0.26 : 0.46;
 
     // 올라간 칸은 조금 커진다. 크기 변화가 색 변화보다 먼저 눈에 띈다.
-    const grow = hot ? rect.w * 0.09 : 0;
+    // 스테이지 우두머리(걸음의 두 번째 보스)는 늘 한 치수 크다 — 중간보스와
+    // 같은 크기면 지도가 "이 스테이지의 끝"을 말할 방법이 없다.
+    const stageBossNode = node.kind === "boss" && bossOrdinalInStage(st) > 0;
+    const grow = (hot ? rect.w * 0.09 : 0) + (stageBossNode ? rect.w * 0.1 : 0);
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.beginPath();
@@ -2615,6 +2929,10 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
         hot ? T.paper : hue,
         { align: "center", weight, outline: true },
       );
+      // 우두머리 칸에만 왕관. 색·크기와 달리 멀리서도 "종류가 다르다"로 읽힌다.
+      if (stageBossNode) {
+        drawCrown(ctx, rect.x + rect.w / 2, rect.y - rect.w * 0.1, rect.w * 0.42, T.gold);
+      }
     } else {
       drawNodeIcon(
         ctx,
@@ -2669,10 +2987,15 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   );
 }
 
+/**
+ * 버튼 문구는 짧고 능동적이어야 한다("전투 시작"·"출발"류) — TFT·슬레이더스파이어·
+ * 발라트로·하스스톤 전장·백팩배틀즈가 공통으로 쓰는 톤이다. "싸우러 가기"처럼
+ * 에두르는 동사구는 안내 문구(존댓말)와 버튼(명사·명령형)의 경계를 흐린다.
+ */
 export function buttonText(s: RunState): string {
   switch (s.phase) {
     case "prepare":
-      return "싸우러 가기";
+      return "전투 시작";
     case "battle": {
       // 보스전에는 이 자리가 개입 버튼이다. 전투 중 죽어 있던 공간을 재사용하므로
       // 세로 레이아웃 예산이 늘지 않는다.
@@ -2692,7 +3015,7 @@ export function buttonText(s: RunState): string {
     }
     case "reward":
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
-      return s.nodeKind === "shop" ? "길 고르기" : "싸우러 가기";
+      return s.nodeKind === "shop" ? "길 고르기" : "전투 시작";
     case "map":
       return "길을 고르세요";
     case "gameover":
@@ -2811,6 +3134,7 @@ function drawBossBanner(
   ctx: CanvasRenderingContext2D,
   L: Layout,
   boss: Cat,
+  stageBoss: boolean,
 ): void {
   const r = L.notice;
   const sniper = boss.breed.id === SNIPER_BREED.id;
@@ -2827,13 +3151,16 @@ function drawBossBanner(
     align: "left",
     weight: 800,
   });
+  // 격이 셋으로 갈린다 — 미니 보스(저격수) / 중간보스 / 스테이지 우두머리.
+  // 우두머리만 금색이다. 판 위 고채도는 위험·모임·취약 셋뿐이라는 원칙에서
+  // 취약(금색)과 같은 대역을 쓴다 — "이건 큰 사건"이라는 뜻으로 이미 학습된 색.
   uiText(
     ctx,
-    sniper ? "설핏 든 것" : "되풀이되는 것",
+    sniper ? "설핏 든 것" : stageBoss ? "이 땅의 우두머리" : "되풀이되는 것",
     r.x + pad * 1.4,
     y + h * 0.72,
     nameSize * 0.72,
-    T.enemy,
+    stageBoss && !sniper ? T.gold : T.enemy,
     { align: "left", weight: 700 },
   );
 
@@ -2908,6 +3235,17 @@ function drawBossBanner(
   );
 }
 
+let lastNoticeText = "";
+let lastNoticeAt = 0;
+/** 안내 문구가 바뀐 시각을 돌려준다. 보스 배너의 등장 애니메이션이 그 기준을 잰다. */
+function trackNoticeChange(text: string): number {
+  if (text !== lastNoticeText) {
+    lastNoticeText = text;
+    lastNoticeAt = performance.now();
+  }
+  return lastNoticeAt;
+}
+
 function drawNotice(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -2917,7 +3255,7 @@ function drawNotice(
   // 보스가 살아 있으면 이 띠는 배너에 넘긴다. 안내는 배치 단계 것이라 겹치지 않는다.
   const boss = s.enemy.find((c) => c?.alive && c.radius > 0);
   if (s.phase === "battle" && boss) {
-    drawBossBanner(ctx, L, boss);
+    drawBossBanner(ctx, L, boss, boss.stageBoss === true);
     return;
   }
   const r = L.notice;
@@ -2963,6 +3301,29 @@ function drawNotice(
   }
 
   if (!s.notice) return;
+
+  /**
+   * 보스 처치 보너스만 다르게 그린다.
+   *
+   * 부검 통계에서 판이 끝나는 이유의 41%가 보스다 — 이 게임에서 가장 큰
+   * 사건인데, "새 목표가 생겼어요" 같은 잔 안내와 같은 크기·색이면 묻힌다.
+   * 금색으로 키우고, 등장을 한 박자 늘여 무게를 준다.
+   *
+   * `s.noticeKind`로 가른다. 문구("보스 처치!"로 시작하는지)로 갈랐다면
+   * 나중에 카피를 다듬을 때 이 스타일이 아무 신호 없이 빠진다.
+   */
+  if (s.noticeKind === "boss") {
+    const since = trackNoticeChange(s.notice);
+    const grow = Math.min(1, (performance.now() - since) / 260);
+    const scale = 0.82 + 0.18 * easeOutCubic(grow);
+    uiText(ctx, s.notice, L.w / 2, cy, size * 1.3 * scale, T.gold, {
+      align: "center",
+      weight: 800,
+      outline: true,
+    });
+    return;
+  }
+
   uiText(ctx, s.notice, L.w / 2, cy, size, T.paperDim, {
     align: "center",
     weight: 600,
@@ -3205,6 +3566,33 @@ function drawCurtain(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.restore();
 }
 
+/**
+ * 보스가 죽는 순간의 화면 흔들림.
+ *
+ * battle.ts는 카메라를 모른다 — `bossdeath` kind의 Fx가 `fxs`에 살아 있는
+ * 동안만 여기서 오프셋을 계산해 판 그림 전체에 얹는다. 위쪽 `drawFx` 근처
+ * 주석대로 일반 타격에는 흔들림을 안 넣었다(예고를 읽는 도중 방해될 여지가
+ * 측정 전이라). 보스가 죽은 뒤에는 그 보스가 걸었던 예고가 이미 지워졌으므로
+ * (`damage`가 `telegraph`를 null로 만든다) 더 읽을 예고가 없다 — 그래서
+ * 이 한 경우만 예외로 켠다.
+ */
+function bossDeathShake(L: Layout): { x: number; y: number } {
+  const dead = fxs.find((f) => f.kind === "bossdeath");
+  if (!dead) return { x: 0, y: 0 };
+  // 위상은 Fx에 실려 온다. s.step은 처치 직후 finishWave가 올려 못 믿는다.
+  const stageBoss = dead.stageBoss === true;
+  const t = 1 - dead.life / dead.maxLife;
+  const decay = (1 - t) ** 2;
+  // 우두머리는 더 크게 흔든다. 중간보스와 같은 진동이면 "더 큰 사건"이라는
+  // 위상이 소리 없이 사라진다 — 수명은 battle이 정하므로 여기서는 진폭만.
+  const mag = L.cell * (stageBoss ? 0.26 : 0.16) * decay;
+  // 진동의 위상은 `life`(연출 남은 시간)에서 뽑는다 — 헤드리스 시뮬은 이 함수를
+  // 아예 안 부르므로 결정성 문제는 없지만, performance.now() 대신 연출 자체의
+  // 시간축을 쓰면 흔들림이 항상 이 Fx의 수명과 같은 리듬으로 움직인다.
+  const wob = dead.life * 0.09;
+  return { x: Math.sin(wob) * mag, y: Math.cos(wob * 1.3) * mag * 0.7 };
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -3216,6 +3604,12 @@ export function render(
   drawArena(ctx, L);
   drawHud(ctx, L, s);
   drawMute(ctx, L, isMuted());
+
+  // 판·고양이·연출만 흔든다. HUD·상점·지도까지 흔들리면 화면 전체가 고장난
+  // 것처럼 보인다.
+  const shake = bossDeathShake(L);
+  ctx.save();
+  ctx.translate(shake.x, shake.y);
 
   drawDivider(ctx, L);
   drawSideLabels(ctx, L);
@@ -3251,6 +3645,7 @@ export function render(
   }
   drawList.sort((p, q) => p.y - q.y);
   for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed);
+  drawBossTargetMark(ctx, L, s);
 
   drawFx(ctx, L);
   drawShots(ctx, L);
@@ -3270,7 +3665,10 @@ export function render(
   }
 
   drawPops(ctx, L);
+  ctx.restore();
+
   drawBottomZone(ctx, L, s);
+  drawBuyTweens(ctx, L);
   drawSynergies(ctx, L, s);
   drawMap(ctx, L, s, drag);
   drawNotice(ctx, L, s);

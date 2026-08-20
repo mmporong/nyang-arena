@@ -30,9 +30,14 @@ import {
   type Side,
 } from "./types.ts";
 import {
+  type Difficulty,
   type EffectKey,
   isTriggered,
   PRESET_SYNERGIES,
+  scaleEffectForDifficulty,
+  TRIGGERS,
+  triggerDifficulty,
+  type Trigger,
   validateAll,
   type BoardUnit,
   type SynergyRule,
@@ -42,6 +47,14 @@ import {
 import generated from "../data/synergies.json" with { type: "json" };
 
 export type Phase = "prepare" | "battle" | "reward" | "map" | "gameover";
+
+/**
+ * `notice`의 성격. 지금은 "보스 처치"만 다르게 그린다(render.ts의 drawNotice).
+ *
+ * 문구 접두("보스 처치!"로 시작하는지)로 갈랐다면 나중에 카피를 다듬을 때
+ * 이 스타일이 아무 신호 없이 빠진다. 필드를 따로 둬서 문구와 스타일을 분리한다.
+ */
+export type NoticeKind = "normal" | "boss";
 
 export type OfferKind = "recruit" | "upgrade" | "replace" | "relic";
 
@@ -78,6 +91,8 @@ export interface RunState {
   offers: (Offer | null)[];
   /** 마지막 전투 결과 메시지 */
   notice: string;
+  /** notice의 성격. `setNotice`가 항상 같이 정한다. */
+  noticeKind: NoticeKind;
   battleElapsed: number;
   /** 이번 런에서 최고 기록을 깼는지. 동점을 갱신으로 표시하지 않기 위해 따로 둔다. */
   recordBroken: boolean;
@@ -319,6 +334,18 @@ export function bossesSeen(state: RunState): number {
 }
 
 /**
+ * 안내 문구를 세팅한다. **종류(`noticeKind`)를 항상 함께 정한다.**
+ *
+ * 산발적으로 `state.notice = ...`만 쓰면 이전에 뜬 보스 배너의 종류가 다음
+ * 안내에 그대로 남는다 — 문구는 바뀌었는데 스타일만 이전 것을 입는 식으로
+ * 깨진다. main.ts도 안내를 세팅할 때는 이 함수를 쓴다.
+ */
+export function setNotice(state: RunState, text: string, kind: NoticeKind = "normal"): void {
+  state.notice = text;
+  state.noticeKind = kind;
+}
+
+/**
  * 지도에서 한 칸을 고른다.
  *
  * 상점 칸은 싸우지 않으므로 그 자리에서 보상을 주고 곧장 상점 화면으로 간다.
@@ -347,7 +374,7 @@ export function chooseNode(state: RunState, idx: number): boolean {
     syncStage(state);
     rollOffers(state);
     state.phase = "reward";
-    state.notice = "쉬어 가는 길이에요 — 생선과 다시 뽑기를 챙겼어요";
+    setNotice(state, "쉬어 가는 길이에요 — 생선과 다시 뽑기를 챙겼어요");
     return true;
   }
 
@@ -364,7 +391,7 @@ export function chooseNode(state: RunState, idx: number): boolean {
   state.phase = "reward";
   // 길목은 안내를 비운다. 매 걸음 같은 말이 뜨면 글자가 배경이 되고,
   // 그러면 정작 알려야 할 때(정예·경고) 아무도 안 읽는다.
-  state.notice = node.kind === "elite" ? "만만치 않아요. 이기면 유물을 남기고 가요" : "";
+  setNotice(state, node.kind === "elite" ? "만만치 않아요. 이기면 유물을 남기고 가요" : "");
   return true;
 }
 
@@ -381,13 +408,13 @@ export function leaveShop(state: RunState): void {
   if (state.nodeKind === "shop") {
     // 정찰은 걸음만 먹었다(chooseNode에서 이미 step을 넘겼다). 다음 갈림길로.
     state.phase = "map";
-    state.notice = "";
+    setNotice(state, "");
     return;
   }
   state.phase = "prepare";
   // 이 안내는 이제 화면에 거의 안 뜬다 — UI가 구매·배치를 한 화면으로 합치면서
   // 준비 화면에서 멈추지 않기 때문이다. 헤드리스에서는 여전히 이 자리를 지난다.
-  state.notice = "";
+  setNotice(state, "");
 }
 
 /** 스테이지 경계를 넘었으면 새 지도를 만든다. */
@@ -439,30 +466,63 @@ export function resolveSynergyPool(): SynergyRule[] {
   return [...byId.values()];
 }
 
+/**
+ * 목표 셋을 고른다. 트리거당 하나가 아니라 **난이도당 하나**로 뽑는다.
+ *
+ * 난이도는 `triggerDifficulty`의 **실측 라벨**이 정한다 — 계산 모형을 두 번
+ * 세웠는데 두 번 다 실측이 부정해서 라벨을 측정에 직접 묶었다(그 이력이
+ * `synergy-schema.ts`의 주석에 있다). 쉬움은 배치 2마리·같은 품종 2, 중간은
+ * 배치 3마리, 어려움은 같은 색 3이다. 등급에 트리거가 여럿이면 판마다
+ * 무작위로 하나를 고른다.
+ *
+ * 효과 크기도 `scaleEffectForDifficulty`로 난이도에 비례하게 다시 잰다 — 쉬운
+ * 목표가 어려운 목표와 보상이 같으면 굳이 어려운 쪽을 볼 이유가 없다.
+ */
 function pickSynergies(pool: SynergyRule[]): SynergyRule[] {
-  // 트리거가 겹치면 한 조합으로 여러 개가 동시에 켜져 밸런스가 무너진다.
-  // 트리거당 최대 1개만 뽑는다.
-  const byTrigger = new Map<string, SynergyRule[]>();
+  const byTrigger = new Map<Trigger, SynergyRule[]>();
   for (const r of pool) {
     const list = byTrigger.get(r.trigger) ?? [];
     list.push(r);
     byTrigger.set(r.trigger, list);
   }
-  // 트리거가 4종이고 한 판에 3개만 쓰므로, 그룹 순서를 섞어야 판마다 다른 조합이 나온다.
-  const groups = shuffle([...byTrigger.values()]);
+
+  const byDifficulty = new Map<Difficulty, Trigger[]>();
+  for (const t of TRIGGERS) {
+    if (!byTrigger.has(t)) continue; // 이 트리거의 후보가 풀에 없으면 등급 자체가 못 뽑힌다
+    const d = triggerDifficulty(t);
+    const list = byDifficulty.get(d) ?? [];
+    list.push(t);
+    byDifficulty.set(d, list);
+  }
+
   const out: SynergyRule[] = [];
   const usedEffects = new Set<string>();
 
-  for (const list of groups) {
-    if (out.length >= SYNERGIES_PER_RUN) break;
-    const shuffled = shuffle([...list]);
-    // 효과까지 겹치면 세 목표가 전부 "공격 속도"인 판이 나와 선택의 맛이 사라진다.
-    // 아직 안 쓴 효과를 우선하고, 없으면 아무거나 쓴다.
-    const pick = shuffled.find((r) => !usedEffects.has(r.effect.key)) ?? shuffled[0];
-    if (!pick) continue;
-    usedEffects.add(pick.effect.key);
-    out.push(pick);
+  for (const difficulty of ["easy", "medium", "hard"] as const) {
+    const triggers = shuffle([...(byDifficulty.get(difficulty) ?? [])]);
+    for (const t of triggers) {
+      const candidates = shuffle([...(byTrigger.get(t) ?? [])]);
+      // 효과까지 겹치면 세 목표가 전부 "공격 속도"인 판이 나와 선택의 맛이 사라진다.
+      // 아직 안 쓴 효과를 우선하고, 없으면 아무거나 쓴다.
+      const pick = candidates.find((r) => !usedEffects.has(r.effect.key)) ?? candidates[0];
+      if (!pick) continue;
+      usedEffects.add(pick.effect.key);
+      out.push({ ...pick, effect: scaleEffectForDifficulty(pick.effect, difficulty) });
+      break;
+    }
   }
+
+  // 풀이 특정 트리거를 아예 못 채운 예외적인 경우를 대비한 보루. 세 등급을
+  // 다 못 채웠으면 남은 후보로 채운다(AC-12: 데이터가 비어도 게임은 돌아야 한다).
+  if (out.length < SYNERGIES_PER_RUN) {
+    const chosenIds = new Set(out.map((r) => r.id));
+    const rest = shuffle(pool.filter((r) => !chosenIds.has(r.id)));
+    for (const r of rest) {
+      if (out.length >= SYNERGIES_PER_RUN) break;
+      out.push({ ...r, effect: scaleEffectForDifficulty(r.effect, triggerDifficulty(r.trigger)) });
+    }
+  }
+
   return out;
 }
 
@@ -712,6 +772,7 @@ export function newRun(seed?: number): RunState {
     activeSynergyIds: new Set(),
     offers: [],
     notice: `생선 ${BALANCE.startGold}마리로 시작한다`,
+    noticeKind: "normal",
     battleElapsed: 0,
     recordBroken: false,
     lossReason: null,
@@ -929,6 +990,8 @@ function buildBossWave(state: RunState, wave: number, scale: number): void {
   const bossCell = 2 * BOARD_COLS + 2;
   const boss = makeCat(breed, "enemy", bossCell);
   boss.radius = BOSS_RADIUS;
+  // 낳는 순간 위상을 박는다 — step은 finishWave가 올리므로 나중엔 못 믿는다.
+  boss.stageBoss = bossOrdinalInStage(state.step) > 0;
   // 첫 보스는 얇게, 후반으로 갈수록 두껍게. 고정 배수는 5웨이브를 벽으로 만든다.
   const ramp = bossRampFor(state);
   const hpMul = (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp) * bossKit(breed.id).power;
@@ -1213,7 +1276,7 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
     if (free < 0) {
       // 살 수 없는 카드를 목록에 남겨두면 무한히 재시도된다. 즉시 걷어낸다.
       state.offers = state.offers.map((o) => (o === offer ? null : o));
-      state.notice = "자리가 다 찼어요";
+      setNotice(state, "자리가 다 찼어요");
       return false;
     }
     state.ally[free] = makeCat(offer.breed, "ally", free);
@@ -1258,22 +1321,22 @@ export function rerollOffers(state: RunState): boolean {
   if (state.freeRerolls > 0) {
     state.freeRerolls -= 1;
     rollOffers(state);
-    state.notice = "";
+    setNotice(state, "");
     return true;
   }
   if (state.gold < REROLL_COST) {
-    state.notice = "생선이 조금 모자라요";
+    setNotice(state, "생선이 조금 모자라요");
     return false;
   }
   state.gold -= REROLL_COST;
   rollOffers(state);
-  state.notice = "";
+  setNotice(state, "");
   return true;
 }
 
 export function startBattle(state: RunState): void {
   if (livingCats(state.ally).length === 0) {
-    state.notice = "한 마리는 세워주세요";
+    setNotice(state, "한 마리는 세워주세요");
     return;
   }
   applySynergies(state);
@@ -1320,7 +1383,7 @@ export function startBattle(state: RunState): void {
   }
   state.battleElapsed = 0;
   state.phase = "battle";
-  state.notice = "";
+  setNotice(state, "");
 }
 
 export function finishWave(state: RunState, won: boolean, reason: "wipe" | "timeout" = "wipe"): void {
@@ -1343,7 +1406,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
       state.recordBroken = true;
       saveBest(state.best);
     }
-    state.notice = `${state.wave}웨이브 도달`;
+    setNotice(state, `${state.wave}웨이브 도달`);
     return;
   }
 
@@ -1368,9 +1431,26 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
     const pick = shuffle(fit.length > 0 ? fit : pool)[0];
     if (pick) {
       state.relics.push(pick);
-      state.notice = `정예 격파 — ${pick.name}`;
+      setNotice(state, `정예 격파 — ${pick.name}`);
     }
   }
+  /**
+   * 보스 처치 보너스. 정예가 유물을 남기듯 보스는 생선을 더 남긴다.
+   *
+   * `goldForWave`가 이미 얹은 보스 배수(1.5)와는 다른 축이다 — 그건 "이 웨이브의
+   * 성격"이 매기는 값이고, 이건 "보스를 넘겼다"는 사건 자체가 매기는 값이다.
+   * `state.nodeKind`를 wave 증가 전에 미리 `kind`로 잡아 뒀으므로 여기서 그대로 쓴다.
+   */
+  // 걸음 서수가 위상을 가른다 — 0이면 중간보스, 그 뒤는 스테이지 우두머리.
+  // step은 아래에서 +1 되기 전이므로 아직 이 보스전의 걸음이다.
+  const stageBoss = kind === "boss" && bossOrdinalInStage(state.step) > 0;
+  const bossBonus = kind === "boss"
+    ? Math.round(
+        (BALANCE.goldBase + state.wave * BALANCE.goldPerWave) *
+          (stageBoss ? BALANCE.stageBossKillBonusMul : BALANCE.bossKillBonusMul),
+      )
+    : 0;
+  if (bossBonus > 0) state.gold += bossBonus;
   state.wave += 1;
   state.step += 1;
   // 걸음이 한 바퀴 돌았으면 새 지도를 만든다.
@@ -1414,9 +1494,20 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   // 산 것을 배치한다.
   applySynergies(state);
   state.phase = "map";
-  state.notice = refreshed
-    ? "새 목표가 생겼어요"
-    : `한 걸음 넘었어요 · 생선 +${goldForWave(state.wave - 1, kind === "elite" ? "snipe" : kind === "boss" ? "boss" : null)}`;
+  // 보스 처치가 가장 큰 사건이므로 목표 갱신 안내보다 우선한다. 그 무게는
+  // 문구가 아니라 noticeKind로 전달한다 — render.ts가 "boss"만 금색으로 키워 그린다.
+  if (bossBonus > 0) {
+    // HUD의 "+N" 팝업은 웨이브 수입까지 합친 값이라 이 알림과 수가 다르다.
+    // "보너스"를 박아 서로 다른 것을 세고 있음을 문구가 직접 말하게 한다.
+    setNotice(state, `${stageBoss ? "우두머리 격파" : "보스 처치"}! 보너스 +${bossBonus}`, "boss");
+  } else if (refreshed) {
+    setNotice(state, "새 목표가 생겼어요");
+  } else {
+    setNotice(
+      state,
+      `한 걸음 넘었어요 · 생선 +${goldForWave(state.wave - 1, kind === "elite" ? "snipe" : kind === "boss" ? "boss" : null)}`,
+    );
+  }
 }
 
 export function moveCat(state: RunState, from: number, to: number): void {
