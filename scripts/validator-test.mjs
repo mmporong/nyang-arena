@@ -302,3 +302,38 @@ if (mirrorFailures.length === 0) {
   for (const p of mirrorFailures) console.log(`  실패 ${p}`);
   process.exit(1);
 }
+
+/**
+ * 예고 판정과 그림의 기하 계약.
+ *
+ * 렌더는 부채꼴을 `ctx.arc(0,0,reach,-arg,arg)` — 즉 **반지름 reach의 원호**로
+ * 그린다. 판정이 `along`(방향 성분)으로 사거리를 자르면 가장자리에서 그림 밖
+ * 1/cos(arg)까지 맞는 구역이 생긴다. 실제로 그랬고 고쳤다 — 이 검사는 그
+ * 회귀를 막는다. 렌더 함수를 직접 부르는 대신 원호 규칙의 경계 성질을 박는다.
+ */
+{
+  const { inTelegraph } = await import("../src/game/battle.ts");
+  const failures = [];
+  const cone = { shape: "cone", mode: "avoid", fx: 0, fy: 0, dirX: 1, dirY: 0, arg: 0.35, reach: 2.4, fuse: 1, fuseMax: 1 };
+  // 축 위 reach 지점: 그림의 원호 위 → 맞아야 한다
+  if (!inTelegraph(cone, 2.4, 0)) failures.push("부채꼴: 축 위 reach 지점이 안 맞는다");
+  // 가장자리 각도에서 원호 살짝 밖(옛 along 판정이면 맞던 자리) → 안 맞아야 한다
+  const edge = 0.349;
+  const d = 2.4 * 1.04; // 원호 4% 밖, 옛 판정의 reach/cos(0.35)=2.556 안
+  if (inTelegraph(cone, Math.cos(edge) * d, Math.sin(edge) * d))
+    failures.push("부채꼴: 원호 밖(그림 밖)인데 판정이 맞다고 한다 — along 사거리 회귀");
+  // 원호 안 + 각 안 → 맞아야 한다
+  if (!inTelegraph(cone, Math.cos(0.2) * 2.0, Math.sin(0.2) * 2.0)) failures.push("부채꼴: 안쪽 점이 안 맞는다");
+  // pad: 몸 반경만큼 넓어진다 — 경계 밖 0.2가 pad 0.28로는 맞아야 한다
+  const circle = { ...cone, shape: "circle", arg: 1.0 };
+  if (inTelegraph(circle, 1.2, 0)) failures.push("원: pad 없이 경계 밖이 맞는다");
+  if (!inTelegraph(circle, 1.2, 0, 0.28)) failures.push("원: pad를 줘도 몸이 걸친 자리가 안 맞는다");
+
+  console.log("\n예고 기하 계약 (판정 = 그림)");
+  if (failures.length === 0) {
+    console.log("  OK   부채꼴 사거리가 원호 기준(그림과 동일), pad가 몸 반경만큼 판정을 넓힌다");
+  } else {
+    for (const f of failures) console.log(`  실패 ${f}`);
+    process.exit(1);
+  }
+}

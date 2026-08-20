@@ -92,6 +92,11 @@ function check(s, where) {
       if (!c.alive && c.hp > 0) fail("살았는데 죽었다고 표시", `${where} ${who} hp=${c.hp}`);
     }
 
+    // 죽은 보스의 예고가 남으면 화면에 유령 장판이 그려지고, blink가 남으면
+    // 반쯤 사라진 채 얼어붙는다. 영상 검수에서 실제로 잡힌 버그라 불변식으로 박는다.
+    if (!c.alive && c.telegraph) fail("죽었는데 예고가 남아 있다", `${where} ${who}`);
+    if (!c.alive && c.blink) fail("죽었는데 blink가 남아 있다", `${where} ${who}`);
+
     if (!finite(c.fx) || !finite(c.fy)) fail("좌표가 유한하지 않다", `${where} ${who} (${c.fx},${c.fy})`);
     else if (c.fy < -1 || c.fy > BOARD_ROWS || c.fx < -1 || c.fx > BOARD_COLS * 2 + 2) {
       fail("고양이가 판 밖으로 나갔다", `${where} ${who} (${c.fx.toFixed(1)},${c.fy.toFixed(1)})`);

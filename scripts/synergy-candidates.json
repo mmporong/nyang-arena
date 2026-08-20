@@ -138,5 +138,45 @@
       "key": "evade_add",
       "value": 0.15
     }
+  },
+  {
+    "id": "iron_line",
+    "name": "철벽 대열",
+    "desc": "앞줄 셋이 어깨를 맞대 벽이 된다",
+    "trigger": "front_melee_3",
+    "effect": {
+      "key": "hp_mul",
+      "value": 1.42
+    }
+  },
+  {
+    "id": "triple_pounce",
+    "name": "삼연격",
+    "desc": "앞줄 셋이 번갈아 몰아친다",
+    "trigger": "front_melee_3",
+    "effect": {
+      "key": "atk_mul",
+      "value": 1.3
+    }
+  },
+  {
+    "id": "volley_line",
+    "name": "일제 사격",
+    "desc": "뒷줄 셋이 호흡을 맞춰 쏜다",
+    "trigger": "back_ranged_3",
+    "effect": {
+      "key": "atk_mul",
+      "value": 1.4
+    }
+  },
+  {
+    "id": "quiet_roost",
+    "name": "고요한 둥지",
+    "desc": "뒷줄 셋이 자리를 지키니 흔들림이 없다",
+    "trigger": "back_ranged_3",
+    "effect": {
+      "key": "atkspd_mul",
+      "value": 1.32
+    }
   }
 ]

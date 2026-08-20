@@ -296,6 +296,8 @@ function fight(formation, archetype, seed, intervene, hp) {
       byPat[key] ??= { n: 0, exposed: 0 };
       byPat[key].n += 1;
       for (const c of before) {
+        // pad=0(중심점 기준)을 유지한다 — 이 축은 대형의 기하만 보고,
+        // 판(pad 도입) 전후 수치를 비교할 수 있어야 한다. 피해 모사가 아니다.
         const inside = inTelegraph(tg, c.fx, c.fy);
         if (tg.mode === "gather" ? !inside : inside) {
           exposedCats += 1;

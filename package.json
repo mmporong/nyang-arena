@@ -31,7 +31,8 @@
     "metrics": "node --experimental-strip-types scripts/metrics-gen.mjs",
     "formation": "node --experimental-strip-types scripts/formation-space.mjs",
     "null": "node --experimental-strip-types scripts/null-model.mjs",
-    "invariants": "node --experimental-strip-types scripts/invariants.mjs"
+    "invariants": "node --experimental-strip-types scripts/invariants.mjs",
+    "tiers": "node --experimental-strip-types scripts/synergy-tiers.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

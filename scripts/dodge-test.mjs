@@ -12,10 +12,12 @@
  * 실행: npm run dodge:test
  */
 import { inTelegraph, stepBattle } from "../src/game/battle.ts";
+import { BALANCE } from "../src/game/balance.ts";
 import { walkMap, leaveShop } from "./bot-policy.mjs";
 import { isBossStep, STAGE_STEPS } from "../src/game/map.ts";
 import { buildEnemyWave, makeCat, newRun, startBattle, currentKind } from "../src/game/run.ts";
 import { breedById } from "../src/game/breeds.ts";
+import { BOSS_BREEDS } from "../src/game/bosses.ts";
 import { emptyBoard } from "../src/game/types.ts";
 
 let failed = 0;
@@ -26,8 +28,13 @@ function check(name, ok, detail = "") {
 }
 
 /** 보스 웨이브를 만들고 예고가 뜰 때까지 돌린다. */
-function bossFightWithTelegraph(arrange) {
-  const s = newRun(1);
+/**
+ * `bossBreedId` — 보스를 특정 품종으로 강제한다. 첫 보스 걸음의 킷이 avoid만
+ * 쓰면 gather 표본이 영영 없으므로, 모임을 재려면 gather 킷(살금이 10)을
+ * 직접 세워야 한다. 체력·공격은 원래 보스 것을 물려받아 스케일을 지킨다.
+ */
+function bossFightWithTelegraph(arrange, seed = 1, bossBreedId = null) {
+  const s = newRun(seed);
   // 보스 웨이브를 **찾는다**. 번호를 박아 두면 주기를 바꿀 때 조용히 깨진다 —
   // 실제로 보스를 5웨이브마다에서 3웨이브마다로 옮겼을 때 이 테스트가 저격
   // 웨이브를 보스로 알고 400틱 동안 예고를 기다렸다.
@@ -51,6 +58,19 @@ function bossFightWithTelegraph(arrange) {
   arrange(s);
   // 웨이브 번호만 바꾸면 적은 여전히 1웨이브 것이다. 다시 만들어야 보스가 나온다.
   buildEnemyWave(s);
+  if (bossBreedId !== null) {
+    const i = s.enemy.findIndex((c) => c && c.radius > 0);
+    if (i >= 0) {
+      const prev = s.enemy[i];
+      const bossBreed = BOSS_BREEDS.find((b) => b.id === bossBreedId);
+      if (!bossBreed) throw new Error(`보스 명단에 없는 id: ${bossBreedId}`);
+      const swapped = makeCat(bossBreed, "enemy", prev.cell);
+      swapped.maxHp = prev.maxHp; swapped.hp = prev.hp;
+      swapped.atk = prev.atk; swapped.radius = prev.radius;
+      swapped.fx = prev.fx; swapped.fy = prev.fy;
+      s.enemy[i] = swapped;
+    }
+  }
   startBattle(s);
 
   // 예고가 뜬 것만으로는 부족하다. **위험 구간 안에 아군이 실제로 들어간**
@@ -323,8 +343,13 @@ console.log("회피 동작 검사\n");
     s.dodgeCharges = 9; // 계약 검사이므로 자원 부족과 섞지 않는다
     s.pending.push({ kind: "act" });
     while (boss.telegraph && s.phase === "battle") stepBattle(s, 16);
+    // 피해 판정과 같은 pad로 잰다 — pad=0으로 재면 실제보다 무른 기준이 된다.
     const caught = s.ally.filter(
-      (c) => c?.alive && (tg.mode === "gather" ? !inTelegraph(tg, c.fx, c.fy) : inTelegraph(tg, c.fx, c.fy)),
+      (c) =>
+        c?.alive &&
+        (tg.mode === "gather"
+          ? !inTelegraph(tg, c.fx, c.fy, BALANCE.telegraphBodyPad)
+          : inTelegraph(tg, c.fx, c.fy, BALANCE.telegraphBodyPad)),
     );
     check(`원버튼 한 번으로 ${tg.mode === "gather" ? "청록" : "붉은"} 예고를 아무도 안 맞는다`,
       caught.length === 0, `${caught.length}마리 걸림`);
@@ -375,6 +400,53 @@ console.log("회피 동작 검사\n");
       check("취약 창에서는 쿨다운 없이 콤보가 쌓인다", boss.strikeCombo >= 5,
         `콤보 ${boss.strikeCombo} · 차지 ${before} → ${s.dodgeCharges}`);
     }
+  }
+}
+
+
+// ── 9. 발동 시점 실효성 ──────────────────────────────────────
+/**
+ * "버튼이 제대로 작동하는가"를 눌린 직후가 아니라 **터지는 순간**으로 잰다.
+ * 눌린 직후는 통과하는데 발동 때 도로 들어가 있으면 화면에서는 버튼이
+ * 고장 난 것이다. 판정은 피해 판정과 같은 pad를 써서 화면·피해·검사가
+ * 전부 같은 기하를 본다.
+ *
+ * 판 단위 성공(발동 시점에 잘못 선 고양이 0마리)의 비율로 판정한다.
+ * 마리 단위 평균은 팀 크기에 따라 후해져서 판끼리 비교가 안 된다.
+ */
+{
+  const PAD = BALANCE.telegraphBodyPad;
+  const tallies = { avoid: { ok: 0, all: 0 }, gather: { ok: 0, all: 0 } };
+  // 모드마다 그 모드를 확실히 쓰는 보스를 세운다 — 무쇠발톱(9)은 전부 avoid,
+  // 살금이(10)는 첫 예고가 gather다. 자연 표본을 기다리면 청록이 영영 없다.
+  const runs = [];
+  for (let seed = 1; seed <= 40; seed++) runs.push([seed, 9], [seed, 10]);
+  for (const [seed, breed] of runs) {
+    const r = bossFightWithTelegraph(clustered, seed, breed);
+    if (!r) continue;
+    const { s, boss } = r;
+    const tg = boss.telegraph;
+    s.dodgeCharges = 9; // 실효성 검사이므로 자원 부족과 섞지 않는다
+    s.pending.push({ kind: "act" });
+    while (boss.telegraph && s.phase === "battle") stepBattle(s, 16);
+    const wrong = s.ally.filter(
+      (c) => c?.alive && (tg.mode === "gather" ? !inTelegraph(tg, c.fx, c.fy, PAD) : inTelegraph(tg, c.fx, c.fy, PAD)),
+    );
+    const t = tallies[tg.mode];
+    t.all += 1;
+    if (wrong.length === 0) t.ok += 1;
+  }
+  for (const [mode, t] of Object.entries(tallies)) {
+    const name = mode === "gather" ? "청록(모임)" : "붉음(흩어짐)";
+    if (t.all === 0) {
+      // 첫 보스 걸음의 킷 구성에 따라 한쪽 모드가 표본에 없을 수 있다.
+      // 그건 실패가 아니라 표본 부족이므로 사실만 적는다.
+      console.log(`  표본 없음: ${name} — 첫 보스 걸음에 이 모드가 안 나왔다`);
+      continue;
+    }
+    const rate = (t.ok / t.all) * 100;
+    check(`${name} 예고: 발동 시점 성공률 90% 이상`, rate >= 90,
+      `${t.ok}/${t.all}판 (${rate.toFixed(0)}%)`);
   }
 }
 
