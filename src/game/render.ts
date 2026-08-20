@@ -1281,6 +1281,15 @@ function seed(f: Fx, x: number, y: number, cell: number): void {
         return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.65, g: u * 0.05, life: 620, max: 620, size: i % 3 ? 1 : 2 };
       });
       break;
+    case "phaseShift":
+      // 죽음보다 짧고 빠르게 튀겨야 한다. 같은 파편을 쓰면 페이즈 전환도
+      // 처치처럼 읽히므로, 위험이 안쪽에서 바깥으로 번지는 모양을 강조한다.
+      push(26, (i) => {
+        const a = (Math.PI * 2 * i) / 26 + rnd(-0.12, 0.12);
+        const sp = rnd(1.4, 3.0) * u;
+        return { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.7, g: u * 0.04, life: 480, max: 480, size: i % 3 ? 1 : 2 };
+      });
+      break;
   }
   // 한 프레임에 스킬이 여럿 터져도 상한을 넘지 않게 한다.
   if (particles.length > 520) particles.splice(0, particles.length - 520);
@@ -1508,6 +1517,34 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
           ctx.lineWidth = Math.max(1, L.cell * 0.08 * (1 - kt * 0.5) * S);
           ctx.beginPath();
           ctx.arc(p.x, p.y, (f.radius + 0.7 + k * 1.0) * pitch * (0.15 + kt * 1.1), 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        break;
+      }
+      case "phaseShift": {
+        // 초반의 화면 섬광은 짧게만 남긴다. 전장을 가리는 시간이 길면
+        // 새 예고를 읽는 순간을 훼손하므로, 위험을 알리는 한 박자로 제한한다.
+        if (t < 0.28) {
+          ctx.globalAlpha = qa(0.3 * (1 - t / 0.28));
+          ctx.fillStyle = f.color;
+          ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        }
+
+        // 죽음의 세 겹 파문과 달리 굵은 한 겹과 짧은 방사선으로 그린다.
+        // 보스가 사라지는 것이 아니라 더 위험해졌다는 방향성이 핵심이다.
+        ctx.globalAlpha = qa(0.95 * (1 - t) ** 0.8);
+        ctx.strokeStyle = f.color;
+        ctx.lineWidth = Math.max(1, L.cell * 0.13 * (1 - t * 0.45) * S);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, f.radius * pitch * (0.2 + t * 1.45), 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = Math.max(1, L.cell * 0.055 * S);
+        const ray = f.radius * pitch * (0.65 + t * 0.7);
+        for (let i = 0; i < 8; i++) {
+          const a = (Math.PI * 2 * i) / 8 + Math.PI / 8;
+          ctx.beginPath();
+          ctx.moveTo(p.x + Math.cos(a) * ray * 0.72, p.y + Math.sin(a) * ray * 0.72);
+          ctx.lineTo(p.x + Math.cos(a) * ray, p.y + Math.sin(a) * ray);
           ctx.stroke();
         }
         break;
@@ -3013,6 +3050,14 @@ export function buttonText(s: RunState): string {
       //
       // 버튼은 하나이고 상황에 따라 역할만 바뀐다 — 취약 창이 열리면 약점 공격,
       // 평소엔 회피. 조작을 늘리지 않고 레이드의 두 국면을 넣는 방법이다.
+      // 예고와 취약 창이 겹치면 resolveIntent가 회피를 먼저 처리한다. 라벨도
+      // 같은 우선순위를 써야 버튼을 눌렀을 때 실제 행동과 어긋나지 않는다.
+      const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
+      if (tg) {
+        if (s.dodgeCharges <= 0) return "전투 중";
+        if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
+        return `${tg.mode === "gather" ? "집결!" : "산개!"}  ${s.dodgeCharges}`;
+      }
       const open = s.enemy.find((c) => c?.alive && c.vulnerableMs > 0);
       if (open) return open.strikeCombo > 0 ? `할퀴기!  x${open.strikeCombo}` : "할퀴기!";
       if (s.dodgeCharges <= 0) return "전투 중";
@@ -3025,8 +3070,6 @@ export function buttonText(s: RunState): string {
        * ("대응"은 게임에서 안 쓰는 말이라 기능이 아니라 장식으로 읽혔다).
        * 무엇을 할지는 여전히 게임이 정하고, 라벨은 그걸 말로 보여줄 뿐이다.
        */
-      const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
-      if (tg) return `${tg.mode === "gather" ? "집결!" : "산개!"}  ${s.dodgeCharges}`;
       return `회피  ${s.dodgeCharges}`;
     }
     case "reward":
@@ -3172,7 +3215,10 @@ function drawBossBanner(
   // 취약(금색)과 같은 대역을 쓴다 — "이건 큰 사건"이라는 뜻으로 이미 학습된 색.
   uiText(
     ctx,
-    sniper ? "설핏 든 것" : stageBoss ? "이 땅의 우두머리" : "되풀이되는 것",
+    // 페이즈 2 문구는 짧게 — 위계는 색이 말한다. 금색은 페이즈와 무관하게
+    // 우두머리의 것이다: 가장 위험해지는 순간에 중간보스 색으로 강등되면
+    // "격이 셋"이라는 위의 원칙이 스스로 깨진다(리뷰가 잡은 회귀).
+    sniper ? "설핏 든 것" : stageBoss && boss.phase2 ? "사나워진 우두머리" : stageBoss ? "이 땅의 우두머리" : "되풀이되는 것",
     r.x + pad * 1.4,
     y + h * 0.72,
     nameSize * 0.72,
@@ -3219,6 +3265,8 @@ function drawBossBanner(
     ctx.fill();
   }
   roundRect(ctx, { x: barX, y: barY, w: Math.max(barH * 0.6, barW * frac), h: barH }, barH * 0.3);
+  // 체력바는 페이즈와 무관하게 같은 색 — 어둡게 바꾸면 트랙(검정 55%)과
+  // 대비가 죽는다. 페이즈 전환은 phaseShift 충격파와 배너 문구가 이미 말한다.
   ctx.fillStyle = T.bossHp;
   ctx.fill();
 
