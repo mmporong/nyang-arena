@@ -497,16 +497,24 @@ function pickSynergies(pool: SynergyRule[]): SynergyRule[] {
 
   const out: SynergyRule[] = [];
   const usedEffects = new Set<string>();
+  const usedFamilies = new Set<string>();
 
   for (const difficulty of ["easy", "medium", "hard"] as const) {
+    // 같은 배치 축이 두 등급에 걸쳐 뜨면 안 된다 — "뒷줄 원거리 1/2"와
+    // "뒷줄 원거리 1/3"이 나란히 뜬 판이 실제로 나왔다(영상 프레임에서 발견).
+    // 라벨이 같아 난이도만 다른 복제로 읽히고, 세 목표가 다 달라야 한다는
+    // 취지가 무너진다. 트리거의 계열(front_melee/back_ranged/...)로 겹침을 막는다.
+    const family = (t: Trigger) => t.replace(/_\d+$/, "");
     const triggers = shuffle([...(byDifficulty.get(difficulty) ?? [])]);
     for (const t of triggers) {
+      if (usedFamilies.has(family(t))) continue;
       const candidates = shuffle([...(byTrigger.get(t) ?? [])]);
       // 효과까지 겹치면 세 목표가 전부 "공격 속도"인 판이 나와 선택의 맛이 사라진다.
       // 아직 안 쓴 효과를 우선하고, 없으면 아무거나 쓴다.
       const pick = candidates.find((r) => !usedEffects.has(r.effect.key)) ?? candidates[0];
       if (!pick) continue;
       usedEffects.add(pick.effect.key);
+      usedFamilies.add(family(t));
       out.push({ ...pick, effect: scaleEffectForDifficulty(pick.effect, difficulty) });
       break;
     }
