@@ -739,8 +739,19 @@ export function healthBarGeom(
   const size = catBodySize(L, radius, sizeMul);
   const bh = Math.max(4, size * 0.15);
   const lift = Math.min(size, L.cell * CAT_SCALE);
-  const board = side === "ally" ? L.allyBoard : L.enemyBoard;
-  const by = Math.max(board.y + 1, cy - size * 0.5 - bh - Math.max(2, lift * 0.06));
+  /**
+   * 위끝 클램프의 기준은 **자기 진영 보드가 아니라 전장 전체의 최상단**이다.
+   *
+   * 자기 보드 기준이었을 때: 도적이 적 진영으로 도약하면 몸(cy)은 적 보드에
+   * 있는데 클램프가 아군 보드 위끝으로 바를 끌어내려, 체력바가 몸을 안
+   * 따라가고 제자리에 남은 것처럼 보였다 — 영상 검수에서 실제로 잡혔다.
+   * 이 클램프의 원래 목적은 "안내 문구 띠를 덮지 말라"이고, 그 선은 진영과
+   * 무관하게 전장 최상단 하나다. side 파라미터는 프로브 호출부와의 계약
+   * 때문에 남긴다.
+   */
+  void side;
+  const topLimit = Math.min(L.allyBoard.y, L.enemyBoard.y);
+  const by = Math.max(topLimit + 1, cy - size * 0.5 - bh - Math.max(2, lift * 0.06));
   return { bh, by };
 }
 
@@ -3008,10 +3019,15 @@ export function buttonText(s: RunState): string {
       // 쿨다운 중에는 남은 시간을 그대로 보여준다. 잠긴 이유를 안 보여주면
       // 그냥 안 먹는 버튼으로 읽힌다 — 예전에 실제로 그 보고를 받았다.
       if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
-      // 버튼 하나가 상황에 맞게 일하므로 조작을 설명할 것이 없어졌다. 남는 것은
-      // **몇 번 남았나**뿐이다. 전에는 `Space 흩어져 · Shift 뭉쳐 6`이었는데
-      // 상자를 넘쳤고, 넘치지 않았더라도 1.2초 안에 읽을 분량이 아니었다.
-      return `대응  ${s.dodgeCharges}`;
+      /**
+       * 라벨은 실제 레이드에서 부르는 콜을 쓴다 — 붉은 예고엔 "산개",
+       * 청록엔 "집결". 예고가 없을 때는 이 버튼의 자원 이름인 "회피"다
+       * ("대응"은 게임에서 안 쓰는 말이라 기능이 아니라 장식으로 읽혔다).
+       * 무엇을 할지는 여전히 게임이 정하고, 라벨은 그걸 말로 보여줄 뿐이다.
+       */
+      const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
+      if (tg) return `${tg.mode === "gather" ? "집결!" : "산개!"}  ${s.dodgeCharges}`;
+      return `회피  ${s.dodgeCharges}`;
     }
     case "reward":
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.

@@ -459,7 +459,7 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
  * 거기서 또 한 번 고르면 브라우저와 헤드리스 시뮬이 갈라진다 — 이 게임의
  * 모든 수치가 둘이 같은 코드를 돈다는 전제 위에 있다.
  *
- *   Space · 버튼   대응 (예고면 피하거나 모이고, 취약 창이면 약점 공격)
+ *   Space · 버튼   회피/산개/집결 (예고면 피하거나 모이고, 취약 창이면 약점 공격)
  *   1 2 3          카드 구매 · R 다시 뽑기 · Enter 다음 단계
  */
 function pushIntent(): void {
