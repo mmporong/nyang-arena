@@ -18,7 +18,7 @@
  */
 
 /** 보스마다 다른 무대. 성격을 공간이 먼저 말한다. */
-export type Scene = "forest" | "stone" | "alley" | "frost";
+export type Scene = "forest" | "stone" | "alley" | "frost" | "ember";
 
 /** 최종 화면 픽셀 몇 개가 씬 픽셀 하나인가. 클수록 굵고 거칠다. */
 const PIXEL = 4;
@@ -328,6 +328,51 @@ function frost(c: Ctx, w: number, h: number): void {
   for (let i = 0; i < 60; i++) F(c, Math.floor(r() * w), Math.floor(r() * h), 1, 1, "rgba(230,250,255,0.55)");
 }
 
+/**
+ * 잿불 벌판 — 스테이지 1(불) 전용 무대(`stages.ts`의 `backdropScene`).
+ *
+ * 보통은 보스 종류가 씬을 고른다(무쇠발톱=콜로세움, 살금이=골목, 서리귀=
+ * 서리 호수). 스테이지 1은 이 셋 중 무쇠발톱·살금이만 서는데, 스테이지
+ * 테마가 "화산" 전체를 말하므로 잔몹전이든 보스전이든 이 씬 하나로
+ * 통일한다 — 서리귀(frost)는 스테이지 1에 안 나오는 보스라 손대지 않는다.
+ */
+function ember(c: Ctx, w: number, h: number): void {
+  const r = rand(67);
+  bands(c, w, h, [[0.18, "#2A0E0C"], [0.14, "#4A150F"], [0.14, "#7A2A12"], [0.14, "#B5501C"], [0.4, "#1C0906"]]);
+  ditherSeam(c, w, Math.round(h * 0.18), 4, "#4A150F");
+  ditherSeam(c, w, Math.round(h * 0.32), 4, "#7A2A12");
+  ditherSeam(c, w, Math.round(h * 0.46), 5, "#B5501C");
+
+  // 해·달 자리엔 분화구 불빛을 건다.
+  disc(c, Math.round(w * 0.76), Math.round(h * 0.16), Math.round(h * 0.15), "rgba(255,140,60,0.14)");
+  disc(c, Math.round(w * 0.76), Math.round(h * 0.16), Math.round(h * 0.09), "#FFB25A");
+
+  ridge(c, w, h, Math.round(h * 0.56), Math.round(h * 0.14), "#241009", r);
+  ridge(c, w, h, Math.round(h * 0.66), Math.round(h * 0.09), "#160A06", r);
+
+  const floor = Math.round(h * 0.72);
+  F(c, 0, floor, w, h, "#1A0906");
+  // 갈라진 바닥 틈으로 새는 용암 줄기.
+  for (let i = 0; i < 6; i++) {
+    const x = Math.floor(r() * w);
+    let y = floor + Math.floor(r() * (h - floor) * 0.4);
+    for (let k = 0; k < 5; k++) {
+      F(c, x + Math.floor((r() - 0.5) * 4), y, 2, 3, "#FF8A3C");
+      y += 3;
+    }
+  }
+  for (let i = 0; i < 20; i++) {
+    F(c, Math.floor(r() * w), floor + Math.floor(r() * (h - floor)), 1, 1, "rgba(255,190,120,0.5)");
+  }
+  // 위로 떠오르는 잿불. 별·반딧불과 반대로 아래→위라 열기가 올라간다는 것이 읽힌다.
+  for (let i = 0; i < 40; i++) {
+    const x = Math.floor(r() * w);
+    const y = Math.floor(r() * h * 0.7);
+    F(c, x, y, 1, 1, "#FFC97A");
+    F(c, x, y, 2, 2, "rgba(255,180,90,0.16)");
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* 캐시                                                                 */
 /* ------------------------------------------------------------------ */
@@ -357,6 +402,7 @@ function build(scene: Scene, bw: number, bh: number, t: number): HTMLCanvasEleme
   if (scene === "stone") stone(c, bw, bh);
   else if (scene === "alley") alley(c, bw, bh);
   else if (scene === "frost") frost(c, bw, bh);
+  else if (scene === "ember") ember(c, bw, bh);
   else forest(c, bw, bh, t);
   return cv;
 }

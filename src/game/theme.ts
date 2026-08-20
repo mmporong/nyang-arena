@@ -10,6 +10,8 @@
  * 생선(자원)만 찬 색인 것은 의도적이다. 온기 일색에서 딱 하나 온도를 깨서 자원이
  * 눈에 들어오게 했고, 마침 생선이라 문자 그대로도 맞다.
  */
+import type { CatColor } from "./types.ts";
+
 /**
  * 색 역할표.
  *
@@ -61,6 +63,21 @@ export const T = {
   action: "#F5A03C",
   actionInk: "#2A1608",
 } as const;
+
+/**
+ * 스테이지 테마가 잔몹에 얹는 색조 팔레트.
+ *
+ * **CatColor의 화면색 사전이 아니다** — `tintForEnemy`는 고양이 자기 색을
+ * 보지 않고 `breedId % 팔레트길이`로 고른다. CatColor 키를 빌린 것은
+ * recolor-sprites.py의 색 이름과 어휘를 맞추기 위해서일 뿐이므로, "같은 색
+ * 시너지 칩을 이걸로 칠하자" 같은 재사용을 하면 실제 스프라이트 색과
+ * 갈라진다(리뷰 경고). 값의 색상각은 recolor의 HSL hue와 ±6° 안에서 맞다.
+ */
+export const STAGE_TINT: Partial<Record<CatColor, string>> = {
+  orange: "#F2823C",
+  crimson: "#C63B3B",
+  gold: "#E8B23C",
+};
 
 /* ------------------------------------------------------------------ */
 /* 숫자                                                                 */

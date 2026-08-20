@@ -31,6 +31,7 @@ import {
   type RunState,
 } from "./run.ts";
 import { RELICS, type Relic } from "./relics.ts";
+import { stageTheme, tintForEnemy } from "./stages.ts";
 
 /** 유물 총 종류. 오른쪽 줄이 "몇 개 중 몇 개"를 말하고 칸 높이를 여기서 뽑는다. */
 const RELIC_TOTAL = RELICS.length;
@@ -190,6 +191,11 @@ export interface DragState {
  * 웨이브는 전부 숲이고, 숲만 하루가 흐른다.
  */
 function sceneForWave(s: RunState): Scene {
+  // 스테이지 테마가 씬을 통째로 정해 두면 그걸 따른다 — 스테이지 1은
+  // 콜로세움·골목 대신 잿불 벌판 하나로 통일한다(서리귀는 스테이지 1에
+  // 안 나오는 보스라 겹칠 일이 없다). 나머지 스테이지는 기존 로직 그대로다.
+  const forced = stageTheme(s.map.stage).backdropScene;
+  if (forced) return forced;
   const boss = s.enemy.find((c) => c?.radius && c.radius > 0 && c.breed.id !== SNIPER_BREED.id);
   if (boss) {
     if (boss.breed.id === 10) return "alley";
@@ -709,6 +715,39 @@ function drawVulnerableRing(
 }
 
 /** 고양이 몸 크기. 반경 있는 것(보스·저격수)은 셀 격자를 벗어나 크게 그린다. */
+/**
+ * 스테이지 색조를 입힌 스프라이트를 만드는 재사용 버퍼.
+ *
+ * 메인 캔버스에서 `source-atop`을 걸면 안 된다 — 그 합성이 자르는 것은
+ * 스프라이트의 알파가 아니라 **목적지 캔버스의 알파**인데, 배경이 이미
+ * 불투명하게 깔려 있어 자를 경계가 없다. 실제로 색조가 고양이 모양이 아니라
+ * 26×26 사각형 통째로 찍혔다(리뷰 실측 Δ99). 알파가 실루엣과 일치하는 곳은
+ * 이 오프스크린 버퍼 안뿐이다.
+ */
+let tintBuf: HTMLCanvasElement | null = null;
+
+function tintedSprite(img: HTMLImageElement, tint: string): CanvasImageSource {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (!tintBuf || tintBuf.width !== w || tintBuf.height !== h) {
+    tintBuf = document.createElement("canvas");
+    tintBuf.width = w;
+    tintBuf.height = h;
+  }
+  const g = tintBuf.getContext("2d")!;
+  g.clearRect(0, 0, w, h);
+  g.drawImage(img, 0, 0);
+  g.save();
+  g.globalCompositeOperation = "source-atop";
+  // 균일 α0.4는 명암을 6할로 눌러 무늬가 죽는다(recolor-sprites.py가 지키는
+  // "밝기 순서 보존"의 반대). 0.28이면 색 기운은 남고 줄무늬·눈이 산다.
+  g.globalAlpha = 0.28;
+  g.fillStyle = tint;
+  g.fillRect(0, 0, w, h);
+  g.restore();
+  return tintBuf;
+}
+
 export function catBodySize(L: Layout, radius: number, sizeMul = 1): number {
   const base = radius > 0 ? L.cell * radius * 2.1 : L.cell * CAT_SCALE;
   return base * sizeMul;
@@ -760,6 +799,7 @@ function drawCat(
   L: Layout,
   cat: Cat,
   dimmed: boolean,
+  stage: number,
 ): void {
   const dir = cat.side === "ally" ? 1 : -1;
   const { x: cx, y: cy } = fieldToScreen(
@@ -843,7 +883,20 @@ function drawCat(
   ctx.globalAlpha *= blinkFade;
 
   const img = spriteFor(cat.breed.id, cat.pose);
-  if (img) {
+  /**
+   * 스테이지 테마의 잔몹 색조 — 버퍼에서 입힌 스프라이트로 바꿔치기한다.
+   * 반전·플래시 등 아래 그리기 경로는 그대로 탄다. 보스(radius>0)와
+   * 저격수는 뺀다: PRD가 우두머리는 칭호·배너로 못박았고, 보스 사각형은
+   * 잔몹의 22.8배 면적이라 색조가 판을 덮는다.
+   */
+  let src: CanvasImageSource | null = img;
+  // 저격수는 radius(0.85)로 이미 걸러지지만 id 검사를 겹쳐 둔다 —
+  // "공용 미니보스는 스테이지 색을 안 입는다"는 의도가 조건에서 읽히게.
+  if (img && cat.side === "enemy" && cat.radius === 0 && cat.breed.id !== SNIPER_BREED.id) {
+    const tint = tintForEnemy(stage, cat.breed.id);
+    if (tint) src = tintedSprite(img, tint);
+  }
+  if (src && img) {
     if (cat.flash > 0) ctx.filter = "brightness(2.4) saturate(0.6)";
     if (cat.side === "enemy") {
       // 적은 좌우를 뒤집어 **우리 쪽을 보게** 한다. 양쪽이 같은 방향을 보고
@@ -855,10 +908,10 @@ function drawCat(
       ctx.save();
       ctx.translate(cx * 2, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(img, x, y, size, size);
+      ctx.drawImage(src, x, y, size, size);
       ctx.restore();
     } else {
-      ctx.drawImage(img, x, y, size, size);
+      ctx.drawImage(src, x, y, size, size);
     }
     ctx.filter = "none";
   } else {
@@ -866,6 +919,7 @@ function drawCat(
     roundRect(ctx, { x, y, w: size, h: size }, size * 0.2);
     ctx.fill();
   }
+
   ctx.restore();
 
   if (!cat.alive) return;
@@ -3020,13 +3074,18 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   // 안 하면 그림처럼 보인다.
   ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
   const info = hotNode ? nodeInfo(hotNode.kind) : null;
+  // 스테이지 제목은 아무것도 안 올렸을 때의 기본 줄에만 붙는다 — 노드를
+  // 올리면 그 칸의 설명이 더 급하므로 자리를 양보한다. backdropScene이 없는
+  // 스테이지(2·3, 아직 미배선)는 이름을 안 붙여 기존 문구 그대로 나간다.
+  const theme = stageTheme(s.map.stage);
+  const stageTitle = theme.backdropScene ? ` · ${theme.name}` : "";
   uiText(
     ctx,
     bossLine
       ? bossLine
       : info
       ? `${info.name} — ${info.hint}`
-      : `${s.map.stage}번째 밤 · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
+      : `${s.map.stage}번째 밤${stageTitle} · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,
     mapBox(L).y - L.scale * 6,
     L.scale * 13,
@@ -3194,9 +3253,14 @@ function drawBossBanner(
   L: Layout,
   boss: Cat,
   stageBoss: boolean,
+  stage: number,
 ): void {
   const r = L.notice;
   const sniper = boss.breed.id === SNIPER_BREED.id;
+  // 스테이지 테마의 칭호. null이면(스테이지 2·3, 아직 미배선) 기존 문구를 쓴다.
+  // 킷·수치는 안 건드리고 문구만 리스킨한다 — 저격수는 스테이지 무관 공용
+  // 미니보스라 테마를 안 탄다.
+  const titled = stageTheme(stage).bossTitles;
   // 저격수는 미니 보스다. 위계를 크기로 표현한다 — 같은 배너, 낮은 높이, 눈금 없음.
   const h = r.h * (sniper ? 0.72 : 1);
   const y = r.y + (r.h - h) / 2;
@@ -3218,7 +3282,9 @@ function drawBossBanner(
     // 페이즈 2 문구는 짧게 — 위계는 색이 말한다. 금색은 페이즈와 무관하게
     // 우두머리의 것이다: 가장 위험해지는 순간에 중간보스 색으로 강등되면
     // "격이 셋"이라는 위의 원칙이 스스로 깨진다(리뷰가 잡은 회귀).
-    sniper ? "설핏 든 것" : stageBoss && boss.phase2 ? "사나워진 우두머리" : stageBoss ? "이 땅의 우두머리" : "되풀이되는 것",
+    sniper ? "설핏 든 것"
+      : titled ? (stageBoss ? (boss.phase2 ? titled.bossPhase2 : titled.bossPhase1) : titled.mid)
+      : stageBoss && boss.phase2 ? "사나워진 우두머리" : stageBoss ? "이 땅의 우두머리" : "되풀이되는 것",
     r.x + pad * 1.4,
     y + h * 0.72,
     nameSize * 0.72,
@@ -3319,7 +3385,7 @@ function drawNotice(
   // 보스가 살아 있으면 이 띠는 배너에 넘긴다. 안내는 배치 단계 것이라 겹치지 않는다.
   const boss = s.enemy.find((c) => c?.alive && c.radius > 0);
   if (s.phase === "battle" && boss) {
-    drawBossBanner(ctx, L, boss, boss.stageBoss === true);
+    drawBossBanner(ctx, L, boss, boss.stageBoss === true, s.map.stage);
     return;
   }
   const r = L.notice;
@@ -3578,7 +3644,12 @@ function watchTransitions(s: RunState): void {
   }
   if (s.map.stage !== seenStage) {
     seenStage = s.map.stage;
-    raise(`${s.map.stage}번째 밤`, "여섯 걸음 안에 악몽이 둘 있어요");
+    const theme = stageTheme(s.map.stage);
+    // backdropScene이 있는 스테이지(지금은 1뿐)만 이름·부제를 새로 건다.
+    // 없는 스테이지(2·3, 아직 미배선)는 기존 문구 그대로 — "테마 레코드만
+    // 자리 잡아 둔다"는 이번 웨이브의 경계를 배너 문구에도 그대로 지킨다.
+    if (theme.backdropScene) raise(`${s.map.stage}번째 밤 · ${theme.name}`, theme.subtitle);
+    else raise(`${s.map.stage}번째 밤`, "여섯 걸음 안에 악몽이 둘 있어요");
   }
 }
 
@@ -3708,7 +3779,7 @@ export function render(
     drawList.push({ cat: sm, y: fieldToScreen(L, sm.fx, sm.fy).y, dimmed: false });
   }
   drawList.sort((p, q) => p.y - q.y);
-  for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed);
+  for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed, s.map.stage);
   drawBossTargetMark(ctx, L, s);
 
   drawFx(ctx, L);

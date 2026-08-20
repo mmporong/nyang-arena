@@ -172,6 +172,34 @@ for (let seed = 1; seed <= RUNS; seed++) {
   }
 }
 
+{
+  /**
+   * 스테이지 테마와 보스 조합의 정합 — 길이 비교가 아니라 **성질**을 잰다.
+   * 길이 비교(테마 3 vs 보스 3)는 BOSSES_PER_STAGE가 3으로 바뀌는 위반을
+   * 조용히 통과시켰다(리뷰 귀무모형 적발). 강제 씬을 가진 스테이지의 보스
+   * 조합을 스냅으로 박아, 명단·걸음 수·테마 어느 쪽이 바뀌어도
+   * "잿불 밤에 서리귀가 선다" 같은 어긋남이 여기서 빨간불이 된다.
+   */
+  const { STAGE_THEMES, stageTheme } = await import("../src/game/stages.ts");
+  const { bossForIndex } = await import("../src/game/bosses.ts");
+  const { BOSSES_PER_STAGE } = await import("../src/game/map.ts");
+  // 테마 작성 시점의 보스 조합. 의도적으로 조합을 바꿨다면 이 스냅도 갱신할 것.
+  const SNAP = { 1: [9, 10] };
+  for (const [stageStr, want] of Object.entries(SNAP)) {
+    const stage = Number(stageStr);
+    if (!stageTheme(stage).backdropScene) continue; // 강제 씬이 없으면 무관
+    for (let cycle = 0; cycle < 3; cycle++) {
+      const s2 = stage + cycle * STAGE_THEMES.length;
+      const got = Array.from({ length: BOSSES_PER_STAGE }, (_, o) =>
+        bossForIndex((s2 - 1) * BOSSES_PER_STAGE + o).id).sort();
+      if (JSON.stringify(got) !== JSON.stringify([...want].sort())) {
+        fail("강제 씬 스테이지의 보스 조합이 테마 작성 시점과 다르다",
+          `스테이지 ${s2}: ${got.join(",")} (기대 ${want.join(",")}) — stages.ts 정합 계약 참조`);
+      }
+    }
+  }
+}
+
 console.log(`불변식 검사 — 런 ${RUNS}회 · ${steps.toLocaleString()}스텝\n`);
 if (seen.size === 0) {
   console.log(`전부 통과 — ${steps.toLocaleString()}스텝 동안 깨진 불변식 없음`);
