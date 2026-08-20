@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "2cdcaf5",
+    "commit": "9ae15b6",
     "dirty": false,
     "reproducible": true,
     "node": "v22.23.2",
@@ -22,42 +22,42 @@
   },
   "distribution": {
     "min": 1,
-    "p25": 9,
-    "median": 15,
-    "p75": 20,
-    "max": 38,
-    "mean": 15.12,
+    "p25": 7,
+    "median": 13,
+    "p75": 19,
+    "max": 32,
+    "mean": 13.15,
     "hitMaxWave": 0
   },
   "session": {
-    "battleSecP25": 124.2,
-    "battleSecMedian": 185.3,
-    "battleSecP75": 265.7
+    "battleSecP25": 98.2,
+    "battleSecMedian": 168,
+    "battleSecP75": 233.2
   },
   "waveKinds": {
     "mixed": {
-      "tried": 848,
-      "passPct": 93.6,
-      "p50Sec": 4.2,
-      "p90Sec": 6.6
+      "tried": 725,
+      "passPct": 92,
+      "p50Sec": 4.1,
+      "p90Sec": 6.8
     },
     "rush": {
-      "tried": 842,
-      "passPct": 99,
+      "tried": 750,
+      "passPct": 99.2,
       "p50Sec": 4.3,
-      "p90Sec": 7.4
+      "p90Sec": 6.9
     },
     "snipe": {
-      "tried": 1251,
-      "passPct": 93,
-      "p50Sec": 6.6,
-      "p90Sec": 10.9
+      "tried": 1077,
+      "passPct": 93.3,
+      "p50Sec": 6.5,
+      "p90Sec": 10.8
     },
     "boss": {
-      "tried": 1596,
-      "passPct": 90.5,
-      "p50Sec": 24.4,
-      "p90Sec": 45.3
+      "tried": 1392,
+      "passPct": 88.2,
+      "p50Sec": 24.2,
+      "p90Sec": 42.9
     }
   },
   "balance": {
@@ -71,7 +71,7 @@
     "dodgeCharges": 2
   },
   "build": {
-    "bundleBytes": 120514
+    "bundleBytes": 132254
   },
   "openIssues": [
     {
