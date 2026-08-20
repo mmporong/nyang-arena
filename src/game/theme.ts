@@ -77,6 +77,9 @@ export const STAGE_TINT: Partial<Record<CatColor, string>> = {
   orange: "#F2823C",
   crimson: "#C63B3B",
   gold: "#E8B23C",
+  // 리컬러 스프라이트의 hue(보라 0.75, 연두 0.28)와 맞춰야 실루엣과 칩이 갈라지지 않는다.
+  purple: "#8F4DB8",
+  green: "#55A84C",
 };
 
 /* ------------------------------------------------------------------ */

@@ -18,7 +18,7 @@
  */
 
 /** 보스마다 다른 무대. 성격을 공간이 먼저 말한다. */
-export type Scene = "forest" | "stone" | "alley" | "frost" | "ember";
+export type Scene = "forest" | "stone" | "alley" | "frost" | "ember" | "blight";
 
 /** 최종 화면 픽셀 몇 개가 씬 픽셀 하나인가. 클수록 굵고 거칠다. */
 const PIXEL = 4;
@@ -184,7 +184,7 @@ function dayMix(t: number): {
 }
 
 /* ------------------------------------------------------------------ */
-/* 씬 넷                                                                */
+/* 씬 다섯                                                              */
 /* ------------------------------------------------------------------ */
 
 /** 숲 — 일반 웨이브. 가장 오래 보는 배경이라 가장 조용하다. */
@@ -373,6 +373,66 @@ function ember(c: Ctx, w: number, h: number): void {
   }
 }
 
+/**
+ * 역병의 밤 — 스테이지 2 전용 무대(`stages.ts`의 `backdropScene`).
+ *
+ * 안개를 불투명한 띠로 쌓고 나무를 먼저 어둡게 눌러야 판 위의 고양이와
+ * 신호가 묻히지 않는다. 포자는 바닥에서 위로만 흘려 역병이 퍼지는 방향을
+ * 읽게 하며, 고정 난수로 창 크기가 같을 때 같은 불길함을 유지한다.
+ */
+function blight(c: Ctx, w: number, h: number): void {
+  const r = rand(113);
+  const fog = ["#1A1230", "#2B1A43", "#432755", "#17252B", "#101A20"];
+  bands(c, w, h, [[0.18, fog[0]!], [0.14, fog[1]!], [0.16, fog[2]!], [0.14, fog[3]!], [0.38, fog[4]!]]);
+  ditherSeam(c, w, Math.round(h * 0.18), 4, fog[1]!);
+  ditherSeam(c, w, Math.round(h * 0.32), 4, fog[2]!);
+  ditherSeam(c, w, Math.round(h * 0.48), 5, fog[3]!);
+
+  // 달빛 대신 독성 안개에 갇힌 보라색 광원을 둔다.
+  disc(c, Math.round(w * 0.72), Math.round(h * 0.2), Math.round(h * 0.14), "rgba(143,77,184,0.14)");
+  disc(c, Math.round(w * 0.72), Math.round(h * 0.2), Math.round(h * 0.075), "#8F4DB8");
+  disc(c, Math.round(w * 0.75), Math.round(h * 0.18), Math.round(h * 0.018), "#C68BE0");
+
+  ridge(c, w, h, Math.round(h * 0.57), Math.round(h * 0.12), "#21152D", r);
+  ridge(c, w, h, Math.round(h * 0.68), Math.round(h * 0.08), "#130F1B", r);
+
+  const ground = Math.round(h * 0.73);
+  F(c, 0, ground, w, h, "#0C1518");
+  // 잎이 없고 갈라진 가지뿐인 나무를 전경에 겹쳐 부패한 숲의 윤곽을 만든다.
+  const bareTree = (x: number, base: number, ht: number, col: string): void => {
+    const trunk = Math.max(2, Math.round(ht * 0.045));
+    F(c, x - Math.floor(trunk / 2), base - ht, trunk, ht, col);
+    for (const [at, side, len] of [[0.28, -1, 0.22], [0.42, 1, 0.27], [0.58, -1, 0.19], [0.7, 1, 0.16]] as const) {
+      const y = base - Math.round(ht * at);
+      const end = Math.round(ht * len);
+      F(c, side < 0 ? x - end : x, y, end, 2, col);
+      F(c, x + side * Math.round(end * 0.65), y - Math.round(ht * 0.12), 2, Math.round(ht * 0.12), col);
+    }
+  };
+  for (let i = 0; i < 9; i++) {
+    const x = Math.round((i / 8) * w) + Math.floor(r() * 8 - 4);
+    bareTree(x, ground + 3, Math.round(h * (0.2 + r() * 0.18)), i % 2 ? "#171322" : "#24152D");
+  }
+
+  // 안개는 세 층으로 낮게 깔아 배경 깊이는 남기고 전장을 평평하게 만든다.
+  for (let layer = 0; layer < 3; layer++) {
+    const y = Math.round(h * (0.42 + layer * 0.105));
+    for (let x = 0; x < w; x += 7) {
+      const wobble = Math.round(Math.sin(x * 0.08 + layer * 2.1) * 3);
+      F(c, x, y + wobble, 9 + Math.floor(r() * 8), 2 + layer, `rgba(104,168,76,${0.12 - layer * 0.02})`);
+    }
+  }
+
+  // 포자는 바닥에서 떠오르며, 큰 점과 잔광을 함께 찍어 움직임을 암시한다.
+  for (let i = 0; i < 42; i++) {
+    const x = Math.floor(r() * w);
+    const y = Math.round(ground - r() * h * 0.52);
+    const col = i % 3 === 0 ? "#9DD65C" : "#67B85A";
+    F(c, x, y, i % 4 === 0 ? 2 : 1, i % 4 === 0 ? 2 : 1, col);
+    F(c, x - 1, y - 1, 3, 3, "rgba(157,214,92,0.14)");
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* 캐시                                                                 */
 /* ------------------------------------------------------------------ */
@@ -403,6 +463,7 @@ function build(scene: Scene, bw: number, bh: number, t: number): HTMLCanvasEleme
   else if (scene === "alley") alley(c, bw, bh);
   else if (scene === "frost") frost(c, bw, bh);
   else if (scene === "ember") ember(c, bw, bh);
+  else if (scene === "blight") blight(c, bw, bh);
   else forest(c, bw, bh, t);
   return cv;
 }

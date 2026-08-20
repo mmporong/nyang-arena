@@ -1,12 +1,18 @@
 import {
   BLINK_IN_MS,
   BLINK_OUT_MS,
+  creepZones,
   damagePops,
+  dodgeUsable,
+  dualChoiceActive,
+  FIELD_MAX_FX,
   fxs,
+  hazardsActive,
   POP_LIFE_MS,
   shots,
   SHOT_LIFE_MS,
   skillName,
+  sweepZones,
   type Fx,
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
@@ -52,6 +58,7 @@ import {
 } from "../validate/synergy-schema.ts";
 import { PASSIVES, SKILLS } from "./skills.ts";
 import {
+  BOARD_ROWS,
   BOARD_SIZE,
   CLASS_LABEL,
   CLASS_ORDER,
@@ -60,8 +67,10 @@ import {
   livingCats,
   type Cat,
   type ClassKind,
+  type CreepZone,
   type Pose,
   type Side,
+  type Telegraph,
 } from "./types.ts";
 
 /**
@@ -318,85 +327,188 @@ function concentric(
   ctx.restore();
 }
 
-function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
-  // 예고는 반경이 커서 그냥 그리면 HUD와 하단 UI까지 침범한다. 전장 안으로 자른다.
+/**
+ * 예고를 그리는 클립 상자. 반경이 커서 그냥 그리면 HUD와 하단 UI까지
+ * 침범하므로 전장 안으로 자른다 — 상주 장판(creep) 그리기도 같은 상자를 쓴다.
+ */
+function telegraphClipBox(L: Layout): { x0: number; y0: number; x1: number; y1: number; m: number } {
   const x0 = Math.min(L.allyBoard.x, L.enemyBoard.x);
   const y0 = Math.min(L.allyBoard.y, L.enemyBoard.y);
   const x1 = Math.max(L.allyBoard.x + L.allyBoard.w, L.enemyBoard.x + L.enemyBoard.w);
   const y1 = Math.max(L.allyBoard.y + L.allyBoard.h, L.enemyBoard.y + L.enemyBoard.h);
-  const m = L.cell * 0.25;
+  return { x0, y0, x1, y1, m: L.cell * 0.25 };
+}
 
+/** 예고 하나를 그린다. `drawTelegraphs`가 `telegraph`·`telegraph2` 둘 다 이걸로 그린다. */
+function drawOneTelegraph(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  tg: Telegraph,
+  box: { x0: number; y0: number; x1: number; y1: number; m: number },
+): void {
+  const { x0, y0, x1, y1, m } = box;
+  // 0 → 1로 차오른다. 다 차면 터진다.
+  const fill = 1 - Math.max(0, tg.fuse) / tg.fuseMax;
+  const gather = tg.mode === "gather";
+  // 나가라는 분홍, 들어와라는 청록. 둘 다 판 위에서 채도를 독점하는 대역이라
+  // 진영색·직업색과 밝기에서부터 갈린다.
+  const hue = gather ? "43,227,180" : "255,63,110";
+  const origin = fieldToScreen(L, tg.fx, tg.fy);
+  const pitch = L.cell + L.gap;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0 - m, y0 - m, x1 - x0 + m * 2, y1 - y0 + m * 2);
+  ctx.clip();
+  ctx.lineJoin = "round";
+
+  if (tg.shape === "circle") {
+    const r = tg.arg * pitch;
+    ctx.beginPath();
+    ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.28})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
+    ctx.lineWidth = 2 + fill * 2;
+    ctx.stroke();
+    // 안쪽에서 차오르는 원. 남은 시간이 한눈에 보인다.
+    ctx.beginPath();
+    ctx.arc(origin.x, origin.y, r * fill, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${hue},0.22)`;
+    ctx.fill();
+    if (gather) {
+      concentric(ctx, origin.x, origin.y, r, hue, fill);
+    } else {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
+      ctx.clip();
+      hatch(ctx, origin.x - r, origin.y - r, r * 2, r * 2, hue, fill);
+      ctx.restore();
+    }
+  } else if (tg.shape === "half") {
+    /**
+     * 극성의 절반 존. 원형·직선·부채꼴처럼 중심에서 뻗는 모양이 아니라
+     * 판을 가르는 사각형이라 회전 대신 **네 모서리를 각각 `fieldToScreen`으로
+     * 옮겨 잇는다** — 세로 화면에서 보드가 전치돼도(fx가 화면 y가 돼도)
+     * 이 방식은 그대로 맞는 사각형을 낸다.
+     */
+    // 아군 보드(0..4)가 아니라 판 전체(FIELD_MAX_FX)로 뻗는다 — 근접이 붙어
+    // 싸우는 자리(fx 6~9)까지 덮어야 판정(battle.ts의 inTelegraph)과 맞는다.
+    const nearX = tg.dirX >= 0 ? tg.fx : -0.5;
+    const farX = tg.dirX >= 0 ? FIELD_MAX_FX + 0.5 : tg.fx;
+    const corners = [
+      fieldToScreen(L, nearX, -0.5),
+      fieldToScreen(L, farX, -0.5),
+      fieldToScreen(L, farX, BOARD_ROWS - 0.5),
+      fieldToScreen(L, nearX, BOARD_ROWS - 0.5),
+    ];
+    ctx.beginPath();
+    ctx.moveTo(corners[0]!.x, corners[0]!.y);
+    for (const p of corners.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
+    ctx.lineWidth = 2 + fill * 2;
+    ctx.stroke();
+    const bx0 = Math.min(...corners.map((p) => p.x));
+    const by0 = Math.min(...corners.map((p) => p.y));
+    const bx1 = Math.max(...corners.map((p) => p.x));
+    const by1 = Math.max(...corners.map((p) => p.y));
+    ctx.save();
+    ctx.clip();
+    if (gather) concentric(ctx, (bx0 + bx1) / 2, (by0 + by1) / 2, (bx1 - bx0) / 2, hue, fill);
+    else hatch(ctx, bx0, by0, bx1 - bx0, by1 - by0, hue, fill);
+    ctx.restore();
+  } else {
+    // 직선·부채꼴은 방향이 있으므로 화면에서도 같은 방향으로 돌린다.
+    const tip = fieldToScreen(L, tg.fx + tg.dirX * tg.reach, tg.fy + tg.dirY * tg.reach);
+    const ang = Math.atan2(tip.y - origin.y, tip.x - origin.x);
+    const len = Math.hypot(tip.x - origin.x, tip.y - origin.y);
+
+    ctx.translate(origin.x, origin.y);
+    ctx.rotate(ang);
+    ctx.beginPath();
+    if (tg.shape === "line") {
+      const half = tg.arg * pitch;
+      ctx.rect(0, -half, len, half * 2);
+    } else {
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, len, -tg.arg, tg.arg);
+      ctx.closePath();
+    }
+    ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
+    ctx.lineWidth = 2 + fill * 2;
+    ctx.stroke();
+    // 방향이 있는 예고는 전부 회피다. 해칭도 같은 규칙을 따른다.
+    ctx.save();
+    ctx.clip();
+    hatch(ctx, -len, -len, len * 2, len * 2, hue, fill);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const box = telegraphClipBox(L);
   for (const c of s.enemy) {
-    const tg = c?.telegraph;
-    if (!c || !tg) continue;
+    if (!c) continue;
+    if (c.telegraph) drawOneTelegraph(ctx, L, c.telegraph, box);
+    // 극성(polarity)의 두 번째 존. `telegraph`가 흩어짐, `telegraph2`가
+    // 모임이다 — 둘이 같은 도화선으로 같이 뜨고 같이 터진다(battle.ts).
+    if (c.telegraph2) drawOneTelegraph(ctx, L, c.telegraph2, box);
+  }
+  // 순차 스윕(sweep) 대기열. 특정 보스의 telegraph가 아니라 battle.ts의
+  // 별도 배열이라(creepZones와 같은 이유) 위 루프엔 안 걸린다. 길이는 항상
+  // 0 또는 1이라 이 자리에서 그냥 그려도 다른 예고와 겹쳐 그려질 일이 없다.
+  for (const z of sweepZones) drawOneTelegraph(ctx, L, z, box);
+}
 
-    // 0 → 1로 차오른다. 다 차면 터진다.
-    const fill = 1 - Math.max(0, tg.fuse) / tg.fuseMax;
-    const gather = tg.mode === "gather";
-    // 나가라는 분홍, 들어와라는 청록. 둘 다 판 위에서 채도를 독점하는 대역이라
-    // 진영색·직업색과 밝기에서부터 갈린다.
-    const hue = gather ? "43,227,180" : "255,63,110";
-    const origin = fieldToScreen(L, tg.fx, tg.fy);
-    const pitch = L.cell + L.gap;
+/**
+ * 상주 장판(creep). `drawOneTelegraph`의 circle 분기와 같은 기하를 쓰되
+ * **맥동**을 더해 "발동 중인 예고"가 아니라 "눌러앉은 위협"으로 읽히게 한다 —
+ * 그리기 로직 자체를 복제하지 않고, `fill` 대신 `pulse`로 채도만 흔든다.
+ */
+function drawCreepZones(ctx: CanvasRenderingContext2D, L: Layout, zones: readonly CreepZone[]): void {
+  if (zones.length === 0) return;
+  const box = telegraphClipBox(L);
+  const pitch = L.cell + L.gap;
+  const hue = "255,63,110";
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+
+  for (const z of zones) {
+    const origin = fieldToScreen(L, z.fx, z.fy);
+    const r = z.arg * pitch;
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x0 - m, y0 - m, x1 - x0 + m * 2, y1 - y0 + m * 2);
+    ctx.rect(box.x0 - box.m, box.y0 - box.m, box.x1 - box.x0 + box.m * 2, box.y1 - box.y0 + box.m * 2);
     ctx.clip();
     ctx.lineJoin = "round";
 
-    if (tg.shape === "circle") {
-      const r = tg.arg * pitch;
-      ctx.beginPath();
-      ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.28})`;
-      ctx.fill();
-      ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
-      ctx.lineWidth = 2 + fill * 2;
-      ctx.stroke();
-      // 안쪽에서 차오르는 원. 남은 시간이 한눈에 보인다.
-      ctx.beginPath();
-      ctx.arc(origin.x, origin.y, r * fill, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(${hue},0.22)`;
-      ctx.fill();
-      if (gather) {
-        concentric(ctx, origin.x, origin.y, r, hue, fill);
-      } else {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
-        ctx.clip();
-        hatch(ctx, origin.x - r, origin.y - r, r * 2, r * 2, hue, fill);
-        ctx.restore();
-      }
-    } else {
-      // 직선·부채꼴은 방향이 있으므로 화면에서도 같은 방향으로 돌린다.
-      const tip = fieldToScreen(L, tg.fx + tg.dirX * tg.reach, tg.fy + tg.dirY * tg.reach);
-      const ang = Math.atan2(tip.y - origin.y, tip.x - origin.x);
-      const len = Math.hypot(tip.x - origin.x, tip.y - origin.y);
+    ctx.beginPath();
+    ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${hue},${0.14 + pulse * 0.1})`;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${hue},${0.55 + pulse * 0.35})`;
+    ctx.lineWidth = 2.4 + pulse * 1.6;
+    ctx.stroke();
+    ctx.save();
+    ctx.clip();
+    hatch(ctx, origin.x - r, origin.y - r, r * 2, r * 2, hue, 0.4 + pulse * 0.2);
+    ctx.restore();
 
-      ctx.translate(origin.x, origin.y);
-      ctx.rotate(ang);
-      ctx.beginPath();
-      if (tg.shape === "line") {
-        const half = tg.arg * pitch;
-        ctx.rect(0, -half, len, half * 2);
-      } else {
-        ctx.moveTo(0, 0);
-        ctx.arc(0, 0, len, -tg.arg, tg.arg);
-        ctx.closePath();
-      }
-      ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
-      ctx.fill();
-      ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
-      ctx.lineWidth = 2 + fill * 2;
-      ctx.stroke();
-      // 방향이 있는 예고는 전부 회피다. 해칭도 같은 규칙을 따른다.
-      ctx.save();
-      ctx.clip();
-      hatch(ctx, -len, -len, len * 2, len * 2, hue, fill);
-      ctx.restore();
-    }
+    // 다음 성장 틱까지 남은 시간. 안쪽에서 차오르다 다 차면 자란다 —
+    // 예고의 "차오르면 터진다"와 같은 문법이라 따로 안 배워도 읽힌다.
+    const tickFill = 1 - Math.max(0, z.fuse) / z.fuseMax;
+    ctx.beginPath();
+    ctx.arc(origin.x, origin.y, r * 0.94, 0, Math.PI * 2 * tickFill);
+    ctx.strokeStyle = `rgba(255,255,255,${0.3 + pulse * 0.25})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
     ctx.restore();
   }
 }
@@ -1539,6 +1651,23 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
           const r = (f.arg ?? 1) * pitch;
           ctx.beginPath();
           ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (shape === "half") {
+          // 극성 절반 존의 섬광. drawOneTelegraph의 half 분기와 같은 방식으로
+          // 네 모서리를 옮겨 잇는다 — p(=fx,0 지점)는 여기서 쓰지 않는다.
+          const dirX = f.dirX ?? 1;
+          const nearX = dirX >= 0 ? f.fx : -0.5;
+          const farX = dirX >= 0 ? FIELD_MAX_FX + 0.5 : f.fx;
+          const corners = [
+            fieldToScreen(L, nearX, -0.5),
+            fieldToScreen(L, farX, -0.5),
+            fieldToScreen(L, farX, BOARD_ROWS - 0.5),
+            fieldToScreen(L, nearX, BOARD_ROWS - 0.5),
+          ];
+          ctx.beginPath();
+          ctx.moveTo(corners[0]!.x * S, corners[0]!.y * S);
+          for (const cpt of corners.slice(1)) ctx.lineTo(cpt.x * S, cpt.y * S);
+          ctx.closePath();
           ctx.fill();
         } else {
           const ang = Math.atan2(f.dirY ?? 0, f.dirX ?? 1);
@@ -3113,13 +3242,17 @@ export function buttonText(s: RunState): string {
       // 같은 우선순위를 써야 버튼을 눌렀을 때 실제 행동과 어긋나지 않는다.
       const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
       if (tg) {
-        if (s.dodgeCharges <= 0) return "전투 중";
+        if (!dodgeUsable(s)) return "전투 중";
         if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
         return `${tg.mode === "gather" ? "집결!" : "산개!"}  ${s.dodgeCharges}`;
       }
       const open = s.enemy.find((c) => c?.alive && c.vulnerableMs > 0);
       if (open) return open.strikeCombo > 0 ? `할퀴기!  x${open.strikeCombo}` : "할퀴기!";
-      if (s.dodgeCharges <= 0) return "전투 중";
+      // `dodgeUsable`(battle.ts) — 차지가 0이어도 순차 스윕(sweep)의 두 번째
+      // 파동은 첫 파동에서 이미 낸 값으로 공짜로 넘어간다("개입 1회로 연쇄
+      // 전체를 넘긴다"). 여기를 `s.dodgeCharges <= 0`으로만 재면 그 무료
+      // 순간에도 버튼이 "전투 중"으로 죽어 보여 아무도 안 누르게 된다.
+      if (!dodgeUsable(s)) return "전투 중";
       // 쿨다운 중에는 남은 시간을 그대로 보여준다. 잠긴 이유를 안 보여주면
       // 그냥 안 먹는 버튼으로 읽힌다 — 예전에 실제로 그 보고를 받았다.
       if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
@@ -3128,8 +3261,10 @@ export function buttonText(s: RunState): string {
        * 청록엔 "집결". 예고가 없을 때는 이 버튼의 자원 이름인 "회피"다
        * ("대응"은 게임에서 안 쓰는 말이라 기능이 아니라 장식으로 읽혔다).
        * 무엇을 할지는 여전히 게임이 정하고, 라벨은 그걸 말로 보여줄 뿐이다.
+       * 차지가 0인데도 눌러야 하는 순간(스윕 두 번째 파동)엔 숫자를 빼서
+       * "0인데 왜 눌러야 하나"는 혼란을 없앤다.
        */
-      return `회피  ${s.dodgeCharges}`;
+      return s.dodgeCharges > 0 ? `회피  ${s.dodgeCharges}` : "회피";
     }
     case "reward":
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
@@ -3141,12 +3276,52 @@ export function buttonText(s: RunState): string {
   }
 }
 
+/**
+ * `dualChoiceActive`(battle.ts)가 참일 때 버튼 자리를 산개/집결 두 짝으로
+ * 가른다. 극성 전용 이름을 안 쓴 것은 그 게이트와 같은 이유다 — 원버튼
+ * 폐기가 검토 중이라 나중엔 극성이 아닌 예고에서도 이 함수가 그대로 쓰인다.
+ *
+ * 사이 틈은 **그림에서만** 있다 — 히트테스트(`main.ts`)는 이 틈을 모르고
+ * 그냥 버튼 가운데 x로 좌/우를 가른다. 틈이 2~4px뿐이라 손가락이 정확히
+ * 거기 떨어지는 사고를 걱정하는 것보다 "가운데 기준 어느 쪽이든 걸린다"가
+ * 더 실수를 덜 만든다. `L.button`은 손대지 않는다 — `npm run probe`의
+ * 최소 손가락 크기 검사(`L.button.h >= 40`)가 이 값을 그대로 보므로, 반쪽을
+ * 여기서만 계산해야 그 검사가 계속 뜻이 있다.
+ */
+export function splitButton(r: Rect): [Rect, Rect] {
+  const gap = Math.max(4, r.w * 0.02);
+  const halfW = (r.w - gap) / 2;
+  return [
+    { x: r.x, y: r.y, w: halfW, h: r.h },
+    { x: r.x + halfW + gap, y: r.y, w: halfW, h: r.h },
+  ];
+}
+
+/**
+ * 갈라진 버튼 한 짝의 문구. `buttonText`의 예고 분기와 조건을 맞췄다 —
+ * 자원 상태(차지·쿨다운)는 두 버튼이 공유하는 값이라 그대로 반복하고,
+ * 갈라지는 것은 동사(산개!/집결!)뿐이다. 여기서 어긋나면 라벨과 실제
+ * 눌렀을 때의 동작(main.ts)이 따로 논다.
+ *
+ * **키 힌트를 붙인다.** 버튼이 둘로 갈리면서 "왼쪽·오른쪽" 대신 눌러야 할
+ * 키(Space·G)를 라벨이 직접 말해야 한다 — 안 그러면 마우스 없이는 어느
+ * 버튼이 어느 키인지 외워야 한다. 좁으면(반쪽 폭 140px 아래, 데스크톱
+ * 세로줄 구성의 최소치가 여기 걸린다) 약칭으로 줄인다 — `uiText`의
+ * `maxWidth` 말줄임이 최후 안전장치지만, 그전에 "Space"가 잘려 "Spa…"로
+ * 보이는 것보다 "spc"가 낫다.
+ */
+function dualButtonText(s: RunState, verb: "산개" | "집결", key: string, keyAbbrev: string, w: number): string {
+  if (!dodgeUsable(s)) return "전투 중";
+  if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
+  const hint = w >= 140 ? key : keyAbbrev;
+  return `${verb}! ${hint}  ${s.dodgeCharges}`;
+}
+
 function drawButton(
   ctx: CanvasRenderingContext2D,
   L: Layout,
   s: RunState,
 ): void {
-  const r = L.button;
   const openBoss = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
 
   /**
@@ -3164,7 +3339,43 @@ function drawButton(
   const armed =
     (s.phase !== "battle" && s.phase !== "map") ||
     openBoss ||
-    (s.dodgeCharges > 0 && s.actCooldown <= 0 && s.enemy.some((c) => c?.telegraph));
+    // `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 — 상주
+    // 장판(creep)·순차 스윕(sweep) 대기열은 특정 보스의 telegraph가 아니라
+    // battle.ts의 별도 배열이라, 그 둘만 이 판정에서 빠지면 떠 있는데도
+    // 버튼이 죽어 보인다(2차 반려가 하네스 사본에서 잡은 것과 같은 실명).
+    // `dodgeUsable`을 쓰는 이유는 스윕 두 번째 파동이 차지 0에서도 공짜로
+    // 통하기 때문이다 — `dodgeCharges > 0`만 보면 그 무료 순간에 버튼이
+    // 죽어 보여 아무도 안 누른다.
+    (dodgeUsable(s) && s.actCooldown <= 0 && hazardsActive(s));
+  const pulse = armed && s.phase === "battle";
+
+  /**
+   * 지금은 극성(polarity)만 버튼이 두 갈래다 — `dualChoiceActive`(battle.ts)
+   * 하나가 그 기준이다. 나머지 예고·취약 창·상점 등은 자동 판단이 되므로
+   * (`resolveIntent`) 여전히 버튼 하나다.
+   *
+   * **원버튼 폐기가 검토 중이다.** `dualChoiceActive`가 넓어지면(모든 예고에서
+   * 산개/집결을 직접 고르는 쪽으로) 여기는 손댈 것이 없다 — 게이트 하나만
+   * 보고 있어서다.
+   */
+  if (s.phase === "battle" && dualChoiceActive(s)) {
+    const [left, right] = splitButton(L.button);
+    drawButtonFace(ctx, left, armed, pulse, dualButtonText(s, "산개", "Space", "spc", left.w));
+    drawButtonFace(ctx, right, armed, pulse, dualButtonText(s, "집결", "G", "G", right.w));
+    return;
+  }
+
+  drawButtonFace(ctx, L.button, armed, pulse, buttonText(s));
+}
+
+/** 버튼 한 짝을 그린다. 단일 버튼과 극성의 두 짝이 같은 얼굴을 쓰도록 뺐다. */
+function drawButtonFace(
+  ctx: CanvasRenderingContext2D,
+  r: Rect,
+  armed: boolean,
+  pulse: boolean,
+  label: string,
+): void {
   const idle = !armed;
   const face = idle ? "rgba(239,224,198,0.07)" : T.action;
   const edge = idle ? "rgba(0,0,0,0.3)" : "#A85E1E";
@@ -3179,11 +3390,11 @@ function drawButton(
   );
 
   // 살아난 순간을 놓치지 않게 테두리가 한 번 밝아진다. 예고는 1.2초뿐이다.
-  if (armed && s.phase === "battle") {
-    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 150);
+  if (pulse) {
+    const p = 0.5 + 0.5 * Math.sin(performance.now() / 150);
     ctx.save();
     roundRect(ctx, r, r.h * 0.26);
-    ctx.strokeStyle = `rgba(255,255,255,${0.18 + pulse * 0.3})`;
+    ctx.strokeStyle = `rgba(255,255,255,${0.18 + p * 0.3})`;
     ctx.lineWidth = Math.max(2, r.h * 0.05);
     ctx.stroke();
     ctx.restore();
@@ -3209,7 +3420,7 @@ function drawButton(
   // 실제로 `Space 흩어져 · Shift 뭉쳐 6`이 버튼 오른쪽으로 삐져나와 있었다.
   uiText(
     ctx,
-    buttonText(s),
+    label,
     r.x + r.w / 2,
     r.y + r.h / 2,
     Math.max(15, r.h * 0.36),
@@ -3751,6 +3962,7 @@ export function render(
   drawBoard(ctx, L, "ally", T.ally, hoverCell);
   drawBoard(ctx, L, "enemy", T.enemy, -1);
   drawTelegraphs(ctx, L, s);
+  drawCreepZones(ctx, L, creepZones);
 
   // 화면 아래쪽 고양이가 위에 그려지도록 y로 정렬한다.
   // 전투 중에는 양쪽이 뒤섞이므로 이게 없으면 겹칠 때 앞뒤가 뒤집혀 보인다.

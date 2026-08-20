@@ -25,13 +25,13 @@ export interface StageTheme {
   readonly subtitle: string;
   /**
    * 배경이 쓸 색 축의 메모. 지금은 스테이지 1만 실제로 소비한다
-   * (`backdropScene`이 그 결과물이다). 2·3은 코드 어디서도 안 읽는 값이라
-   * 다음 웨이브가 씬을 그릴 때 참고할 팔레트 메모로만 남긴다.
+   * (`backdropScene`이 그 결과물이다). 스테이지별 팔레트는 배경과 잔몹
+   * 색조를 함께 고를 때 같은 밤의 온도를 유지하는 기준이다.
    */
   readonly palette: { readonly base: string; readonly accent: string };
   /**
    * 악몽 잔몹에 덮어씌울 색조. 비어 있으면 `tintForEnemy`가 null을 돌려주고
-   * 원래 스프라이트 색 그대로 나간다(스테이지 2·3은 아직 비어 있다).
+   * 원래 스프라이트 색 그대로 나간다.
    */
   readonly mobColors: readonly CatColor[];
   /**
@@ -88,16 +88,20 @@ export const STAGE_THEMES: readonly StageTheme[] = [
       bossPhase2: "재 속에 숨어든 것",
     },
   },
-  // 스테이지 2 — 역병(자리만 잡아 둔다). 다음 웨이브가 N1·N4·C1과 함께 채운다.
+  // 스테이지 2 — 역병. 보라와 독초록이 안개 속의 적을 같은 무리로 묶는다.
   {
     stage: 2,
     name: "곪은 밤",
     subtitle: "만지면 안 되는 것들이 있어요",
     palette: { base: "#241733", accent: "#6FAE4A" },
-    mobColors: [],
+    mobColors: ["purple", "green"],
     waveOrder: ["mixed", "snipe", "rush", "mixed"],
-    backdropScene: null,
-    bossTitles: null,
+    backdropScene: "blight",
+    bossTitles: {
+      mid: "곪은 안개를 두른 것",
+      bossPhase1: "역병을 몰고 온 것",
+      bossPhase2: "부패한 숨결에 잠긴 것",
+    },
   },
   // 스테이지 3 — 얼음(자리만 잡아 둔다). 다음 웨이브가 신드라고사·리치왕과 함께 채운다.
   {
@@ -135,7 +139,7 @@ export function stageTheme(stage: number): StageTheme {
 
 /**
  * 이 적 품종이 이번 스테이지에서 덮어쓸 색조. 테마에 잔몹 색조가 없으면
- * (스테이지 2·3, 아직 미배선) null — 원래 스프라이트 색 그대로 나간다.
+ * (스테이지 3처럼 아직 색조가 없는 테마는) null — 원래 스프라이트 색 그대로 나간다.
  *
  * 품종 id로 팔레트 안 고정 인덱스를 골라 결정적으로 배정한다. 같은 웨이브를
  * 다시 봐도 같은 적이 같은 색으로 나와야 "이 잔몹이 그 잔몹이다"가 화면에서도
