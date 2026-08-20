@@ -18,7 +18,7 @@
  */
 
 /** 보스마다 다른 무대. 성격을 공간이 먼저 말한다. */
-export type Scene = "forest" | "stone" | "alley" | "frost" | "ember" | "blight";
+export type Scene = "forest" | "stone" | "alley" | "frost" | "ember" | "blight" | "citadel";
 
 /** 최종 화면 픽셀 몇 개가 씬 픽셀 하나인가. 클수록 굵고 거칠다. */
 const PIXEL = 4;
@@ -433,6 +433,69 @@ function blight(c: Ctx, w: number, h: number): void {
   }
 }
 
+/**
+ * 얼음 성채의 밤 — 스테이지 3 전용 무대(`stages.ts`의 `backdropScene`).
+ *
+ * 푸른 얼음과 죽음의 보라를 하늘·성채·바닥에 나눠야 눈발과 달빛이 전장
+ * 신호보다 앞서지 않는다. 첨탑은 같은 고정 난수로 높이만 달리해, 창 크기가
+ * 바뀌어도 성채의 윤곽과 눈발의 위치가 매번 달라지지 않게 한다.
+ */
+function citadel(c: Ctx, w: number, h: number): void {
+  const r = rand(157);
+  const sky = ["#090F2B", "#111A45", "#22235A", "#33245B", "#100F26"] as const;
+  bands(c, w, h, [[0.18, sky[0]], [0.14, sky[1]], [0.15, sky[2]], [0.13, sky[3]], [0.4, sky[4]]]);
+  ditherSeam(c, w, Math.round(h * 0.18), 4, sky[1]);
+  ditherSeam(c, w, Math.round(h * 0.32), 4, sky[2]);
+  ditherSeam(c, w, Math.round(h * 0.47), 5, sky[3]);
+
+  // 차가운 달빛을 한 점으로 모아 성채 실루엣과 얼음의 반사를 함께 읽게 한다.
+  const moonX = Math.round(w * 0.74);
+  const moonY = Math.round(h * 0.18);
+  disc(c, moonX, moonY, Math.round(h * 0.15), "rgba(167,208,255,0.12)");
+  disc(c, moonX, moonY, Math.round(h * 0.09), "#CFEAFF");
+  disc(c, moonX + Math.round(h * 0.025), moonY - Math.round(h * 0.02), Math.round(h * 0.018), "#8FA8D8");
+
+  ridge(c, w, h, Math.round(h * 0.57), Math.round(h * 0.1), "#17183A", r);
+  ridge(c, w, h, Math.round(h * 0.68), Math.round(h * 0.07), "#0D1028", r);
+
+  const ground = Math.round(h * 0.72);
+  F(c, 0, ground, w, h, "#10132C");
+  F(c, 0, ground, w, 2, "#536FAD");
+
+  // 뾰족한 탑을 뒤에서 앞으로 겹쳐 성채가 평면 띠가 아니라 왕좌처럼 보이게 한다.
+  const spire = (x: number, base: number, width: number, height: number, body: string, edge: string): void => {
+    for (let row = 0; row < height; row++) {
+      const half = Math.max(1, Math.round((row / height) * width * 0.5));
+      F(c, x - half, base - height + row, half * 2 + 1, 1, body);
+      if (row % 3 === 0) F(c, x - half, base - height + row, 1, 1, edge);
+    }
+    F(c, x - Math.round(width * 0.5), base, width, 2, body);
+  };
+  const towers = [
+    [0.08, 0.2, 0.11], [0.24, 0.32, 0.15], [0.43, 0.24, 0.13],
+    [0.62, 0.36, 0.17], [0.82, 0.25, 0.13], [0.96, 0.3, 0.14],
+  ] as const;
+  for (const [at, scale, widthScale] of towers) {
+    const width = Math.max(4, Math.round(w * widthScale));
+    const height = Math.max(8, Math.round(h * scale));
+    spire(Math.round(w * at), ground + 2, width, height, "#272653", "#718BC8");
+  }
+  F(c, Math.round(w * 0.18), Math.round(h * 0.61), Math.round(w * 0.64), ground - Math.round(h * 0.61), "#1C1B43");
+  F(c, Math.round(w * 0.2), Math.round(h * 0.61), Math.round(w * 0.6), 2, "#465B99");
+
+  // 눈발은 바닥으로 떨어지는 방향을 주되, 큰 점은 줄여 고양이 실루엣을 가리지 않는다.
+  for (let i = 0; i < 56; i++) {
+    const x = Math.floor(r() * w);
+    const y = Math.floor(r() * h * 0.82);
+    const col = i % 4 === 0 ? "rgba(207,234,255,0.75)" : "rgba(151,190,235,0.48)";
+    F(c, x, y, i % 5 === 0 ? 2 : 1, i % 5 === 0 ? 2 : 1, col);
+    if (i % 6 === 0) F(c, x - 1, y + 2, 3, 1, "rgba(207,234,255,0.24)");
+  }
+  for (let i = 0; i < 18; i++) {
+    F(c, Math.floor(r() * w), ground + Math.floor(r() * (h - ground)), 3 + Math.floor(r() * 6), 1, "rgba(174,213,255,0.22)");
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* 캐시                                                                 */
 /* ------------------------------------------------------------------ */
@@ -464,6 +527,7 @@ function build(scene: Scene, bw: number, bh: number, t: number): HTMLCanvasEleme
   else if (scene === "frost") frost(c, bw, bh);
   else if (scene === "ember") ember(c, bw, bh);
   else if (scene === "blight") blight(c, bw, bh);
+  else if (scene === "citadel") citadel(c, bw, bh);
   else forest(c, bw, bh, t);
   return cv;
 }

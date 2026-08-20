@@ -103,16 +103,20 @@ export const STAGE_THEMES: readonly StageTheme[] = [
       bossPhase2: "부패한 숨결에 잠긴 것",
     },
   },
-  // 스테이지 3 — 얼음(자리만 잡아 둔다). 다음 웨이브가 신드라고사·리치왕과 함께 채운다.
+  // 스테이지 3 — 얼음 성채. 보스 이름이 아니라 겨울·죽음·왕좌의 이미지로 밤을 묶는다.
   {
     stage: 3,
     name: "얼어붙는 밤",
     subtitle: "숨이 하얗게 얼어붙는 밤이에요",
     palette: { base: "#0A2334", accent: "#7A9BE8" },
-    mobColors: [],
+    mobColors: ["navy", "teal", "purple"],
     waveOrder: ["rush", "snipe", "mixed", "mixed"],
-    backdropScene: null,
-    bossTitles: null,
+    backdropScene: "citadel",
+    bossTitles: {
+      mid: "서리 왕좌 아래 숨은 것",
+      bossPhase1: "겨울 왕좌에 앉은 것",
+      bossPhase2: "죽음을 거느린 겨울 군주",
+    },
   },
 ];
 
@@ -139,7 +143,7 @@ export function stageTheme(stage: number): StageTheme {
 
 /**
  * 이 적 품종이 이번 스테이지에서 덮어쓸 색조. 테마에 잔몹 색조가 없으면
- * (스테이지 3처럼 아직 색조가 없는 테마는) null — 원래 스프라이트 색 그대로 나간다.
+ * null — 원래 스프라이트 색 그대로 나간다.
  *
  * 품종 id로 팔레트 안 고정 인덱스를 골라 결정적으로 배정한다. 같은 웨이브를
  * 다시 봐도 같은 적이 같은 색으로 나와야 "이 잔몹이 그 잔몹이다"가 화면에서도
