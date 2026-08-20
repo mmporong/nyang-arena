@@ -6,6 +6,7 @@ import {
   dodgeUsable,
   dualChoiceActive,
   FIELD_MAX_FX,
+  finalPhaseChannelActive,
   fxs,
   hazardsActive,
   POP_LIFE_MS,
@@ -15,7 +16,7 @@ import {
   sweepZones,
   type Fx,
 } from "./battle.ts";
-import { bossForIndex, bossKit, BOSS_THRESHOLDS, SNIPER_BREED } from "./bosses.ts";
+import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
 import { bossHint, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
@@ -801,7 +802,16 @@ function drawVulnerableRing(
   size: number,
   cat: Cat,
 ): void {
-  const max = Math.max(1, bossKit(cat.breed.id).vulnerableMs);
+  /**
+   * 최종 국면(finalPhase, US-404)의 마지막 취약 창은 킷의 평소 값(서리귀
+   * 4500ms)보다 길게 잡는다(`FINAL_VULNERABLE_MS` 5000ms) — 그 창이 열려
+   * 있는 동안은 분모를 이 값으로 바꿔야, 열리자마자 고리가 이미 다 찬
+   * 것처럼 보이지 않는다.
+   */
+  const max =
+    cat.finalPhase?.stage === "open"
+      ? FINAL_VULNERABLE_MS
+      : Math.max(1, bossKit(cat.breed.id).vulnerableMs);
   const left = Math.max(0, Math.min(1, cat.vulnerableMs / max));
   const pulse = vulnerablePulse(cat, performance.now());
   // 보스 반경 1.5칸 안으로 묶는다. 스프라이트가 3.15칸에 그려지므로 0.47이 그 선이다.
@@ -1222,6 +1232,46 @@ function drawBossTargetMark(ctx: CanvasRenderingContext2D, L: Layout, s: RunStat
     ctx.moveTo(cx - w, my + w * 0.7);
     ctx.lineTo(cx, my);
     ctx.lineTo(cx + w, my + w * 0.7);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/**
+ * 표식(seize, US-403) 마커 — 표식이 걸린 아군 머리 위에 그린다.
+ *
+ * `cat.seized`는 battle.ts가 판정에만 쓰는 상태이고(`fireTelegraph`의 seize
+ * 분기가 도화선이 다 되는 순간 1회 판정한다), 이 함수를 지워도 전투 결과는
+ * 같다. 구원 원 자체는 새로 그리지 않는다 — 여느 gather 원과 같은 `Telegraph`
+ * 라 `drawTelegraphs`가 이미 그린다. 여기서는 "누가 표식됐는지"만 얹는다.
+ *
+ * 보스 표적 표식(위 함수)과 헷갈리지 않도록 **아래를 가리키는** 역삼각형으로
+ * 그린다 — "위에서 찍혔다"는 방향이 그대로 읽힌다. 색은 새 신호를 안 만들고
+ * `T.danger`를 재사용한다(theme.ts: 판 위 고채도는 위험·모임·취약 셋뿐이라는
+ * 원칙) — 표식된 몸이 실제로 위험에 처해 있다는 뜻과도 맞는다.
+ */
+function drawSeizeMark(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const marked: Cat[] = [];
+  for (const c of s.ally) if (c && c.alive && c.seized) marked.push(c);
+  for (const c of s.summons) if (c.alive && c.seized) marked.push(c);
+  if (marked.length === 0) return;
+
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+  for (const c of marked) {
+    const { x: cx, y: cy } = fieldToScreen(L, c.fx, c.fy);
+    const { bh, by } = healthBarGeom(L, c.side, c.radius, cy, c.sizeMul);
+    const w = Math.max(6, bh * 1.6);
+    const my = by - bh * 1.6;
+
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,63,110,${0.7 + pulse * 0.3})`;
+    ctx.lineWidth = Math.max(1.5, bh * 0.5);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx - w, my);
+    ctx.lineTo(cx, my + w * 0.7);
+    ctx.lineTo(cx + w, my);
     ctx.stroke();
     ctx.restore();
   }
@@ -3240,6 +3290,11 @@ export function buttonText(s: RunState): string {
       // 평소엔 회피. 조작을 늘리지 않고 레이드의 두 국면을 넣는 방법이다.
       // 예고와 취약 창이 겹치면 resolveIntent가 회피를 먼저 처리한다. 라벨도
       // 같은 우선순위를 써야 버튼을 눌렀을 때 실제 행동과 어긋나지 않는다.
+      //
+      // 최종 국면(finalPhase, US-404)의 채널 동안은 그 무엇보다 먼저 잠긴다
+      // — 예고도 취약 창도 이 동안은 안 걸리므로 원래대로면 "회피"가
+      // 뜨겠지만, 실제로는 아무 것도 할 수 없는 연출 구간이다.
+      if (finalPhaseChannelActive(s)) return "…";
       const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
       if (tg) {
         if (!dodgeUsable(s)) return "전투 중";
@@ -3337,16 +3392,17 @@ function drawButton(
    * 버튼까지 정답을 알려주면 읽을 이유가 사라진다.
    */
   const armed =
-    (s.phase !== "battle" && s.phase !== "map") ||
-    openBoss ||
-    // `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 — 상주
-    // 장판(creep)·순차 스윕(sweep) 대기열은 특정 보스의 telegraph가 아니라
-    // battle.ts의 별도 배열이라, 그 둘만 이 판정에서 빠지면 떠 있는데도
-    // 버튼이 죽어 보인다(2차 반려가 하네스 사본에서 잡은 것과 같은 실명).
-    // `dodgeUsable`을 쓰는 이유는 스윕 두 번째 파동이 차지 0에서도 공짜로
-    // 통하기 때문이다 — `dodgeCharges > 0`만 보면 그 무료 순간에 버튼이
-    // 죽어 보여 아무도 안 누른다.
-    (dodgeUsable(s) && s.actCooldown <= 0 && hazardsActive(s));
+    !finalPhaseChannelActive(s) && // 최종 국면 채널 — 개입 버튼은 잠긴다("…")
+    ((s.phase !== "battle" && s.phase !== "map") ||
+      openBoss ||
+      // `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 — 상주
+      // 장판(creep)·순차 스윕(sweep) 대기열은 특정 보스의 telegraph가 아니라
+      // battle.ts의 별도 배열이라, 그 둘만 이 판정에서 빠지면 떠 있는데도
+      // 버튼이 죽어 보인다(2차 반려가 하네스 사본에서 잡은 것과 같은 실명).
+      // `dodgeUsable`을 쓰는 이유는 스윕 두 번째 파동이 차지 0에서도 공짜로
+      // 통하기 때문이다 — `dodgeCharges > 0`만 보면 그 무료 순간에 버튼이
+      // 죽어 보여 아무도 안 누른다.
+      (dodgeUsable(s) && s.actCooldown <= 0 && hazardsActive(s)));
   const pulse = armed && s.phase === "battle";
 
   /**
@@ -3939,6 +3995,50 @@ function bossDeathShake(L: Layout): { x: number; y: number } {
   return { x: Math.sin(wob) * mag, y: Math.cos(wob * 1.3) * mag * 0.7 };
 }
 
+/**
+ * 최종 국면(finalPhase, US-404) 연출 — 화면이 어두워지고 보스가 빛난다.
+ *
+ * battle.ts는 상태(`Cat.finalPhase`의 `stage`·`remainMs`)만 들고 있다.
+ * "얼마나 어두워지는지"·"얼마나 빛나는지"는 전부 연출의 몫이라 여기서
+ * 계산한다 — 지워도 전투 결과는 같다. "구원 플래시"(채널이 끝나며 아군이
+ * 회복하는 순간)는 새 연출을 안 만든다 — battle.ts가 그 순간 이미 힐 팝업과
+ * `ring` Fx를 쏘아 올리므로(기존 힐 연출과 같은 경로) 여기서는 화면
+ * 어두워짐·보스 발광 둘만 얹는다.
+ */
+function drawFinalPhaseOverlay(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const boss = s.enemy.find((c) => c?.alive && c.finalPhase);
+  if (!boss || !boss.finalPhase) return;
+  const { stage, remainMs, totalMs } = boss.finalPhase;
+
+  // 화면 어두워짐 — 채널 동안만, **판(arenaBox) 안에서만**. `drawArena`가
+  // 채우는 것과 같은 영역이라 HUD·안내 문구는 안 어두워진다(`bossDeathShake`
+  // 주석과 같은 원칙 — "판·고양이·연출만" 흔들거나 어두워져야 한다).
+  if (stage === "channel") {
+    const t = totalMs > 0 ? 1 - Math.max(0, remainMs) / totalMs : 1;
+    ctx.save();
+    roundRect(ctx, arenaBox(L), L.cell * 0.22);
+    ctx.fillStyle = `rgba(6,4,3,${0.12 + t * 0.4})`;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 보스 발광 — 채널 내내 맥동하고, 마지막 창에서는 옅게 남는다.
+  const { x: bx, y: by } = fieldToScreen(L, boss.fx, boss.fy);
+  const size = catBodySize(L, boss.radius, boss.sizeMul);
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+  const r = size * (0.7 + pulse * 0.18);
+  const g = ctx.createRadialGradient(bx, by, size * 0.2, bx, by, r);
+  const glowAlpha = stage === "channel" ? 0.5 + pulse * 0.25 : 0.2;
+  g.addColorStop(0, `rgba(240,186,74,${glowAlpha})`);
+  g.addColorStop(1, "rgba(240,186,74,0)");
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(bx, by, r, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.restore();
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -3993,9 +4093,13 @@ export function render(
   drawList.sort((p, q) => p.y - q.y);
   for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed, s.map.stage);
   drawBossTargetMark(ctx, L, s);
+  drawSeizeMark(ctx, L, s);
 
   drawFx(ctx, L);
   drawShots(ctx, L);
+  // 최종 국면(finalPhase) 연출 — 고양이·연출 위, 데미지 숫자 아래. 숫자가
+  // 어두워진 화면에서도 그대로 읽혀야 "얼마나 회복했는지"가 안 묻힌다.
+  drawFinalPhaseOverlay(ctx, L, s);
 
   // 드래그 중인 고양이는 손가락을 따라다닌다.
   if (drag.active) {

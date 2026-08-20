@@ -162,6 +162,27 @@ export interface RunState {
    * 전후로 `telegraphsEaten`이 얼마나 갈리는지를 견줘 수동 선택의 값을 잰다.
    */
   polarityChoices: number;
+  /**
+   * 표식(seize, US-403)이 걸린 횟수와 그중 구원에 성공한 횟수.
+   *
+   * 구원 성공률(`seizeRescued / seizeMarked`)이 이 기믹의 값을 재는 숫자다.
+   * `battle.ts`의 `makeTelegraph`가 표식을 걸 때 `seizeMarked`를,
+   * `fireTelegraph`의 seize 분기가 구원에 성공했을 때만 `seizeRescued`를
+   * 늘린다 — 표식냥이 판정 전에 다른 이유로 죽으면 분모만 늘고 분자는 안
+   * 늘어 "구원 못 함"으로 잡힌다(의도된 계산이다).
+   */
+  seizeMarked: number;
+  seizeRescued: number;
+  /**
+   * 최종 국면(finalPhase, US-404)을 이미 한 번 썼는가.
+   *
+   * 서리귀는 스테이지 3뿐 아니라 테마 순환상 6·9…에서도 다시 스테이지
+   * 우두머리로 선다(`scripts/invariants.mjs`의 SNAP 계약 참고) — 이 문이
+   * 없으면 "지는 것이 연출"이 서리귀를 만날 때마다 반복돼 첫 등장의 무게가
+   * 사라진다. `battle.ts`의 `finalPhaseEligible`이 트리거 **시작 시점**에
+   * 바로 참으로 올려, 같은 판에서 다시는 열리지 않는다.
+   */
+  finalPhaseUsed: boolean;
 
   /**
    * 여정 지도.
@@ -808,6 +829,9 @@ export function newRun(seed?: number): RunState {
     vulnOverlapSeen: 0,
     vulnOverlapDodged: 0,
     polarityChoices: 0,
+    seizeMarked: 0,
+    seizeRescued: 0,
+    finalPhaseUsed: false,
     map: makeStage(1, runSeed),
     step: 0,
     nodeKind: null,

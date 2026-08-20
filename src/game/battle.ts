@@ -8,8 +8,18 @@ import {
   CREEP_IDLE_DESPAWN_MS,
   CREEP_RADIUS_STEPS,
   CREEP_TICK_MS,
+  FINAL_CHANNEL_MS,
+  FINAL_HEAL_FRAC,
+  FINAL_MIN_HP_FRAC,
+  FINAL_VULNERABLE_MS,
+  SEIZE_ADJACENT_RADIUS,
+  SEIZE_FAIL_FRAC,
+  SEIZE_FUSE_MS,
+  SEIZE_GATHER_RADIUS,
+  SEIZE_KNOCKBACK,
   SWEEP_DMG_MUL,
   SWEEP_FUSE_MS,
+  SWEEP_WAVE_ROWS,
   TELEGRAPH_FUSE_MS,
   type BossKit,
 } from "./bosses.ts";
@@ -362,6 +372,17 @@ function damage(target: Cat, amount: number, crit: boolean): void {
    * 같은 말이 된다.
    */
   if (target.blink && target.blink.phase === "gone") return;
+  /**
+   * 최종 국면(finalPhase, US-404) 채널 동안은 **무적**이다. `tickFinalPhase`
+   * 주석이 "예고도 공격도 멈춘다"고 약속하는데, 그 약속을 코드로 지키는
+   * 자리가 여기다 — 보스를 스턴시켜도(`startFinalPhase`) 보스 자신의 행동만
+   * 멎을 뿐, 아군의 평타·스킬·DoT는 계속 boss를 때린다. 실측으로 채널 진입
+   * 후 96.6%(기준 봇)·77.6%(입력 잠금만 지킨 정책)가 채널 도중 보스가
+   * 죽어 연출이 아예 재생되지 않았다 — "무적"이 주석에만 있고 코드에는
+   * 없었던 것이다. 여기서 막으면 doStrike(잔여 vulnerableMs 틈)까지 포함해
+   * 보스로 가는 모든 피해 경로가 한 번에 잠긴다.
+   */
+  if (target.finalPhase?.stage === "channel") return;
   let left = Math.round(amount);
   if (target.shield > 0) {
     const absorbed = Math.min(target.shield, left);
@@ -413,6 +434,11 @@ function damage(target: Cat, amount: number, crit: boolean): void {
     // 죽은 보스 밑에 반쪽 장판이 남는다.
     target.telegraph2 = null;
     target.blink = null;
+    // 최종 국면(finalPhase, US-404) 도중 보스가 죽으면(마지막 취약 창에서
+    // 흔히 일어난다 — 그게 이 국면의 성공 조건이다) `tickBoss`가 다시는
+    // 이 상태를 안 건드리므로 여기서 지운다. 안 지우면 죽은 보스가 화면을
+    // 계속 어둡게 누르고, 다음 전투까지 "전투 밖에 최종 국면이 남았다"로 샌다.
+    target.finalPhase = null;
     // 저격수(미니 보스)는 뺀다 — 확장 링 3겹·화면 흔들림은 진짜 레이드 보스의
     // 처치에만 어울리는 무게다.
     if (isRaidBoss(target)) spawnBossDeathFx(target);
@@ -875,9 +901,19 @@ function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | nu
  */
 function doStrike(state: RunState): boolean {
   // 부재(gone) 중인 보스는 대상이 아니다 — damage()가 어차피 0으로 막는데
-  // 여기서 콤보만 오르면 "때렸는데 안 깎이는" 거짓 화면이 된다.
+  // 여기서 콤보만 오르면 "때렸는데 안 깎이는" 거짓 화면이 된다. 최종 국면
+  // 채널 중인 보스도 같은 이유로 뺀다 — damage()가 이미 무적으로 막지만,
+  // 여기서도 걸러야 콤보가 헛되이 쌓이거나 타격 연출이 헛돈다. 화면은
+  // 버튼을 "…"로 잠그는데(render.ts) 입력 자체는 여전히 큐에 들어올 수
+  // 있으므로(하네스·거친 연타), 판정 쪽에서도 같은 문을 잠가야 화면과
+  // 실제 결과가 어긋나지 않는다.
   const boss = state.enemy.find(
-    (c) => c?.alive && c.radius > 0 && c.vulnerableMs > 0 && !(c.blink && c.blink.phase === "gone"),
+    (c) =>
+      c?.alive &&
+      c.radius > 0 &&
+      c.vulnerableMs > 0 &&
+      c.finalPhase?.stage !== "channel" &&
+      !(c.blink && c.blink.phase === "gone"),
   );
   if (!boss) return false;
 
@@ -1445,6 +1481,9 @@ function tickEffects(cats: (Cat | null)[], dt: number): void {
       c.pose = "sleep";
       c.dot = null;
       c.stun = 0;
+      // 표식(seize)이 걸린 채로 죽으면 판정도 못 받고 마커만 시체 위에
+      // 영원히 남는다 — 죽음도 "표식의 역할이 끝났다"는 뜻이므로 지운다.
+      if (c.seized) c.seized = false;
       continue;
     }
 
@@ -1811,6 +1850,54 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number, tally: RunState): Ma
     return { primary: avoidHalf, secondary: gatherCircle };
   }
 
+  if (pattern === "seize") {
+    /**
+     * 표식(seize, 발키르 오마주, US-403). 무작위 아군 1마리에 표식을 걸고
+     * (`Cat.seized`), 보스가 동시에 구원 원(gather)을 함께 깐다. 원 자체는
+     * 여느 gather 원과 똑같이 그려지고 똑같이 `doGather`를 태운다 —
+     * **집결 버튼을 억지로 새로 만들지 않는다**는 원칙이 여기서 그대로
+     * 성립한다. 다른 점은 판정뿐이다: `fireTelegraph`의 seize 분기가 이
+     * 존이 터지는 순간 **표식이 걸린 그 한 마리만** 채점한다(`Telegraph.
+     * seize`가 그 갈림길이다) — 나머지 팀은 이 예고에 안 걸린다.
+     *
+     * 표식 대상은 결정적 시드로 고른다(`rng()` 대신 `mixSeed`) — 극성의
+     * 방향과 같은 이유다. 같은 시드는 항상 같은 아군을 표식한다.
+     *
+     * **소환수는 후보에서 뺀다.** 실측(`w3-lab.mjs`)으로 표식의 24%가
+     * 소환수에 붙었다 — 6~20초면 알아서 사라질 몸에 "구원해야 할 표식"을
+     * 거는 것은 판단을 요구하는 게 아니라 헛일이다(구원해도 곧 사라지고,
+     * 실패해도 대가가 가짜다). `f.summon`이 채워져 있으면 소환수다
+     * (`types.ts` `Cat.summon`).
+     */
+    const alive = foes.filter((f) => f.alive && !f.summon);
+    if (alive.length === 0) return null;
+    const pick = mixSeed(mixSeed(tally.seed, tally.wave), idx) % alive.length;
+    const marked = alive[pick]!;
+    marked.seized = true;
+    tally.seizeMarked += 1;
+
+    const c = centroid(foes);
+    // 모이기(gather) 패턴과 같은 편향 비율 — 팀 쪽으로 살짝 당겨서 도착
+    // 자체가 몇 걸음은 되게 한다(0.25는 위 `mode === "gather"` 분기와 같은 값).
+    const GATHER_BIAS = 0.25;
+    return {
+      primary: {
+        shape: "circle",
+        mode: "gather",
+        fx: c.fx + (boss.fx - c.fx) * GATHER_BIAS,
+        fy: c.fy + (boss.fy - c.fy) * GATHER_BIAS,
+        dirX: 0,
+        dirY: 0,
+        arg: SEIZE_GATHER_RADIUS,
+        reach: 0,
+        fuse: SEIZE_FUSE_MS,
+        fuseMax: SEIZE_FUSE_MS,
+        seize: true,
+      },
+      secondary: null,
+    };
+  }
+
   const mode: TelegraphMode = pattern === "gather" || pattern === "hearth" ? "gather" : "avoid";
   const shape: TelegraphShape =
     pattern === "gather" || pattern === "stomp" || pattern === "hearth" || pattern === "quake"
@@ -2101,6 +2188,41 @@ function fireTelegraph(
     reach: t.reach,
   });
 
+  if (t.seize === true) {
+    /**
+     * 표식(seize) 심판 — 이 존은 팀 전체가 아니라 표식이 걸린 아군 **한
+     * 마리만** 가른다. `doGather`(청록 규칙)는 이 존도 여느 gather 원과
+     * 똑같이 취급해 팀 전체를 원 쪽으로 밀어 주지만, 살고 죽는 것은 표식냥
+     * 하나에 달려 있다.
+     *
+     * 구원 판정은 **발동 시점 1회, dt 결정적**이다 — 도화선이 다 되는 이
+     * 순간에만 묻는다. 두 갈래로 산다: (a) 표식 시점 보스가 함께 깐 구원
+     * 원 안에 있거나, (b) 아군 누군가와 인접하면(뭉친 대형이면 원까지
+     * 안 가도 된다) 구원이다.
+     */
+    const marked = foes.find((f) => f.seized === true);
+    if (marked) marked.seized = false; // 표식의 역할은 여기서 끝난다 — 성패와 무관하게 지운다.
+    if (marked && marked.alive) {
+      const rescued =
+        inTelegraph(t, marked.fx, marked.fy, BALANCE.telegraphBodyPad) ||
+        foes.some((f) => f !== marked && f.alive && fieldDistance(marked, f) <= SEIZE_ADJACENT_RADIUS);
+      if (overlapping && rescued) tally.vulnOverlapDodged += 1;
+      if (rescued) tally.seizeRescued += 1;
+      if (!rescued) {
+        tally.telegraphsEaten += 1;
+        damage(marked, Math.max(1, Math.round(marked.maxHp * SEIZE_FAIL_FRAC)), false);
+        fireTelegraphHitFx(marked, boss, hue);
+        // 넉백 — 보스 반대 방향으로 밀린다. 플레이어 행동이 아니라 피격
+        // 반응이라 dash(startDash)가 아니라 좌표를 바로 옮긴다.
+        const away = Math.atan2(marked.fy - boss.fy, marked.fx - boss.fx) || 0;
+        marked.fx += Math.cos(away) * SEIZE_KNOCKBACK;
+        marked.fy += Math.sin(away) * SEIZE_KNOCKBACK;
+        clampToField(marked);
+      }
+    }
+    return; // 아래의 전원 채점(avoid/gather 공용 분기)은 타지 않는다.
+  }
+
   if (t.mode === "gather") {
     /**
      * 청록 원은 **대피소**다. 안에 있으면 안 맞고, 밖에 있으면 맞는다 —
@@ -2243,8 +2365,9 @@ function tickCreepZones(allies: Cat[], dt: number): void {
  * 순차 스윕(sweep) 대기열. `creepZones`와 같은 전례 — 모듈 전역 배열 + dt 진행.
  *
  * **행 0→4 순차 대신 두 파동이다(원본 헤이건의 "안전지대 춤" 문법 — 리뷰
- * (ㄷ)).** 홀수 행(1·3) 묶음이 한 파동으로 동시에 켜지고, 그게 터지면
- * 곧바로 짝수 행(0·2·4) 묶음이 다음 파동으로 켜진다. 한 파동 안의 행들은
+ * (ㄷ)).** 어느 행이 어느 파동에 속하는지는 `bosses.ts`의 `SWEEP_WAVE_ROWS`가
+ * 정한다(현재: 첫 파동 [1,3] → 둘째 파동 [0,4] — US-401, 그 파일 주석의
+ * 실측 표 참고). 한 파동 안의 행들은
  * **같은 도화선을 공유**하므로(`advanceSweepQueue`가 한꺼번에 만든다)
  * `fuse`/`fuseMax`가 항상 같은 값이라 렌더의 "차오르는 정도"(`fill`)가
  * 음수가 되는 일이 없다 — 예전(행 하나씩) 설계가 "한 번에 하나만" 담아야
@@ -2293,11 +2416,8 @@ let sweepBurstCharged = false;
 function enqueueSweep(boss: Cat): void {
   sweepBoss = boss;
   sweepBurstCharged = false; // 새 문턱 — 이번 스윕은 아직 차지를 안 썼다
-  const odd: number[] = [];
-  const even: number[] = [];
-  for (let row = 0; row < BOARD_ROWS; row++) (row % 2 === 0 ? even : odd).push(row);
   sweepPendingWaves.length = 0;
-  sweepPendingWaves.push(odd, even);
+  for (const wave of SWEEP_WAVE_ROWS) sweepPendingWaves.push([...wave]);
   sweepZones.length = 0;
   advanceSweepQueue();
 }
@@ -2458,6 +2578,161 @@ function assignTelegraph(boss: Cat, made: MadeTelegraph | null): void {
   boss.telegraph2 = made?.secondary ?? null;
 }
 
+/**
+ * 최종 국면(finalPhase, US-404) 대상 조건.
+ *
+ * **스테이지 3 우두머리(서리귀, id 11)에게만, 게임 전체에서 1회만** 참이다.
+ * `state.finalPhaseUsed`가 문을 지킨다 — 서리귀는 테마 순환상 스테이지
+ * 3·6·9…에서도 다시 스테이지 우두머리로 선다(`scripts/invariants.mjs`의
+ * SNAP 계약 참고)이지만, 이 연출은 그중 **맨 처음 한 번**만 켜져야 "지는
+ * 것이 연출"이 매 서리귀 우두머리전마다 반복되는 상투적인 것으로 안 변한다.
+ *
+ * 마지막 문턱(`BOSS_THRESHOLDS`의 끝, 0.1)을 그대로 재사용한다 — "체력이
+ * 10% 이하"라는 새 매직넘버를 따로 안 만든다.
+ */
+function finalPhaseEligible(boss: Cat, state: RunState): boolean {
+  if (state.finalPhaseUsed) return false;
+  if (boss.stageBoss !== true || boss.breed.id !== 11) return false;
+  const last = BOSS_THRESHOLDS[BOSS_THRESHOLDS.length - 1]!;
+  return boss.hp / Math.max(1, boss.maxHp) <= last;
+}
+
+/**
+ * 최종 국면을 연다 — 채널 시작.
+ *
+ * 진행 중이던 위협을 전부 지운다. 채널이 전 아군을 빈사(hp 1)로 만드는데,
+ * 그 순간 상주 장판(creep)·순차 스윕(sweep)이 살아 있으면 그대로 죽는다 —
+ * "지는 것이 연출"이지 "빈사인데 또 맞아서 진짜로 죽는 것"이 아니므로
+ * 안전을 여기서 보장한다.
+ */
+function startFinalPhase(boss: Cat, foes: Cat[], state: RunState): void {
+  state.finalPhaseUsed = true;
+  /**
+   * 공격 정지 — 새 "멈춤" 상태를 만드는 대신 기존 스턴 필드를 그대로 쓴다.
+   * tickEffects가 매 스텝 이 값을 깎아 주므로 여기서 따로 셀 필요가 없다.
+   *
+   * **보스만 재우면 안 된다.** 보스 웨이브는 앞줄 호위 둘을 늘 데리고
+   * 나온다(`buildBossWave`, `BALANCE.bossEscortCount`) — 우두머리도 예외가
+   * 아니다. `state.enemy`(보드) 뿐 아니라 **적 쪽 소환수**(`state.summons`,
+   * side==="enemy")도 재운다 — 지금 악몽 명단엔 소환사가 없어 실제로는
+   * 안 생기지만, `damage()`의 채널 무적 가드와 짝을 맞춰 "채널 동안 보스로
+   * 가는 공격 경로가 하나도 없다"를 코드가 구조적으로 보장하게 한다.
+   */
+  for (const c of state.enemy) {
+    if (c && c.alive) c.stun = Math.max(c.stun, FINAL_CHANNEL_MS);
+  }
+  for (const c of state.summons) {
+    if (c.alive && c.side === "enemy") c.stun = Math.max(c.stun, FINAL_CHANNEL_MS);
+  }
+  creepZones.length = 0;
+  clearSweepQueue();
+  /**
+   * 채널 직전 체력을 스냅샷한 뒤 빈사(hp 1)로 낮춘다. 스냅샷이 있어야 채널이
+   * 끝날 때 "원래보다 나빠지지 않는다"(hp = max(직전 hp, maxHp×60%))는
+   * 회복 공식을 지킬 수 있다 — 실측에서 이미 60% 넘게 살아 있던 아군의
+   * 53.5%가 고정 60%로 되레 깎였었다.
+   *
+   * `c.dot = null`도 여기서 함께 지운다 — DoT는 `damage()`를 거치므로
+   * 채널 무적 가드가 막아 주지만(위 참고), 그 전에 이미 걸려 있던 DoT를
+   * 안 지우면 tickEffects가 매 스텝 `damage(c, slice, false)`를 불러서
+   * **아군 쪽 hp 1**을 즉사시킨다 — 보스 무적과 별개로 아군은 원래부터
+   * damage()가 그대로 통과한다. 강제 재현으로 5마리 전멸까지 갔었다.
+   */
+  const preHp = new Map<string, number>();
+  for (const c of foes) {
+    if (!c.alive) continue;
+    preHp.set(c.uid, c.hp);
+    c.hp = 1; // 사망이 아니라 빈사 — damage()를 거치지 않고 직접 대입한다.
+    c.dot = null;
+  }
+  boss.finalPhase = { stage: "channel", remainMs: FINAL_CHANNEL_MS, totalMs: FINAL_CHANNEL_MS, preHp };
+  // 기존 페이즈 전환 연출(phaseShift)을 그대로 재사용한다 — 새 Fx 종류를
+  // 만들지 않는다. render.ts가 이 kind를 이미 충격파 링과 플래시로 그린다.
+  pushFx({
+    kind: "phaseShift",
+    fx: boss.fx,
+    fy: boss.fy,
+    tx: 0,
+    ty: 0,
+    radius: boss.radius * 1.8,
+    angle: 0,
+    life: FINAL_CHANNEL_MS,
+    color: "#F0BA4A",
+  });
+}
+
+/**
+ * 최종 국면 진행 — 채널(무적) → 회복 + 마지막 취약 창.
+ *
+ * `open` 단계의 실제 카운트다운은 이 함수가 안 잰다 — `tickBoss` 맨 위의
+ * 공용 `vulnerableMs` 감소 로직이 이미 돌고 있으므로 그걸 그대로 빌려
+ * 쓴다(창이 닫히는 순간만 여기서 감지해 `finalPhase`를 지운다). 두 타이머를
+ * 따로 세면 반드시 어긋난다.
+ */
+function tickFinalPhase(boss: Cat, foes: Cat[], dt: number): void {
+  const fp = boss.finalPhase;
+  if (!fp) return;
+
+  if (fp.stage === "channel") {
+    fp.remainMs = Math.max(0, fp.remainMs - dt);
+    if (fp.remainMs > 0) return;
+
+    /**
+     * 채널이 끝났다 — 전 아군을 "빈사에서 끌어올리되 원래보다 나빠지지
+     * 않게" 회복시킨다. `hp = max(채널 직전 hp, maxHp×60%)`다 — 고정
+     * `1 + maxHp×60%`였을 때는 채널 직전에 이미 60%를 넘게 살아 있던
+     * 아군의 절반 이상이 되레 손해를 봤다(실측 53.5%). `fp.preHp`가
+     * `startFinalPhase`가 남긴 그 직전 값이다.
+     */
+    for (const c of foes) {
+      if (!c.alive) continue;
+      const before = c.hp;
+      const preChannelHp = fp.preHp.get(c.uid) ?? 0;
+      const target = Math.max(preChannelHp, Math.round(c.maxHp * FINAL_HEAL_FRAC));
+      c.hp = Math.min(c.maxHp, Math.max(c.hp, target));
+      const got = Math.round(c.hp - before);
+      if (got > 0) {
+        pop(c, `+${got}`, false, true);
+        pushFx({ kind: "ring", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.9, angle: 0, life: 420, color: FX_GATHER });
+      }
+    }
+
+    /**
+     * 마지막 창이 최소 8%를 실제로 요구하게 만든다. 발동 문턱이 10%에
+     * 걸려 있어도 그 순간 hp가 훨씬 낮게(때로는 1~2%) 잡히는 판이
+     * 실측에서 흔했다 — 그러면 입력이 전혀 없어도 1.4초 만에 창이
+     * 끝나 "마지막 창"이라는 이름값을 못 한다. 바닥만 올리고 천장은
+     * 안 건드린다(`Math.max`) — 이미 8% 넘게 남아 있으면 그대로 둔다.
+     */
+    boss.hp = Math.max(boss.hp, Math.round(boss.maxHp * FINAL_MIN_HP_FRAC));
+
+    // 마지막 취약 창 — 새 타이머가 아니라 기존 vulnerableMs를 그대로 연다.
+    // 창이 열리고 닫히는 로직·버튼 문구("할퀴기!")·연타 판정이 전부 공짜로
+    // 재사용된다(resolveIntent·buttonText는 vulnerableMs>0만 본다).
+    boss.vulnerableUsed = true;
+    boss.vulnerableMs = FINAL_VULNERABLE_MS;
+    boss.strikeCombo = 0;
+    fp.stage = "open";
+    pushFx({ kind: "ring", fx: boss.fx, fy: boss.fy, tx: 0, ty: 0, radius: boss.radius * 1.3, angle: 0, life: 520, color: "#F0BA4A" });
+    return;
+  }
+
+  // stage === "open" — 창이 닫혔는지만 본다(카운트다운 자체는 위에서 말한
+  // 공용 로직 몫). 닫혔는데 아직 안 죽었으면 연타가 부족했던 것 —
+  // `finalPhase`를 지우면 다음 tickBoss 호출부터 평소 문턱 로직이 이어받아
+  // 보스가 남은 체력으로 다시 싸운다(`thresholdIdx`는 이 국면 내내 그대로였다).
+  if (boss.vulnerableMs <= 0) boss.finalPhase = null;
+}
+
+/**
+ * 최종 국면 채널이 지금 진행 중인가 — render.ts의 버튼 잠금과 화면 어두워짐이
+ * 같은 기준을 봐야 한다. `open`(마지막 취약 창) 단계는 잠그지 않는다 — 그
+ * 때는 평소 취약 창과 똑같이 연타가 버튼의 일이다.
+ */
+export function finalPhaseChannelActive(state: RunState): boolean {
+  return state.enemy.some((c) => c?.alive && c.finalPhase?.stage === "channel");
+}
+
 /** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
 function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   if (!boss.alive) return;
@@ -2475,6 +2750,15 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   if (boss.vulnerableMs > 0) {
     boss.vulnerableMs = Math.max(0, boss.vulnerableMs - dt);
     if (boss.vulnerableMs === 0) boss.strikeCombo = 0;
+  }
+
+  /**
+   * US-404 최종 국면 — 한 번 시작되면 이것만 본다. blink·telegraph·문턱
+   * 로직보다 앞에 둬야 "채널 동안 아무 일도 안 일어난다"가 실제로 지켜진다.
+   */
+  if (boss.finalPhase) {
+    tickFinalPhase(boss, foes, dt);
+    return;
   }
 
   if (boss.blink) {
@@ -2518,6 +2802,20 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
    * 비로소 다음 것" — 원본 헤이건의 리듬과도 맞다.
    */
   if (sweepBoss === boss && (sweepZones.length > 0 || sweepPendingWaves.length > 0)) return;
+
+  /**
+   * US-404 최종 국면 진입 시점. **취약 창 반절 가드보다 먼저 본다.**
+   * 처음엔 그 가드 뒤에 뒀는데, hp가 취약 창 전반부(연타 타임이라 문턱
+   * 검사 자체가 막힌 구간) 안에서 10% 밑으로 떨어지면 그 창이 끝나거나
+   * 후반부에 들 때까지 감지가 늦어졌다 — 실측(`w3-lab.mjs`)으로 발동
+   * 시점 hp% p50이 4.4%까지 밀렸다(문턱은 10%인데). `boss.telegraph`
+   * 가드·스윕 가드는 그대로 남긴다 — 진행 중이던 예고·스윕은 안 잘라먹는다,
+   * 최종 국면은 **문턱 판단이 열리는 자리**에서만 끼어든다.
+   */
+  if (finalPhaseEligible(boss, tally)) {
+    startFinalPhase(boss, foes, tally);
+    return;
+  }
 
   /**
    * 취약 창의 **앞 절반은 순수 연타 타임**이다. 처음 조기 return을 걷어냈을
@@ -2725,6 +3023,17 @@ export function stepBattle(state: RunState, dtMs: number): void {
     // boss.telegraph가 계속 null인 채로(makeTelegraph의 sweep 분기 참고)
     // 5행이 이어져야 하므로 보스의 다음 문턱 판단과 무관해야 한다.
     tickSweepQueue(allies, state, step);
+    /**
+     * 표식(seize)의 짝인 구원 원이 사라지면(주로 그 보스가 죽었을 때) 표식만
+     * 혼자 남는다 — `damage()`는 죽은 보스의 `telegraph`는 지우지만 아군
+     * 쪽 상태(`seized`)는 모른다(보스 하나만 받는 함수라 아군 목록이 없다).
+     * 매 스텝 여기서 짝이 아직 살아 있는지 확인해, 끊어졌으면 마저 지운다 —
+     * 정상 종료(도화선이 다 됨)는 `fireTelegraph`의 seize 분기가 이미
+     * 지우므로 여기서는 대부분 조용한 no-op이다.
+     */
+    if (!foes.some((e) => e.telegraph?.seize === true)) {
+      for (const a of allies) if (a.seized) a.seized = false;
+    }
 
     // 양쪽 다 **진짜 고양이만** 센다. 소환수가 남았다고 판이 이어지면
     // 죽은 뒤에 분신이 대신 싸우는 시간이 생긴다.
@@ -2735,6 +3044,16 @@ export function stepBattle(state: RunState, dtMs: number): void {
       // 먼저 비운다.
       creepZones.length = 0;
       clearSweepQueue();
+      /**
+       * 최종 국면(finalPhase)도 같은 이유로 여기서 지운다. **보스가 죽지
+       * 않고도** 이 전투가 끝날 수 있다 — 마지막 취약 창(open)이 열린 채로
+       * 아군이 전멸하면(팀이 아주 얇을 때 실제로 일어난다: 실측으로 20/20
+       * 시드에서 재현됐다) `damage()`의 죽음 경로를 안 타므로 `finalPhase`가
+       * 안 지워진 채로 `gameover`에 넘어간다.
+       */
+      for (const e of state.enemy) if (e) e.finalPhase = null;
+      // 타임아웃 분기와 대칭 — 패배(전멸) 경로도 표식을 남기지 않는다.
+      for (const a of allyBodies(state)) a.seized = false;
       finishWave(state, realFoes.length === 0 && realAllies.length > 0);
       return;
     }
@@ -2813,6 +3132,10 @@ export function stepBattle(state: RunState, dtMs: number): void {
     if (state.battleElapsed >= battleTimeout(state)) {
       creepZones.length = 0; // 위 승패 분기와 같은 이유
       clearSweepQueue();
+      for (const e of state.enemy) if (e) e.finalPhase = null; // 위와 같은 이유
+      // 표식도 지운다 — 패배 경로는 finishWave가 아군 리셋 전에 빠져나가므로
+      // 여기서 안 지우면 게임오버 화면에 표식 마커가 유령처럼 남는다(리뷰 재현).
+      for (const a of allyBodies(state)) a.seized = false;
       finishWave(state, false, "timeout");
       return;
     }

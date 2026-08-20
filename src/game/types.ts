@@ -117,6 +117,15 @@ export interface Telegraph {
    * 기본은 없음(=false)이라 기존 예고 생성 코드는 한 곳도 안 건드린다.
    */
   resident?: boolean;
+  /**
+   * **표식(seize) 전용.** 이 원이 US-403의 구원 원임을 표시한다. `resident`와
+   * 같은 이유로 한 비트만 얹는다 — `fireTelegraph`(battle.ts)가 이 원이
+   * 터질 때 "전원 채점"이 아니라 "표식이 걸린 아군 한 마리만 채점"으로
+   * 갈라야 하는데, 패턴 이름은 `makeTelegraph` 안에서만 살고 만들어진
+   * `Telegraph`엔 안 남기 때문이다. optional이고 기본은 없음(=false)이라
+   * 기존 예고 생성 코드는 한 곳도 안 건드린다.
+   */
+  seize?: boolean;
 }
 
 /**
@@ -476,6 +485,46 @@ export interface Cat {
    * 종류가 대신한다(`battle.ts`).
    */
   phase2?: boolean;
+
+  /**
+   * 표식(seize, US-403) 구원 대기 상태. **아군만** 쓴다.
+   *
+   * 참이면 이 고양이가 지금 도화선 위에 서 있다는 뜻이고, 구원 판정은
+   * `fireTelegraph`(battle.ts)의 seize 분기가 **도화선이 다 되는 순간 1회**
+   * 결정적으로 내린다 — 매 프레임 다시 재지 않는다. `blink`·`phase2`와 같은
+   * 이유로 optional이다: `run.ts`의 `makeCat`은 이 필드를 채우지 않는다
+   * (이 작업의 담당 파일이 아니다). 안 채워진 고양이는 `undefined`이고
+   * `false`와 똑같이 취급한다.
+   */
+  seized?: boolean;
+  /**
+   * 최종 국면(finalPhase, US-404) 상태. **스테이지 3 우두머리(서리귀)에게만,
+   * 게임 전체에서 1회만** 켜진다(`RunState.finalPhaseUsed`가 그 문을 지킨다).
+   *
+   * `channel` — 2.5초 전능 채널. 예고도 공격도 멈춘다(`boss.stun`을 그대로
+   * 걸어 재사용한다). 채널이 끝나면 `open`으로 넘어가면서 전 아군이 60%
+   * 회복하고 보스에게 마지막 취약 창이 열린다 — 그 창은 **새 타이머를
+   * 따로 두지 않고 기존 `vulnerableMs`를 그대로 빌려 쓴다**(창이 닫히면
+   * `battle.ts`가 스스로 `finalPhase`를 지운다).
+   *
+   * `remainMs`/`totalMs`는 `channel` 단계에서만 진행의 근거다 — `open`
+   * 단계의 실제 남은 시간은 `boss.vulnerableMs`(대 `FINAL_VULNERABLE_MS`)를
+   * 봐야 한다(render.ts). 두 값을 이중으로 흘려보내면 반드시 어긋난다.
+   *
+   * `preHp` — 채널 시작 **직전** 각 아군의 체력 스냅샷(uid→hp). 채널 회복
+   * 공식이 "빈사에서 끌어올리되 원래보다 나빠지지 않는다"(hp = max(채널
+   * 직전 hp, maxHp×60%))를 지키려면 그 직전 값을 기억해 둬야 한다 — hp를
+   * 1로 낮춘 뒤에는 원래 값을 잃어버리기 때문이다.
+   *
+   * `blink`·`phase2`와 같은 이유로 optional이다 — `run.ts`의 `makeCat`은
+   * 채우지 않는다.
+   */
+  finalPhase?: {
+    stage: "channel" | "open";
+    remainMs: number;
+    totalMs: number;
+    preHp: Map<string, number>;
+  } | null;
 }
 
 export type Board = (Cat | null)[];

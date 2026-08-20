@@ -650,8 +650,11 @@ console.log("회피 동작 검사\n");
     `${sw.ok}/${sw.checked}`,
   );
 
-  // creep: 서리귀(11) phase2 패턴 [hearth, quake, hearth, creep] — 문턱 idx3(=인덱스3)이 creep.
-  const cr = forceHazard(11, 3, 0.39, (boss) => {
+  // creep: 서리귀(11) phase2 패턴 [seize, creep, hearth] — 문턱 idx4(=인덱스1, 4%3)이 creep.
+  // idx3(=인덱스0)은 seize다 — seize는 상주 장판을 안 남기므로 hazardsActive
+  // 검사에 안 맞고(장판 없이도 위험은 있지만, 여기서 재려는 건 "특정 보스의
+  // telegraph가 아닌 별도 배열"뿐이라 creep으로 그대로 잰다).
+  const cr = forceHazard(11, 4, 0.24, (boss) => {
     boss.phase2 = true;
   });
   check(

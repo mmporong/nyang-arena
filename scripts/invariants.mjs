@@ -119,6 +119,22 @@ function check(s, where) {
     // 극성(polarity)의 두 번째 동시 예고도 같은 이유로 검사한다.
     if (!c.alive && c.telegraph2) fail("죽었는데 예고2(극성)가 남아 있다", `${where} ${who}`);
     if (!c.alive && c.blink) fail("죽었는데 blink가 남아 있다", `${where} ${who}`);
+    /**
+     * US-403(표식)·US-404(최종 국면) 잔존 검사.
+     *
+     * 표식(`seized`)은 아군에게, 최종 국면(`finalPhase`)은 보스에게만 붙는
+     * 상태다. 죽으면 그 역할이 끝나야 한다 — `battle.ts`의 tickEffects·
+     * fireTelegraph seize 분기·stepBattle의 매 스텝 짝 확인이 이걸 보장하는
+     * 코드고, 여기는 그 보장이 실제로 지켜지는지 300판·수십만 스텝으로 확인한다.
+     */
+    if (!c.alive && c.seized) fail("죽었는데 표식(seize)이 남아 있다", `${where} ${who}`);
+    if (!c.alive && c.finalPhase) fail("죽었는데 최종 국면(finalPhase)이 남아 있다", `${where} ${who}`);
+    // 전투 밖에서는 둘 다 있어서는 안 된다 — 표식은 아군이 웨이브를 넘어
+    // 사는 몸이라 흘리면 다음 전투까지 새고, finalPhase는 게임 전체 1회
+    // 연출이라 살아 있는 채로 전투를 나가면 다음 화면에서도 어두워진 채
+    // 남는다.
+    if (s.phase !== "battle" && c.seized) fail("전투 밖에 표식(seize)이 남았다", `${where} ${who}`);
+    if (s.phase !== "battle" && c.finalPhase) fail("전투 밖에 최종 국면(finalPhase)이 남았다", `${where} ${who}`);
 
     if (!finite(c.fx) || !finite(c.fy)) fail("좌표가 유한하지 않다", `${where} ${who} (${c.fx},${c.fy})`);
     else if (c.fy < -1 || c.fy > BOARD_ROWS || c.fx < -1 || c.fx > BOARD_COLS * 2 + 2) {
@@ -207,7 +223,7 @@ for (let seed = 1; seed <= RUNS; seed++) {
   const { bossForIndex } = await import("../src/game/bosses.ts");
   const { BOSSES_PER_STAGE } = await import("../src/game/map.ts");
   // 테마 작성 시점의 보스 조합. 의도적으로 조합을 바꿨다면 이 스냅도 갱신할 것.
-  const SNAP = { 1: [9, 10], 2: [9, 11] };
+  const SNAP = { 1: [9, 10], 2: [9, 11], 3: [10, 11] };
   for (const [stageStr, want] of Object.entries(SNAP)) {
     const stage = Number(stageStr);
     if (!stageTheme(stage).backdropScene) continue; // 강제 씬이 없으면 무관
