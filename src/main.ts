@@ -1,4 +1,5 @@
-import { clearBattleFx, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
+import { clearBattleFx, dualChoiceActive, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
+import { BALANCE } from "./game/balance.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
 import {
   mapNodeRects,
@@ -6,6 +7,7 @@ import {
   render,
   rerollRect,
   spawnBuyTween,
+  splitButton,
   type DragState,
 } from "./game/render.ts";
 import {
@@ -21,7 +23,7 @@ import {
   type RunState,
 } from "./game/run.ts";
 import { openLanes } from "./game/map.ts";
-import { cellToField } from "./game/types.ts";
+import { cellToField, type Intervention } from "./game/types.ts";
 import { loadSprites } from "./game/sprites.ts";
 import { loadIcons } from "./game/icons.ts";
 import { playSting, setBed, toggleMute, unlockAudio } from "./game/audio.ts";
@@ -318,7 +320,19 @@ canvas.addEventListener("pointerdown", (e) => {
     if (state.phase === "battle") {
       // 누르는 즉시 들어간다. 뗄 때까지 기다릴 이유가 없어졌다 — 길게 누르기가
       // 뜻하던 것(뭉침)이 사라졌고, 취약 창에서는 연타가 곧 화력이다.
-      pushIntent();
+      //
+      // **지금은 극성(polarity)만 버튼이 두 짝이다(C1).** `dualChoiceActive`
+      // (battle.ts) 하나가 그 기준이다 — 원버튼 폐기가 검토 중이라, 나중에
+      // 그 게이트가 넓어지면(모든 예고에서 산개/집결을 직접 고르는 쪽으로)
+      // 여기는 손댈 것이 없다. `splitButton`이 render.ts와 같은 값을 내므로
+      // 그림과 히트테스트가 어긋나지 않는다. 게이트가 닫혀 있으면 예전처럼
+      // `act` 하나뿐.
+      if (dualChoiceActive(state)) {
+        const [left] = splitButton(layout.button);
+        pushIntent(x < left.x + left.w ? "dodge" : "gather", true);
+      } else {
+        pushIntent("act");
+      }
       return;
     }
     onPrimaryAction();
@@ -448,7 +462,7 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 /* ------------------------------------------------------------------ */
 
 /**
- * 개입 키도 **하나**다. 버튼과 완전히 같은 일을 한다.
+ * 개입 키는 평소 **하나**다. 버튼과 완전히 같은 일을 한다.
  *
  * 전에는 Space가 흩어짐, Shift가 뭉침이었다. 조작을 둘로 가른 것은 무엇을
  * 할지를 사람이 고르게 하려는 설계였는데, 1.2초짜리 예고 안에서 **장판 색을
@@ -459,17 +473,40 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
  * 거기서 또 한 번 고르면 브라우저와 헤드리스 시뮬이 갈라진다 — 이 게임의
  * 모든 수치가 둘이 같은 코드를 돈다는 전제 위에 있다.
  *
- *   Space · 버튼   회피/산개/집결 (예고면 피하거나 모이고, 취약 창이면 약점 공격)
- *   1 2 3          카드 구매 · R 다시 뽑기 · Enter 다음 단계
+ * **지금은 극성(polarity)에서만 예외로 키가 둘이다(C1) — `dualChoiceActive`
+ * (battle.ts) 하나가 그 기준이다.** 반반 장판은 흩어짐이 아니라 "어느
+ * 반쪽으로 가는가"를 사람이 정해야 하는데, 자동은 정의상 그걸 못 고른다
+ * (어느 쪽이 급한지는 판 상황이 아니라 취향·팀 배치가 정한다). 그래도
+ * 여전히 손가락 하나, 눈치 하나 — 새로 배울 것은 "지금 두 갈래 상황이다"와
+ * "G가 반대쪽이다" 뿐이다. **G는 게이트가 닫혀 있을 때 Space·버튼과 똑같이
+ * act를 넣는다** — 눌러도 손해가 없으므로 몰라도 되는 키다.
+ *
+ * **원버튼 폐기가 검토 중이다.** `dualChoiceActive`가 넓어지면(모든 예고에서
+ * 산개/집결을 직접 고르는 쪽으로) Space·G의 분기는 그대로 두고 게이트
+ * 함수만 고치면 된다 — 여기 두 케이스가 이미 그 조건 하나만 본다.
+ *
+ *   Space           회피/산개 (게이트가 닫혀 있으면 예고 자동 대응 · 취약 창이면 약점 공격)
+ *   G               집결 (게이트가 열려 있을 때만 산개와 갈라진다 · 닫혀 있으면 Space와 동일)
+ *   1 2 3           카드 구매 · R 다시 뽑기 · Enter 다음 단계
  */
-function pushIntent(): void {
+/**
+ * `dual` — 이 입력이 극성(polarity) 같은 두 갈래 게이트가 열린 동안 사람이
+ * 직접 고른 것이라는 표시(`Intervention.dual`, types.ts). `polarityChoices`
+ * 부검 카운터가 **넣는 이 순간**의 게이트 상태를 그대로 들고 가도록 큐에
+ * 실어 보낸다 — 소비되는 시점에 다시 물으면 쿨다운에 막혀 늦게 소비될 때
+ * 예고가 이미 꺼져 있어 분명히 골랐는데도 안 세어진다.
+ */
+function pushIntent(kind: Intervention["kind"] = "act", dual = false): void {
   if (state.phase !== "battle") return;
   markIntervention();
-  state.pending.push({ kind: "act" });
+  state.pending.push(kind === "dodge" || kind === "gather" ? { kind, dual } : { kind });
 }
 
 window.addEventListener("keydown", (e) => {
-  if (e.repeat && e.code !== "Space") return;
+  // 연타를 그대로 받는 것은 취약 창(연타가 곧 화력) 때문이다. G도 같은
+  // 이유로 반복을 받는다 — 안 받으면 극성에서 산개(Space)만 연타되고
+  // 집결(G)은 꾹 눌러도 한 번만 나가는 비대칭이 생긴다.
+  if (e.repeat && e.code !== "Space" && e.code !== "KeyG") return;
   unlockAudio();
 
   // 음소거는 페이즈 잠금 위에 있다. 탭 쪽과 같은 이유다.
@@ -483,7 +520,15 @@ window.addEventListener("keydown", (e) => {
     case "Space":
       e.preventDefault();
       // 취약 창에는 연타가 곧 화력이라 자동 반복도 그대로 받는다.
-      pushIntent();
+      if (dualChoiceActive(state)) pushIntent("dodge", true);
+      else pushIntent("act");
+      return;
+    case "KeyG":
+      e.preventDefault();
+      // 게이트가 닫혀 있으면 버튼·Space와 완전히 같은 일(act)을 한다 — 몰라도
+      // 손해가 없는 키여야 한다.
+      if (dualChoiceActive(state)) pushIntent("gather", true);
+      else pushIntent("act");
       return;
     case "Enter":
       if (state.phase !== "battle") onPrimaryAction();
@@ -584,7 +629,13 @@ function frame(now: number): void {
   }
   const dt = last === 0 ? 16 : Math.min(100, now - last);
   last = now;
-  stepBattle(state, dt);
+  /**
+   * 화면 체감용 배속(`BALANCE.battleSpeed`)은 **여기, 실시간 dt에만** 곱한다.
+   * `scripts/`의 헤드리스 하네스는 `stepBattle(s, 100)`을 직접 부르므로 이
+   * 곱셈을 거치지 않는다 — 그래서 배속을 바꿔도 sim·invariants 수치는
+   * 그대로다. 이건 밸런스가 아니라 표현이라는 근거가 바로 이 분리다.
+   */
+  stepBattle(state, dt * BALANCE.battleSpeed);
   setBed(musicFor(state));
   render(ctx!, layout, state, drag, hoverCell);
   requestAnimationFrame(frame);

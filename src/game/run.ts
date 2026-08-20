@@ -153,6 +153,15 @@ export interface RunState {
    */
   vulnOverlapSeen: number;
   vulnOverlapDodged: number;
+  /**
+   * 극성(polarity)에서 플레이어가 회피 대신 **집결을 직접 골랐던** 횟수(C1).
+   *
+   * 자동(`act`)은 극성을 늘 산개로 근사하므로 이 카운터를 안 늘린다 — 화면·
+   * 키보드가 `dodge`·`gather`를 직접 큐에 넣을 때만 는다(`resolveIntent`).
+   * 0보다 크다는 것 자체가 "수동 선택이 실제로 쓰였다"는 증거이고, 그
+   * 전후로 `telegraphsEaten`이 얼마나 갈리는지를 견줘 수동 선택의 값을 잰다.
+   */
+  polarityChoices: number;
 
   /**
    * 여정 지도.
@@ -798,6 +807,7 @@ export function newRun(seed?: number): RunState {
     telegraphsEaten: 0,
     vulnOverlapSeen: 0,
     vulnOverlapDodged: 0,
+    polarityChoices: 0,
     map: makeStage(1, runSeed),
     step: 0,
     nodeKind: null,

@@ -49,14 +49,35 @@ export type Side = "ally" | "enemy";
  * 재는데, 그러려면 정책이 직접 종류를 지정할 수 있어야 한다. 게임 화면에서는
  * 안 쓰인다.
  */
+/**
+ * `dual` — 극성(polarity) 같은 두 갈래 게이트(`dualChoiceActive`, battle.ts)
+ * 가 **열려 있는 동안 사람이 직접** 이 의도를 큐에 넣었다는 표시.
+ *
+ * `polarityChoices` 부검 카운터가 "몇 번 소비됐나"가 아니라 "몇 번 골랐나"를
+ * 재려면, 게이트가 열려 있었는지를 **넣는 순간**(main.ts) 물어야 한다 —
+ * 소비 시점(`stepBattle`이 큐에서 꺼내는 순간)에 다시 물으면 그 사이 예고가
+ * 이미 꺼져 있을 수 있어(쿨다운에 막혀 늦게 소비될 때) 분명히 골랐는데도
+ * 안 세어진다(실측: seed 4에서 입력 1회가 +0으로 셌다). 그래서 이 비트를
+ * `Intervention` 자체에 실어 큐를 타고 그대로 넘어가게 한다. 측정 봇
+ * (`bot-policy.mjs`)이 직접 넣는 dodge/gather는 **이 비트를 안 채운다** —
+ * 사람이 고른 것만 세어야 하므로.
+ */
 export type Intervention =
   | { kind: "act" }
-  | { kind: "dodge" }
-  | { kind: "gather" }
+  | { kind: "dodge"; dual?: boolean }
+  | { kind: "gather"; dual?: boolean }
   | { kind: "strike" };
 
-/** 보스 광역기의 예고 모양. 터지기 전에 화면에 그려진다. */
-export type TelegraphShape = "circle" | "line" | "cone";
+/**
+ * 보스 광역기의 예고 모양. 터지기 전에 화면에 그려진다.
+ *
+ * `half` — 판을 좌/우로 가르는 절반. **극성(polarity)** 전용이다. 원형·직선·
+ * 부채꼴은 전부 "중심에서 거리·각도"로 안팎을 가르는데, 절반은 그 계산이
+ * 의미가 없다(경계선까지 거리는 무한대로 가도 안이다). 그래서 `fx`를 경계
+ * 좌표로, `dirX`의 부호를 "안쪽이 어느 방향인가"로 재활용하고 `fy`·`dirY`·
+ * `arg`·`reach`는 쓰지 않는다 — `inTelegraph`가 다른 모양보다 먼저 갈라낸다.
+ */
+export type TelegraphShape = "circle" | "line" | "cone" | "half";
 
 /**
  * 예고가 요구하는 것.
@@ -88,6 +109,35 @@ export interface Telegraph {
   fuse: number;
   /** 예고 전체 길이(ms). 렌더가 차오르는 정도를 계산한다 */
   fuseMax: number;
+  /**
+   * 터진 뒤 사라지지 않고 `CreepZone`으로 눌러앉아야 하는가. **creep 패턴만**
+   * 참이다. `Telegraph`에 이 한 비트만 얹는 이유: 발동 판정(`fireTelegraph`)이
+   * "이 예고가 creep이었는가"를 알아야 하는데, 패턴 이름은 `makeTelegraph`
+   * 안에서만 살고 만들어진 `Telegraph`엔 안 남기 때문이다. optional이고
+   * 기본은 없음(=false)이라 기존 예고 생성 코드는 한 곳도 안 건드린다.
+   */
+  resident?: boolean;
+}
+
+/**
+ * 성장형 장판(creep) — 발동 후에도 사라지지 않고 판 위에 눌러앉는 예고.
+ *
+ * `Telegraph`를 그대로 확장한다. shape·mode·fx·fy·arg는 "지금 이 순간의
+ * 원형 장판"으로 기존 판정·렌더(`inTelegraph`·`drawTelegraphs`)를 한 톨도
+ * 바꾸지 않고 그대로 재사용하기 위해서다 — 다른 점은 **꺼지지 않는다**는
+ * 것뿐이고, 꺼지지 않게 만드는 상태만 여기 얹는다.
+ *
+ * `fuse`는 "터지기까지 남은 시간"이 아니라 **다음 성장 틱까지 남은 시간**으로
+ * 뜻이 바뀐다 — 값이 0에 닿으면 터지는 대신 자라난다. 렌더의 "차오르는 정도"
+ * 계산(`fuseMax` 대비 `fuse`)은 그대로 맥동 애니메이션으로 재활용된다.
+ */
+export interface CreepZone extends Telegraph {
+  /** 아무도 없었던 연속 시간(ms). `CREEP_IDLE_DESPAWN_MS`에 닿으면 소멸한다. */
+  idleMs: number;
+  /** 반경 성장 단계. `CREEP_RADIUS_STEPS`의 인덱스이고 배열 끝에서 멈춘다. */
+  stepIdx: number;
+  /** 틱마다 점유 중인 아군에게 주는 고정 피해. 스폰 시점 보스 공격력으로 정해진다. */
+  tickDamage: number;
 }
 
 /** 근접은 붙어야 때리고, 원거리는 제자리에서 쏜다. */
@@ -262,6 +312,19 @@ export interface Cat {
   radius: number;
   /** 예고 중인 광역기. 보스만 쓴다. */
   telegraph: Telegraph | null;
+  /**
+   * 두 번째 동시 예고. **극성(polarity)에서만** 쓴다.
+   *
+   * `telegraph`는 계속 "보스가 지금 거는 예고 하나"를 뜻하고(회피 자동판단
+   * `resolveIntent`가 이걸 찾아 산개로 처리한다), 극성만 예외로 동시에 두
+   * 존(흩어짐 반쪽·모임 반쪽)을 걸어야 한다. 배열로 일반화하는 대신 필드
+   * 하나를 더 두는 이유: `state.enemy`를 도는 자리가 battle.ts·render.ts에
+   * 십수 군데라 `telegraph: Telegraph[]`로 바꾸면 전부 고쳐야 하는데, 실제로
+   * 동시에 두 개 이상 뜨는 예고는 지금 이 패턴 하나뿐이다. `run.ts`의
+   * `makeCat`은 이 필드를 채우지 않으므로(이 작업의 담당 파일이 아니다)
+   * optional이고, 안 채워진 값은 `null`과 같다.
+   */
+  telegraph2?: Telegraph | null;
   /** 다음에 발동할 체력 문턱의 인덱스. 보스만 쓴다. */
   thresholdIdx: number;
   /**

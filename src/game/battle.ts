@@ -1,6 +1,19 @@
 import { BALANCE } from "./balance.ts";
-import { BOSS_ANCHORS, BOSS_BREEDS, BOSS_THRESHOLDS, bossKit, TELEGRAPH_FUSE_MS, type BossKit } from "./bosses.ts";
-import { rng } from "./rng.ts";
+import {
+  BOSS_ANCHORS,
+  BOSS_BREEDS,
+  BOSS_THRESHOLDS,
+  bossKit,
+  CREEP_DMG_MUL,
+  CREEP_IDLE_DESPAWN_MS,
+  CREEP_RADIUS_STEPS,
+  CREEP_TICK_MS,
+  SWEEP_DMG_MUL,
+  SWEEP_FUSE_MS,
+  TELEGRAPH_FUSE_MS,
+  type BossKit,
+} from "./bosses.ts";
+import { mixSeed, rng } from "./rng.ts";
 import {
   BOARD_COLS,
   BOARD_ROWS,
@@ -13,6 +26,7 @@ import {
   MANA_MAX,
   type Cat,
   type ClassKind,
+  type CreepZone,
   type Intervention,
   type Side,
   type Telegraph,
@@ -192,6 +206,19 @@ export interface Fx {
 export const fxs: Fx[] = [];
 
 /**
+ * 상주 장판(creep). 발동 후에도 사라지지 않는 예고 하나당 원소 하나다.
+ *
+ * `fxs`·`damagePops`·`shots`와 같은 모듈 전역 배열이지만 **연출이 아니라
+ * 판정 상태다** — 피해·성장이 이 배열의 원소를 직접 읽고 고친다. 그래서
+ * 저 셋과 달리 아무 데서나 비워도 되는 게 아니라, **전투가 끝나는 바로 그
+ * 순간**(`stepBattle`의 두 `finishWave` 호출 지점) 명시적으로 비운다 —
+ * "상주 장판이 전투 종료 후 남지 않는다"를 invariants가 그 즉시 검사할 수
+ * 있어야 하기 때문이다. `clearBattleFx`에도 넣어 두는 것은 전체 런 재시작
+ * (다시 도전) 경로에 대한 이중 안전장치일 뿐, 주된 보장은 아니다.
+ */
+export const creepZones: CreepZone[] = [];
+
+/**
  * 연출 큐를 전부 비운다. 새 런을 시작할 때 부른다.
  *
  * 이 셋은 모듈 전역이라 런을 넘어 살아남는다. 예전에는 재시작 경로가
@@ -202,6 +229,8 @@ export function clearBattleFx(): void {
   fxs.length = 0;
   damagePops.length = 0;
   shots.length = 0;
+  creepZones.length = 0;
+  clearSweepQueue();
 }
 
 function pushFx(f: Omit<Fx, "maxLife"> & { maxLife?: number }): void {
@@ -380,6 +409,9 @@ function damage(target: Cat, amount: number, crit: boolean): void {
      * 죽었을 때 반쯤 사라진 채로 화면에 얼어붙는다.
      */
     target.telegraph = null;
+    // 극성(polarity)의 두 번째 동시 예고도 같은 이유로 지운다 — 안 지우면
+    // 죽은 보스 밑에 반쪽 장판이 남는다.
+    target.telegraph2 = null;
     target.blink = null;
     // 저격수(미니 보스)는 뺀다 — 확장 링 3겹·화면 흔들림은 진짜 레이드 보스의
     // 처치에만 어울리는 무게다.
@@ -793,6 +825,28 @@ function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | nu
   const onBoard = (fx: number, fy: number) =>
     fy >= -0.3 && fy <= BOARD_ROWS - 1 + 0.3 && fx >= -0.3 && fx <= FIELD_MAX_FX + 0.3;
 
+  /**
+   * 절반(half) 장판은 고리 탐색 대신 **경계를 최단 거리로 넘는 좌표를 직접
+   * 계산한다.** 아래 고리 탐색의 상한은 반경 4.95칸(ring 9 × 0.55)인데,
+   * 절반 장판은 판 전체(`FIELD_MAX_FX`)를 가르는 경계라 위험 쪽 깊숙이 선
+   * 고양이가 넘어야 할 거리가 그보다 클 수 있다 — 실측(리뷰 (f))으로 위험
+   * 반쪽이 아군 홈 쪽일 때 산개 성공률이 0%였다. 방향(`dirX` 부호)이 이미
+   * 정해져 있으니 거리와 무관하게 경계 바로 너머 한 점으로 곧장 갈 수 있다
+   * — `doGather`가 gather 반쪽을 넘을 때 쓰는 것과 같은 계산이다. 그 점이
+   * 다른 장판(creep 등)과 겹쳐 다시 위험하면 아래 고리 탐색으로 넘어간다.
+   */
+  for (const z of zones) {
+    if (z.shape !== "half") continue;
+    // 이 반쪽이 실제로 이 고양이를 위협할 때만 지름길을 쓴다. 가드가 없으면
+    // 고양이가 이미 안전한 반쪽에 서 있어도(위협은 creep/sweep 등 다른
+    // 장판인데) 무관한 half 경계로 원거리 순간이동을 시켜버린다 — 진짜
+    // 위협에 맞춘 고리 탐색을 건너뛰고 엉뚱한 자리로 보내는 셈이다.
+    if (!inTelegraph(z, cat.fx, cat.fy, BALANCE.telegraphBodyPad)) continue;
+    const fx = z.dirX >= 0 ? z.fx - DODGE_MARGIN : z.fx + DODGE_MARGIN;
+    const fy = cat.fy;
+    if (onBoard(fx, fy) && !risky(fx, fy)) return { fx, fy };
+  }
+
   for (let ring = 1; ring <= 9; ring++) {
     const r = ring * 0.55;
     for (let a = 0; a < 12; a++) {
@@ -849,10 +903,26 @@ function doStrike(state: RunState): boolean {
  *
  * 흩어짐과 정확히 반대 동작이다. 붉은 장판에 이걸 쓰면 위험 한가운데로
  * 모이므로, 어느 장판인지 읽지 못하면 벌을 받는다.
+ *
+ * **`mode`로 걸러야 한다.** 극성(polarity)에서는 avoid 반쪽이 `telegraph`
+ * (주 필드)를 차지하고 gather 원은 `telegraph2`에 담긴다 — `e.telegraph`만
+ * 보면 극성일 때 늘 avoid 반쪽을 "모일 자리"로 착각해 아군을 위험 한가운데로
+ * 끌고 간다. 일반 gather 패턴(예: hearth)은 `telegraph`가 이미 gather이므로
+ * 그대로 걸린다.
+ *
+ * **gather 장판은 항상 원형(circle)이다.** 극성의 gather 반쪽도 예전엔 절반
+ * (half) 모양이어서 여기 전용 분기가 있었는데, 그 절반이 avoid의 정확한
+ * 여집합이라 "avoid 밖으로 나가기"와 "gather 안으로 들어가기"가 같은
+ * 목적지를 가리켰다 — 산개·집결·자동 세 정책이 항상 같은 결과를 냈다(리뷰
+ * (d) 실측). 지금은 gather를 안전 반쪽 한가운데의 작은 원으로 만들어서
+ * (`makeTelegraph`의 polarity 분기) 항상 이 원형 경로 하나만 탄다.
  */
 function doGather(state: RunState): boolean {
   const zones: Telegraph[] = [];
-  for (const e of state.enemy) if (e?.telegraph) zones.push(e.telegraph);
+  for (const e of state.enemy) {
+    if (e?.telegraph?.mode === "gather") zones.push(e.telegraph);
+    if (e?.telegraph2?.mode === "gather") zones.push(e.telegraph2);
+  }
   const target = zones[0];
   if (!target) return false;
 
@@ -955,6 +1025,83 @@ function tickDashes(cats: Cat[], dt: number): void {
 }
 
 /**
+ * 지금 판 위에 있는 위험 전부 — 보스 telegraph·telegraph2 ∪ 상주 장판(creep)
+ * ∪ 순차 스윕(sweep) 대기열.
+ *
+ * **"위험이 있는가"를 묻는 자리는 전부 이거 하나만 써야 한다.** creep과
+ * sweep은 `state.enemy[].telegraph`에 안 산다 — creep은 발동 뒤 독립된
+ * 장판으로 눌러앉고(`creepZones`), sweep은 문턱 하나가 5행을 예약해 자기
+ * 큐(`sweepZones`)로 돈다. `s.enemy.some(c => c?.telegraph)`만 보는 사본이
+ * 하나라도 있으면 그 사본은 creep·sweep이 떠 있는 동안 "위험 없음"으로
+ * 잘못 읽는다 — 그 사본이 봇이면 안 피하고, 그 사본이 측정 하네스면
+ * "게임이 어려워졌다"와 "봇이 눈이 멀었다"를 구분할 수 없게 된다(2차 반려
+ * 진단). `scripts/`의 각 하네스·`render.ts`의 버튼 활성 판정이 전부 이
+ * 함수를 부른다.
+ */
+export function hazardZones(state: RunState): Telegraph[] {
+  const zones: Telegraph[] = [];
+  for (const c of state.enemy) {
+    if (c?.telegraph) zones.push(c.telegraph);
+    if (c?.telegraph2) zones.push(c.telegraph2);
+  }
+  zones.push(...creepZones, ...sweepZones);
+  return zones;
+}
+
+/** `hazardZones`가 하나라도 있는가. 봇·하네스가 "지금 반응할 게 있나"를 묻는 자리. */
+export function hazardsActive(state: RunState): boolean {
+  return hazardZones(state).length > 0;
+}
+
+/**
+ * 지금 회피/집결을 눌러 실제로 값을 볼 수 있는가 — **차지가 0이어도 참일 수
+ * 있다.** 순차 스윕(sweep)의 두 번째 파동은 첫 파동에서 이미 차지를 냈으면
+ * (`sweepBurstCharged`) 차지 없이도 공짜로 넘어간다("개입 1회로 연쇄
+ * 전체를 넘긴다", 리뷰 (ㄷ)) — `stepBattle`의 소비 지점이 그 예외를 안다.
+ *
+ * **화면(render.ts의 버튼 활성 판정)과 측정 하네스(bot-policy.mjs 등)가
+ * 전부 이 함수 하나로 "지금 눌러야 하는가"를 물어야 한다.** `state.
+ * dodgeCharges > 0`만 보는 사본이 하나라도 남으면, 두 번째 파동이 뜬
+ * 순간 버튼이 "전투 중"으로 죽어 보이거나(사람이 안 누른다) 봇이 아예
+ * 큐에 안 넣어서(실측: 봇이 이 사본을 쓰는 채로는 SWEEP_DMG_MUL을 1.0으로
+ * 되돌린 뒤 sim 중앙값이 10에서 안 올랐다) `stepBattle`의 무료 통로가
+ * 있으나 마나가 된다.
+ */
+export function dodgeUsable(state: RunState): boolean {
+  return state.dodgeCharges > 0 || (sweepZones.length > 0 && sweepBurstCharged);
+}
+
+/**
+ * 극성(polarity)이 지금 판 위에 떠 있는가.
+ *
+ * `telegraph2`가 있는 예고는 극성뿐이다 — `assignTelegraph`가 두 필드를 항상
+ * 같이 채우고 같이 비우므로 이 필드 하나로 충분하다. 화면(버튼·키보드)과
+ * `resolveIntent`가 "지금 버튼을 가를지"를 같은 기준으로 물어야 어긋나지
+ * 않으므로 여기서 한 번만 정의하고 내보낸다.
+ */
+export function polarityActive(state: RunState): boolean {
+  return state.enemy.some((c) => c?.alive && c.telegraph2);
+}
+
+/**
+ * 버튼을 산개/집결 두 갈래로 가를지 정하는 **단일 게이트**.
+ *
+ * 지금은 극성(polarity)일 때만 참이다 — 반반 장판은 어느 쪽으로 가도 판의
+ * 절반은 위험해서 자동 판단이 정의상 불가능한 유일한 경우이기 때문이다.
+ *
+ * **원버튼 폐기가 검토 중이다.** 모든 예고에서 산개/집결을 직접 고르게
+ * 하기로 정해지면 이 함수 하나만(예: `state.enemy.some((c) => c?.alive &&
+ * c.telegraph)`로) 바꾸면 된다 — 화면(render.ts의 버튼 분할·main.ts의
+ * 클릭·키 라우팅)과 `resolveIntent`의 부검 카운터가 전부 이 함수 하나만
+ * 보고 있어서, 그 순간 다른 곳을 손댈 필요가 없다. `polarityActive`를
+ * 그대로 쓰지 않고 감싸는 이유가 이것이다 — 게이트의 조건과 "극성이란
+ * 무엇인가"는 지금은 같은 말이지만 앞으로 갈라질 수 있는 별개의 질문이다.
+ */
+export function dualChoiceActive(state: RunState): boolean {
+  return polarityActive(state);
+}
+
+/**
  * 버튼 하나가 지금 무엇을 해야 하는지 정한다.
  *
  * 화면은 `act` 하나만 보낸다. 무엇을 할지 사람이 1.2초 안에 고르게 하는 대신
@@ -967,7 +1114,12 @@ function tickDashes(cats: Cat[], dt: number): void {
  *
  * `dodge`·`gather`·`strike`를 직접 지정한 것은 그대로 통과시킨다. 측정
  * 스크립트가 "늘 흩어지기만", "거꾸로 읽기" 같은 나쁜 정책을 일부러 돌려
- * 개입의 값을 재는 데 쓴다.
+ * 개입의 값을 재는 데 쓴다 — **그리고 극성일 때 화면·키보드도 이 경로로
+ * 산개/집결을 직접 박아 넣는다(C1).** `act`만 아래에서 산개로 근사한다:
+ * `doDodge`는 avoid 반쪽(`telegraph`)만 피하고 `doGather`는 gather
+ * 반쪽(`mode==="gather"`인 쪽, 극성이면 `telegraph2`)만 노리므로, 사람이
+ * 고른 대로 정확히 다른 동작이 나간다. 여기서 또 무엇을 할지 고치면
+ * 화면이 이미 고른 것을 뒤집는 꼴이라 손대지 않는다.
  *
  * **우선순위: 예고가 활성이면 회피/집결이 약점 공격을 이긴다.**
  * `tickBoss`가 취약 창 **후반부**에는 문턱 예고를 허용하므로([2]), 창이
@@ -978,6 +1130,11 @@ function tickDashes(cats: Cat[], dt: number): void {
  * `vulnOverlapDodged`).
  */
 function resolveIntent(state: RunState, intent: Intervention | undefined): Intervention | undefined {
+  // 순수 함수로 둔다. **부검 카운터(`polarityChoices`)를 여기서 늘리지 않는다** —
+  // `stepBattle`이 쿨다운에 막힌 큐 머리를 "strike인지만" 보려고 이 함수를
+  // 스텝마다 다시 부르는데(`locked` 판정), 여기서 부작용을 내면 아직 큐에서
+  // 안 빠져나온 같은 입력이 잠긴 동안 매 스텝 또 세어진다(실측: 입력 1회에
+  // +9). 실제로 소비된(큐에서 빠져나온) 시점에만 `stepBattle`이 직접 센다.
   if (intent?.kind !== "act") return intent;
   const tg = state.enemy.find((c) => c?.telegraph)?.telegraph;
   if (tg) return tg.mode === "gather" ? { kind: "gather" } : { kind: "dodge" };
@@ -987,12 +1144,33 @@ function resolveIntent(state: RunState, intent: Intervention | undefined): Inter
 
 /** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
 function doDodge(state: RunState): boolean {
-  const zones: Telegraph[] = [];
-  for (const e of state.enemy) if (e?.telegraph) zones.push(e.telegraph);
+  const bossZones: Telegraph[] = [];
+  for (const e of state.enemy) if (e?.telegraph) bossZones.push(e.telegraph);
+  // 상주 장판(creep)도 피해야 할 구역이다 — battle.ts만의 별도 배열이라
+  // `state.enemy`를 도는 위 루프엔 안 걸린다. `resolveIntent`는 이미 보스
+  // 예고가 없으면 기본으로 dodge를 고르므로, 여기 넣는 것만으로 "creep만
+  // 떠 있을 때 act를 누르면 빠져나온다"가 공짜로 성립한다.
+  //
+  // 순차 스윕(sweep) 대기열도 같은 이유로 넣는다 — 큐가 도는 동안
+  // `boss.telegraph`는 계속 null이라(`makeTelegraph`의 sweep 분기 참고)
+  // 위 루프엔 절대 안 걸리지만, 실제로 판 위에서 지금 켜져 있는 행은
+  // 회피해야 할 진짜 위험이다.
+  const zones: Telegraph[] = [...bossZones, ...creepZones, ...sweepZones];
   if (zones.length === 0) return false;
 
-  // 남은 도화선. 여럿이면 가장 먼저 터지는 것에 맞춘다.
-  const fuse = Math.min(...zones.map((z) => z.fuse));
+  /**
+   * 남은 도화선. 여럿이면 가장 먼저 터지는 것에 맞춘다.
+   *
+   * **"언제 터지는지"가 있는 예고에서만 뽑는다** — 보스 예고와 sweep 둘 다
+   * `fuse`가 실제 발동까지 남은 시간이다. creep은 다르다: `fuse`가 "다음
+   * 성장 틱까지"라 700ms마다 0 근처로 떨어진다 — 그걸 이 최소값에 섞으면
+   * 진짜 예고를 피하는 중에도 유예가 거의 0이 되어 "제때 못 나갔다"로
+   * 오판된다(도착해도 `moved`가 안 켜진다). creep만 떠 있을 때는 터지는
+   * 시점이 없으므로 "닿을 수 있으면 무조건 시도"가 맞는 규칙이라, creep
+   * 자신의 틱 주기를 넉넉한 유예로 대신 쓴다.
+   */
+  const timedZones = [...bossZones, ...sweepZones];
+  const fuse = timedZones.length > 0 ? Math.min(...timedZones.map((z) => z.fuse)) : CREEP_TICK_MS;
   let moved = false;
   for (const c of allyBodies(state)) {
     // 이미 안전한 자리로 달리는 중이면 다시 세지 않는다.
@@ -1239,8 +1417,14 @@ function separate(cats: Cat[]): void {
  * 밀어내기뿐이라 여기서만 묶는다. 보스는 반경이 있어 중심이 가장자리에 서면
  * 몸이 걸치지만, 보스는 밀리지 않으므로(위의 `aFixed`) 이 함수를 안 탄다.
  */
-/** 판의 오른쪽 끝. `clampToField`와 `safeSpot`이 같은 값을 봐야 한다. */
-const FIELD_MAX_FX = ENEMY_FRONT_FX + BOARD_COLS - 1;
+/**
+ * 판의 오른쪽 끝. `clampToField`와 `safeSpot`이 같은 값을 봐야 한다.
+ *
+ * render.ts도 극성(polarity)의 절반 예고를 그릴 때 같은 값이 필요해
+ * 내보낸다 — 화면의 사각형 경계와 판정의 경계가 다른 수식이면 반드시
+ * 갈린다.
+ */
+export const FIELD_MAX_FX = ENEMY_FRONT_FX + BOARD_COLS - 1;
 
 function clampToField(c: Cat): void {
   const maxX = FIELD_MAX_FX;
@@ -1470,11 +1654,163 @@ function updateBossPhase(boss: Cat, kit: BossKit): void {
  * 인덱스 3)부터 `phase2Patterns`를 그 인덱스 그대로 돌린다. 패턴 배열은
  * 순환표일 뿐 처음부터 봐야 하는 서사가 아니므로 문제가 안 된다.
  */
-function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
+/**
+ * 만들어진 예고. **`secondary`가 있는 건 극성(polarity)뿐이다.**
+ *
+ * `boss.telegraph`(하나)로는 극성의 "동시에 두 존"을 못 담아서, 만드는
+ * 쪽을 쌍으로 돌려주고 붙이는 쪽(`tickBoss`)이 `telegraph`·`telegraph2`에
+ * 나눠 담는다. 나머지 모든 패턴은 `secondary: null`이라 기존 흐름과
+ * 다르지 않다.
+ */
+interface MadeTelegraph {
+  primary: Telegraph;
+  secondary: Telegraph | null;
+}
+
+/**
+ * 극성(polarity) gather 원의 반경(칸).
+ *
+ * 리뷰 권고 범위(1.2~1.5) 안에서 1.3을 골랐다 — 안전 반쪽 한가운데(splitX의
+ * 절반쯤 더 간 자리)까지 모여야 하므로 몸 하나 겨우 들어가는 크기(0.5 이하)면
+ * 여럿이 부대끼다 밀려나고, 반쪽을 거의 다 덮는 크기(2.5 이상)면 다시 "아무
+ * 데나 서 있으면 된다"로 물러나 산개와 구분이 사라진다. `pol-choice.mjs`
+ * 재실측으로 세 정책(산개/집결/자동)이 실제로 갈리는지 확인할 것 — 갈리지
+ * 않으면 이 값을 더 줄여 목적지를 더 좁고 멀게 만드는 것이 1순위 손잡이다.
+ */
+const POLARITY_GATHER_RADIUS = 1.3;
+
+function makeTelegraph(boss: Cat, foes: Cat[], idx: number, tally: RunState): MadeTelegraph | null {
   if (foes.length === 0) return null;
   const kit = bossKit(boss.breed.id);
   const patterns = boss.phase2 === true && kit.phase2Patterns !== undefined ? kit.phase2Patterns : kit.patterns;
   const pattern = patterns[idx % patterns.length]!;
+
+  if (pattern === "creep") {
+    /**
+     * 성장형 장판(파멸의 오마주). 경고 반경이 첫 성장 단계(0.9칸)와 같다 —
+     * 발동하는 순간 바로 그 크기의 원형이 `fireTelegraph`에서 상주 장판으로
+     * 눌러앉기 때문이다(`resident: true`). 조준은 기존 circle과 같은 무게중심.
+     */
+    const c = centroid(foes);
+    return {
+      primary: {
+        shape: "circle",
+        mode: "avoid",
+        fx: c.fx,
+        fy: c.fy,
+        dirX: 0,
+        dirY: 0,
+        arg: CREEP_RADIUS_STEPS[0],
+        reach: 0,
+        fuse: TELEGRAPH_FUSE_MS,
+        fuseMax: TELEGRAPH_FUSE_MS,
+        resident: true,
+      },
+      secondary: null,
+    };
+  }
+
+  if (pattern === "sweep") {
+    /**
+     * 순차 스윕(안전지대 춤의 오마주). 행 0→4가 차례로 켜진다.
+     *
+     * **문턱 하나가 5행을 통째로 예약한다** — `enqueueSweep`이 5행을
+     * `sweepPendingRows`에 한 번에 채우고, 그 뒤로는 `tickSweepQueue`가
+     * `stepBattle`에서 매 스텝 독립적으로 진행한다(`creepZones`와 같은
+     * "모듈 배열 + dt 진행" 전례). 예전엔 문턱 하나가 행 하나만 걸고 "다음은
+     * 몇 행인가"를 보스(`sweepRow`)에 남겨서, 다음 sweep 문턱이 패턴 순환을
+     * 한 바퀴 돌아 다시 걸릴 때까지 이어지지 않았다 — 실측(리뷰 sweep-chain)
+     * 으로 한 보스전에서 행 0·1만, 간격 16초였다. "행이 차례로 켜진다"는
+     * 설계와 달리 사실상 두 번 따로 뜨는 원형 예고에 가까웠다.
+     *
+     * `boss.telegraph`는 여기서 안 채운다(`null` 반환) — 스윕은 이제
+     * `boss.telegraph`가 아니라 `sweepZones`에 산다. 문턱 자체는 그대로
+     * 소비되므로(`tickBoss`의 `thresholdIdx += 1`은 안 건드린다) 보스는 다음
+     * 문턱을 향해 계속 나아가고, 스윕 큐는 그와 무관하게 스스로 다 돈다.
+     */
+    enqueueSweep(boss);
+    return null;
+  }
+
+  if (pattern === "polarity") {
+    /**
+     * 극성(타디우스 오마주). 판을 좌/우로 가른 절반은 회피(`shape: "half"`,
+     * 경계 fx·dirX 부호가 안쪽 방향)해야 하고, 안전한 반쪽 **한가운데의 작은
+     * 원**(`shape: "circle"`)까지 모여야 온전히 산다. 둘 다 같은 도화선으로
+     * 동시에 걸었다가 동시에 터뜨린다(`tickBoss`가 `telegraph2`의 fuse를
+     * `telegraph`에 맞춰 그대로 따라가게 한다).
+     *
+     * **gather 반경은 avoid의 여집합이 되면 안 된다.** 처음엔 gather도
+     * avoid의 정확한 여집합(half)이었다 — 판정상 "avoid 밖으로 나가기"와
+     * "gather 안으로 들어가기"가 완전히 같은 목적지였으므로, 산개·집결·
+     * 자동(act) 세 정책이 전부 같은 결과를 냈다(리뷰 (d) 실측,
+     * `pol-choice.mjs`: 세 정책 모두 100%). 원을 **작게** 만들어도(다음
+     * 시도) 반경으로 고정한 자리는 여전히 "그 반쪽 아무 데나 서 있으면
+     * 되는 산개"의 진부분집합일 뿐이라 관계가 안 바뀐다(리뷰 C2 지적) —
+     * **위치 자체가 산개와 달라야 한다.**
+     *
+     * **원 중심을 팀 무게중심을 안전 반쪽에 사영한 자리로 잡는다.** 팀이
+     * 이미 안전 쪽에 있으면(무게중심이 안전 반쪽) 원이 지금 서 있는 자리
+     * 근처에 생겨 집결이 싸지고, 위험 쪽에 있거나 딱 걸쳐 있으면 원이
+     * 경계 바로 안쪽(`DODGE_MARGIN`)에 생겨 산개(경계만 넘으면 끝)보다
+     * 더 멀리 모이라고 요구한다 — 팀 대형에 따라 "이번엔 산개가 싼가
+     * 집결이 싼가"가 실제로 갈린다.
+     *
+     * **방향은 시드로 결정한다, `rng()`는 안 쓴다.** 예전엔 `idx % 2`였는데,
+     * 무쇠발톱의 `phase2Patterns`(`bosses.ts`)에서 "polarity"가 걸리는 idx는
+     * 항상 3 mod 4(3, 7, 11 …)로 고정이라 `%2`가 매번 같은 값을 냈다 — 실측
+     * 334/334판이 전부 같은 방향(avoid가 오른쪽)이었다(리뷰 B1). `mixSeed`
+     * (rng.ts)로 시드·웨이브·이 문턱의 idx를 섞으면 공유 `rng()` 스트림을
+     * 안 태우고도(다른 계통의 소비 순서에 영향 없이) 판마다, 그리고 한 판
+     * 안에서 극성이 여러 번 걸리면 그때마다 결정적으로 방향이 갈린다.
+     *
+     * 경계는 **아군 보드 절반(fx 2)이 아니라 판 전체의 절반**이다. 근접은
+     * 실제로 붙어 싸우는 동안 fx가 6~9까지 나가므로(sweep의 reach와 같은
+     * 함정), 아군 보드로 좁히면 근접 팀은 늘 한쪽에만 몰려 판단이 사라진다.
+     * `FIELD_MAX_FX`가 판의 오른쪽 끝이라 그 절반이 자연스러운 중앙선이다.
+     */
+    const splitX = FIELD_MAX_FX / 2;
+    const avoidLeft = (mixSeed(mixSeed(tally.seed, tally.wave), idx) & 1) === 0;
+    const avoidHalf: Telegraph = {
+      shape: "half",
+      mode: "avoid",
+      fx: splitX,
+      fy: 0,
+      dirX: avoidLeft ? -1 : 1,
+      dirY: 0,
+      arg: 0,
+      reach: 0,
+      fuse: TELEGRAPH_FUSE_MS,
+      fuseMax: TELEGRAPH_FUSE_MS,
+    };
+
+    // 예고 생성 시점(도화선이 켜지는 순간) 팀 무게중심 → 안전 반쪽으로 사영.
+    const center = centroid(foes);
+    const safeSign = avoidLeft ? 1 : -1; // 안전 반쪽이 있는 방향(avoid의 반대)
+    const boundary = splitX + safeSign * DODGE_MARGIN;
+    const projectedX = safeSign > 0 ? Math.max(center.fx, boundary) : Math.min(center.fx, boundary);
+    // 원이 판을 넘어가지 않게 반경만큼 안쪽으로 눌러 담는다.
+    const gatherFx = Math.max(
+      POLARITY_GATHER_RADIUS,
+      Math.min(FIELD_MAX_FX - POLARITY_GATHER_RADIUS, projectedX),
+    );
+    const gatherFy = Math.max(0, Math.min(BOARD_ROWS - 1, center.fy));
+
+    const gatherCircle: Telegraph = {
+      shape: "circle",
+      mode: "gather",
+      fx: gatherFx,
+      fy: gatherFy,
+      dirX: 0,
+      dirY: 0,
+      arg: POLARITY_GATHER_RADIUS,
+      reach: 0,
+      fuse: TELEGRAPH_FUSE_MS,
+      fuseMax: TELEGRAPH_FUSE_MS,
+    };
+    return { primary: avoidHalf, secondary: gatherCircle };
+  }
+
   const mode: TelegraphMode = pattern === "gather" || pattern === "hearth" ? "gather" : "avoid";
   const shape: TelegraphShape =
     pattern === "gather" || pattern === "stomp" || pattern === "hearth" || pattern === "quake"
@@ -1514,19 +1850,25 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
     const c = centroid(foes);
     const midY = (BOARD_ROWS - 1) / 2;
     return {
-      ...base,
-      fx: c.fx,
-      fy: midY,
-      dirX: 0,
-      dirY: 0,
-      // 화톳불은 모이기와 같은 이유로 넓다 — 모이라고 해 놓고 못 모이면 벌이다.
-      arg: pattern === "hearth" ? 1.9 : 1.5,
-      reach: 0,
+      primary: {
+        ...base,
+        fx: c.fx,
+        fy: midY,
+        dirX: 0,
+        dirY: 0,
+        // 화톳불은 모이기와 같은 이유로 넓다 — 모이라고 해 놓고 못 모이면 벌이다.
+        arg: pattern === "hearth" ? 1.9 : 1.5,
+        reach: 0,
+      },
+      secondary: null,
     };
   }
 
   if (pattern === "stomp") {
-    return { ...base, fx: boss.fx, fy: boss.fy, dirX: 0, dirY: 0, arg: 2.4, reach: 0 };
+    return {
+      primary: { ...base, fx: boss.fx, fy: boss.fy, dirX: 0, dirY: 0, arg: 2.4, reach: 0 },
+      secondary: null,
+    };
   }
 
   if (mode === "gather") {
@@ -1544,20 +1886,26 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
      */
     const GATHER_BIAS = 0.25;
     return {
-      ...base,
-      fx: c.fx + (boss.fx - c.fx) * GATHER_BIAS,
-      fy: c.fy + (boss.fy - c.fy) * GATHER_BIAS,
-      dirX: 0,
-      dirY: 0,
-      // 흩어짐 원형(1.6)보다 넓다. 모이라고 해 놓고 못 모이면 규칙이 아니라 벌이다.
-      arg: 1.9,
-      reach: 0,
+      primary: {
+        ...base,
+        fx: c.fx + (boss.fx - c.fx) * GATHER_BIAS,
+        fy: c.fy + (boss.fy - c.fy) * GATHER_BIAS,
+        dirX: 0,
+        dirY: 0,
+        // 흩어짐 원형(1.6)보다 넓다. 모이라고 해 놓고 못 모이면 규칙이 아니라 벌이다.
+        arg: 1.9,
+        reach: 0,
+      },
+      secondary: null,
     };
   }
 
   if (shape === "circle") {
     const c = centroid(foes);
-    return { ...base, fx: c.fx, fy: c.fy, dirX: 0, dirY: 0, arg: 1.6, reach: 0 };
+    return {
+      primary: { ...base, fx: c.fx, fy: c.fy, dirX: 0, dirY: 0, arg: 1.6, reach: 0 },
+      secondary: null,
+    };
   }
 
   // 직선은 가장 먼 대상을 향해 쏜다 — 뒷줄까지 닿아야 원거리도 위험해진다.
@@ -1570,23 +1918,26 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
   const dy = aim.fy - boss.fy;
   const len = Math.hypot(dx, dy) || 1;
   return {
-    ...base,
-    fx: boss.fx,
-    fy: boss.fy,
-    dirX: dx / len,
-    dirY: dy / len,
-    /**
-     * 직선은 **폭(칸)**, 부채꼴은 **반각(라디안)**이다. 단위가 달라 헷갈리기 쉽다.
-     *
-     * 부채꼴이 0.7rad였다 — 반각 40도면 전체 80도라 보스에서 팀을 향해 부챗살을
-     * 펴면 사실상 전원을 덮는다. 실측으로 6마리 중 5~6마리를 항상 맞혔고,
-     * 그래서 **다른 모든 패턴의 신호를 묻어버렸다.** 대형을 어떻게 잡아도
-     * 부채꼴 한 방이면 같은 결과다.
-     *
-     * 0.35rad(반각 20도, 전체 40도)면 축에서 벗어난 것은 빠져나간다.
-     */
-    arg: shape === "line" ? 0.75 : 0.35,
-    reach: shape === "line" ? 14 : 5.5,
+    primary: {
+      ...base,
+      fx: boss.fx,
+      fy: boss.fy,
+      dirX: dx / len,
+      dirY: dy / len,
+      /**
+       * 직선은 **폭(칸)**, 부채꼴은 **반각(라디안)**이다. 단위가 달라 헷갈리기 쉽다.
+       *
+       * 부채꼴이 0.7rad였다 — 반각 40도면 전체 80도라 보스에서 팀을 향해 부챗살을
+       * 펴면 사실상 전원을 덮는다. 실측으로 6마리 중 5~6마리를 항상 맞혔고,
+       * 그래서 **다른 모든 패턴의 신호를 묻어버렸다.** 대형을 어떻게 잡아도
+       * 부채꼴 한 방이면 같은 결과다.
+       *
+       * 0.35rad(반각 20도, 전체 40도)면 축에서 벗어난 것은 빠져나간다.
+       */
+      arg: shape === "line" ? 0.75 : 0.35,
+      reach: shape === "line" ? 14 : 5.5,
+    },
+    secondary: null,
   };
 }
 
@@ -1596,6 +1947,22 @@ function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
  * 화면과 판정이 같은 말을 한다. 기본 0은 측정 스크립트용(중심점 기준).
  */
 export function inTelegraph(t: Telegraph, fx: number, fy: number, pad = 0): boolean {
+  if (t.shape === "half") {
+    /**
+     * 좌/우 절반(극성 전용). `t.fx`가 경계, `dirX`의 부호가 "안쪽" 방향이다.
+     * 다른 모양처럼 거리·각도로 재는 게 아니라 부호 하나로 끝나서 다른
+     * 분기보다 먼저 걸러낸다.
+     *
+     * 판 전체(`FIELD_MAX_FX`)로 자른다 — **아군 보드(0..4)로 좁히면 안
+     * 된다.** 근접은 실제로 붙어 싸우는 동안 fx가 6~9(적 진영 근처)까지
+     * 나가는데, 거기서 늘 `false`가 나오면 흩어짐이 근접을 절대 못
+     * 잡거나(안 걸린 것으로 읽힘) 모임이 근접을 늘 잘못 잡는다(판 밖이라
+     * 항상 "안에 없음") — 실측으로 sweep(같은 함정)이 근접 팀에서 40시드
+     * 내내 한 번도 안 걸렸다.
+     */
+    if (fx < -0.5 || fx > FIELD_MAX_FX + 0.5) return false;
+    return t.dirX >= 0 ? fx >= t.fx - pad : fx <= t.fx + pad;
+  }
   const rx = fx - t.fx;
   const ry = fy - t.fy;
   const d = Math.hypot(rx, ry);
@@ -1658,9 +2025,37 @@ function fireTelegraphHitFx(target: Cat, boss: Cat, hue: string): void {
   pushFx({ kind: "spark", fx: target.fx, fy: target.fy, tx: 0, ty: 0, radius: 0.6, angle: away, life: 260, color: hue });
 }
 
-function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
-  const t = boss.telegraph;
-  if (!t) return;
+/**
+ * 예고 `t`를 터뜨린다. **어느 필드(`telegraph`·`telegraph2`)의 것인지는
+ * 호출부가 정한다** — 극성(polarity)이 동시에 두 존을 터뜨려야 해서
+ * `boss.telegraph`를 직접 읽던 예전 방식으로는 두 번째 존을 못 다뤘다.
+ *
+ * `dmgMul` — 기본 1(보통 예고). `tickSweepQueue`가 `SWEEP_DMG_MUL`을 넘긴다 —
+ * sweep은 한 문턱이 700ms 간격으로 5행을 잇달아 터뜨리는데, 예고 회피 실패의
+ * 기본 피해(`telegraphHit`)는 최대체력 비율이라 한 번만으로도 사실상 즉사라서
+ * (`bosses.ts`의 `SWEEP_DMG_MUL` 주석 참고) 그 배율을 5번 반복하면 자원
+ * (회피 차지 2·쿨다운 1초)이 못 버틴다.
+ *
+ * `countOverlap` — 기본 true. sweep 한 파동은 여러 행(zone)을 **같은
+ * `boss.vulnerableMs` 값으로 한 틱에 몰아서** 터뜨린다(`tickSweepQueue`) —
+ * 취약 창 겹침은 실제로는 "이 파동 동안 한 번" 벌어진 일인데, 행마다
+ * `fireTelegraph`를 부르면 같은 겹침을 행 수만큼(최대 5) 중복으로 센다.
+ * `tickSweepQueue`가 파동의 첫 행에만 true를, 나머지엔 false를 넘겨서
+ * `vulnOverlapSeen`·`vulnOverlapDodged`가 파동당 1회로 clamp되게 한다(두 파동이 한 창에 들면 2 — 5보다 낫지만 완전한 창 단위는 아니다).
+ */
+function fireTelegraph(
+  boss: Cat,
+  foes: Cat[],
+  tally: RunState,
+  t: Telegraph,
+  dmgMul: number = 1,
+  countOverlap: boolean = true,
+): void {
+  // 극성(polarity)은 이 함수가 avoid·gather 반쪽마다 한 번씩, 같은 틱에
+  // 두 번 불린다(tickBoss) — 그래서 극성 하나가 telegraphsSeen을 2 올린다.
+  // "예고 하나 = telegraphsSeen 1"이 다른 패턴과는 맞지만 극성만 어긋나므로,
+  // 부검 화면에서 극성이 유난히 자주 뜬 것처럼 보일 수 있다는 것을 이 숫자를
+  // 읽을 때 감안할 것 — 판정(telegraphsEaten 분모·분자 짝)은 그대로 맞다.
   tally.telegraphsSeen += 1;
   /**
    * 취약 창이 열린 채로 예고가 터지는 순간 — [2]가 만든 상충 지점이다.
@@ -1672,12 +2067,13 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
    * 그때 실제로 몸을 지켰는지를 잰다 — 부검·측정 전용이고 판정에는 관여하지
    * 않는다.
    */
-  const overlapping = boss.vulnerableMs > 0;
+  const overlapping = boss.vulnerableMs > 0 && countOverlap;
   if (overlapping) tally.vulnOverlapSeen += 1;
   const ramp = bossRampFor(tally);
   const frac =
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
-    bossKit(boss.breed.id).power;
+    bossKit(boss.breed.id).power *
+    dmgMul;
   const hue = t.mode === "gather" ? FX_GATHER : FX_DANGER;
 
   /**
@@ -1729,9 +2125,24 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
       damage(f, telegraphHit(f, boss, frac), false);
       fireTelegraphHitFx(f, boss, hue);
     }
-    // 뭉침이 끝나면 곧바로 흩어질 수 있어야 한다. 묶어 두면 다음 원형 예고가
-    // 무게중심을 노려 통째로 맞고, 그러면 모인 것이 벌이 된다.
-    for (const f of foes) f.moveLock = 0;
+    /**
+     * 뭉침이 끝나면 곧바로 흩어질 수 있어야 한다. 묶어 두면 다음 원형 예고가
+     * 무게중심을 노려 통째로 맞고, 그러면 모인 것이 벌이 된다.
+     *
+     * **극성(polarity)의 gather 반쪽에서는 이 리셋을 건너뛴다.** `t`가
+     * `boss.telegraph2`(=이 존의 짝인 avoid 반쪽이 방금 같은 틱에 먼저
+     * 터졌다는 뜻)이면, 전원 리셋이 **avoid 쪽이 붙잡아 둔 유닛의 moveLock도
+     * 같이 지운다** — 실제 피해 판정은 이미 끝난 뒤라 안전하지만(avoid의
+     * fireTelegraph가 이 함수보다 먼저, 리셋 전 좌표로 이미 판정했다), 리셋
+     * 직후 같은 틱 안에서 그 유닛이 걸어 나가 "터지자마자 도로 움직인다"는
+     * 부자연스러운 그림이 된다(측정 스크립트가 이걸 회피 실패로 오인한 적이
+     * 있다). 극성은 애초에 "뭉쳐서 무게중심이 한 점"이 되는 패턴이 아니라
+     * 판 전체에 흩어진 채로 반을 가르는 패턴이라, 원래 리셋의 전제(다음
+     * 원형 예고가 뭉친 무게중심을 노린다)가 성립하지 않는다.
+     */
+    if (t !== boss.telegraph2) {
+      for (const f of foes) f.moveLock = 0;
+    }
   } else {
     let caught = 0;
     for (const f of foes) {
@@ -1747,6 +2158,215 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
     if (!avoided) tally.telegraphsEaten += 1;
     if (overlapping && avoided) tally.vulnOverlapDodged += 1;
   }
+
+  // creep 패턴은 첫 발동을 여느 circle avoid와 똑같이 맞고(위에서 이미
+  // 처리됐다), 그 뒤에 사라지는 대신 상주 장판으로 눌러앉는다.
+  if (t.resident) spawnCreepZone(boss, t);
+}
+
+/**
+ * 상주 장판을 낳는다. `t`의 발동 시점 반경·위치를 그대로 이어받아
+ * `CREEP_RADIUS_STEPS[0]`부터 자라기 시작한다.
+ *
+ * 틱당 피해는 **보스 공격력의 절반을 고정값으로** 굳혀서(`CREEP_DMG_MUL`)
+ * 스폰 시점 한 번만 계산한다 — 보스가 나중에 죽어도(장판은 남을 수 있다)
+ * 피해가 사라진 보스를 다시 참조할 필요가 없다.
+ */
+function spawnCreepZone(boss: Cat, t: Telegraph): void {
+  const zone: CreepZone = {
+    shape: "circle",
+    mode: "avoid",
+    fx: t.fx,
+    fy: t.fy,
+    dirX: 0,
+    dirY: 0,
+    arg: CREEP_RADIUS_STEPS[0],
+    reach: 0,
+    // 다음 성장 틱까지. 렌더가 이 값으로 맥동을 그린다(`fuseMax` 대비 `fuse`).
+    fuse: CREEP_TICK_MS,
+    fuseMax: CREEP_TICK_MS,
+    idleMs: 0,
+    stepIdx: 0,
+    tickDamage: Math.max(1, Math.round(boss.atk * CREEP_DMG_MUL)),
+  };
+  creepZones.push(zone);
+}
+
+/**
+ * 상주 장판을 dt만큼 진행한다. `stepBattle`의 고정 스텝으로만 불러야
+ * 헤드리스 시뮬과 브라우저가 같은 결과를 낸다 — 다른 시간축 상태들과 같은
+ * 규칙이다.
+ *
+ * 무점유 소멸은 **매 프레임** 잰다(1.4초 연속 무점유). 성장/피해는 **틱
+ * 경계에서만** 잰다(700ms마다, 그 순간 점유 중이어야 발동). 둘을 한
+ * 타이머로 합치면 "700ms짜리 창 안에서 잠깐 비었다 다시 찼다"가 소멸로
+ * 오판된다 — 실제 점유는 계속되고 있는데도.
+ */
+function tickCreepZones(allies: Cat[], dt: number): void {
+  for (let i = creepZones.length - 1; i >= 0; i--) {
+    const z = creepZones[i];
+    if (!z) continue;
+    const occupied = allies.some((a) => inTelegraph(z, a.fx, a.fy, BALANCE.telegraphBodyPad));
+
+    if (occupied) z.idleMs = 0;
+    else z.idleMs += dt;
+    if (z.idleMs >= CREEP_IDLE_DESPAWN_MS) {
+      creepZones.splice(i, 1);
+      continue;
+    }
+
+    z.fuse -= dt;
+    if (z.fuse > 0) continue;
+    // 남은 시간을 다음 틱으로 넘기지 않는다 — 다른 고정 스텝 타이머들과
+    // 같은 규칙이고, dt가 700ms를 넘을 일이 없어(SIM_STEP_MS=100) 오차가
+    // 쌓이지 않는다.
+    z.fuse = CREEP_TICK_MS;
+    if (!occupied) continue; // 비어 있으면 자라지도, 때리지도 않는다
+
+    for (const a of allies) {
+      if (!inTelegraph(z, a.fx, a.fy, BALANCE.telegraphBodyPad)) continue;
+      damage(a, z.tickDamage, false);
+      // 장판 중심에서 밀려난 방향으로 튄다. `fireTelegraphHitFx`는 보스
+      // 좌표가 필요해 재사용할 수 없다 — 장판은 발동 뒤 보스와 독립이다.
+      const away = Math.atan2(a.fy - z.fy, a.fx - z.fx);
+      pushFx({ kind: "spark", fx: a.fx, fy: a.fy, tx: 0, ty: 0, radius: 0.6, angle: away, life: 260, color: FX_DANGER });
+    }
+    if (z.stepIdx < CREEP_RADIUS_STEPS.length - 1) {
+      z.stepIdx += 1;
+      z.arg = CREEP_RADIUS_STEPS[z.stepIdx]!;
+      pushFx({ kind: "ring", fx: z.fx, fy: z.fy, tx: 0, ty: 0, radius: z.arg, angle: 0, life: 420, color: FX_DANGER });
+    }
+  }
+}
+
+/**
+ * 순차 스윕(sweep) 대기열. `creepZones`와 같은 전례 — 모듈 전역 배열 + dt 진행.
+ *
+ * **행 0→4 순차 대신 두 파동이다(원본 헤이건의 "안전지대 춤" 문법 — 리뷰
+ * (ㄷ)).** 홀수 행(1·3) 묶음이 한 파동으로 동시에 켜지고, 그게 터지면
+ * 곧바로 짝수 행(0·2·4) 묶음이 다음 파동으로 켜진다. 한 파동 안의 행들은
+ * **같은 도화선을 공유**하므로(`advanceSweepQueue`가 한꺼번에 만든다)
+ * `fuse`/`fuseMax`가 항상 같은 값이라 렌더의 "차오르는 정도"(`fill`)가
+ * 음수가 되는 일이 없다 — 예전(행 하나씩) 설계가 "한 번에 하나만" 담아야
+ * 했던 이유가 이 파동 단위 구조에서는 사라진다.
+ *
+ * **왜 5행 순차를 버렸는가.** 예전 설계(행마다 700ms 간격으로 순차 점멸)는
+ * 한 번의 문턱이 최대 5번의 개별 회피를 요구했는데, `ACT_COOLDOWN_MS`(1초)
+ * ·`dodgeCharges`(보스전당 2회)라는 이 게임의 공용 자원 예산으로는 완벽하게
+ * 반응해도 행마다 매번 새로 피할 수단이 없었다(실측: 하네스 실명을 걷어낸
+ * 뒤에도 sim 중앙값이 회복되지 않았다 — 진짜 난이도였다). 파동을 둘로
+ * 묶으면 문턱 하나가 요구하는 **몸의 이동**은 최대 2회로 줄고, 각 파동의
+ * 도화선을 넉넉히(`SWEEP_FUSE_MS`) 잡으면 1초 쿨다운 뒤에도 다음 파동을
+ * 받을 여유가 남는다.
+ *
+ * **"개입 1회로 연쇄 전체를 넘긴다"는 자원(차지)에서도 그대로다.** 두 파동은
+ * 서로 다른 행을 가르지만(홀수↔짝수) 같은 하나의 "안전지대 춤" 기믹이다 —
+ * 그래서 한 스윕 문턱 안에서 **차지는 첫 회피 한 번만 쓴다**
+ * (`sweepBurstCharged`, `stepBattle`의 소비 지점 참고). 두 번째 파동도
+ * 몸은 다시 옮겨야 하지만(행이 바뀌었으니) 그 대가로 차지를 또 내지 않는다
+ * — 안 그러면 무쇠발톱의 나머지 패턴(quake·gather·cone)과 차지를 다투다
+ * 보스전 하나에서 사실상 못 넘는 문턱이 남는다(실측: 이 예외 없이 SWEEP_
+ * DMG_MUL을 1.0으로 되돌리자 sim 중앙값이 9로 떨어졌다 — 파동 자체는
+ * 이제 잘 피해지는데, 그 두 번째 파동에 쓸 차지가 다른 패턴에 이미
+ * 바닥났던 것이다).
+ */
+export const sweepZones: Telegraph[] = [];
+/** 아직 켜지 않은 파동. 각 원소가 그 파동에 속한 행 번호들이다. */
+const sweepPendingWaves: number[][] = [];
+/** 지금 도는 스윕을 낸 보스. `fireTelegraph`가 피해 계산에 `boss.atk`를 쓴다. */
+let sweepBoss: Cat | null = null;
+/**
+ * 지금 도는 스윕 문턱에서 이미 차지를 한 번 썼는가. `enqueueSweep`(새 문턱)
+ * 에서 `false`로 돌아가고, `stepBattle`이 첫 성공 회피에서 `true`로 올린다
+ * — 그 뒤로는 두 번째 파동을 피해도 차지·쿨다운을 또 안 쓴다. `stepBattle`
+ * 안에서만 읽고 쓰므로 내보내지 않는다.
+ */
+let sweepBurstCharged = false;
+
+/**
+ * 문턱 하나가 파동 두 개(홀수 행 묶음 → 짝수 행 묶음)를 한 번에 예약한다.
+ * 실제로 켜는 것은 `advanceSweepQueue`이고, 이후 진행은 `tickSweepQueue`가
+ * 보스의 다음 판단과 무관하게 스스로 돈다 — 예전엔 문턱 하나가 행 하나만
+ * 걸고 다음 sweep 문턱이 패턴 순환을 한 바퀴 돌아 다시 걸릴 때까지
+ * 기다렸다(실측 16초 간격, 리뷰 sweep-chain).
+ */
+function enqueueSweep(boss: Cat): void {
+  sweepBoss = boss;
+  sweepBurstCharged = false; // 새 문턱 — 이번 스윕은 아직 차지를 안 썼다
+  const odd: number[] = [];
+  const even: number[] = [];
+  for (let row = 0; row < BOARD_ROWS; row++) (row % 2 === 0 ? even : odd).push(row);
+  sweepPendingWaves.length = 0;
+  sweepPendingWaves.push(odd, even);
+  sweepZones.length = 0;
+  advanceSweepQueue();
+}
+
+/** 대기 중인 다음 파동을 켠다. 이미 파동이 떠 있거나 남은 파동이 없으면 아무 일도 안 한다. */
+function advanceSweepQueue(): void {
+  if (sweepZones.length > 0) return;
+  const wave = sweepPendingWaves.shift();
+  if (wave === undefined) return;
+  for (const row of wave) {
+    sweepZones.push({
+      shape: "line",
+      mode: "avoid",
+      fx: -0.5,
+      fy: row,
+      dirX: 1,
+      dirY: 0,
+      // 행 간격이 1칸이라 살짝 넘치게 잡아야 경계에 걸친 몸도 확실히 걸린다.
+      arg: 0.55,
+      // 아군 보드(0..4)만 덮으면 안 된다 — 근접은 실제로 붙어 싸우는 동안
+      // fx가 6~9(적 진영 근처)까지 나간다. 기존 line 패턴과 같은 관례로 판
+      // 전체를 덮는다.
+      reach: FIELD_MAX_FX + 1,
+      fuse: SWEEP_FUSE_MS,
+      fuseMax: SWEEP_FUSE_MS,
+    });
+  }
+}
+
+/**
+ * 스윕 대기열을 dt만큼 진행한다. `tickCreepZones`와 같은 자리(`stepBattle`)
+ * 에서 매 스텝 불린다 — 보스의 `tickBoss` 사이클과 무관하게 스스로 돈다.
+ *
+ * 한 파동에 속한 행들은 도화선을 공유하므로 맨 앞 원소의 `fuse`만 보고
+ * 다 같이 깎는다 — `advanceSweepQueue`가 전부 같은 값으로 만들었으므로
+ * 어느 것을 대표로 봐도 같다. 파동이 터지면(행 전부) `fireTelegraph`를
+ * 그대로 불러 다른 avoid 예고와 판정·연출이 완전히 같고, 곧바로 다음
+ * 파동을 켠다.
+ */
+function tickSweepQueue(allies: Cat[], tally: RunState, dt: number): void {
+  if (sweepZones.length === 0) return;
+  if (!sweepBoss || !sweepBoss.alive) {
+    // 낸 보스가 죽거나 사라지면 큐를 접는다 — 죽은 보스의 공격력을 다시
+    // 참조할 수 없고, 안 그러면 유령 예고가 남는다.
+    clearSweepQueue();
+    return;
+  }
+  for (const z of sweepZones) z.fuse -= dt;
+  if (sweepZones[0]!.fuse > 0) return;
+  // 파동의 첫 행에서만 취약 겹침을 센다 — 나머지 행은 같은 겹침의 중복이다.
+  let firstRow = true;
+  for (const z of sweepZones) {
+    fireTelegraph(sweepBoss, allies, tally, z, SWEEP_DMG_MUL, firstRow);
+    firstRow = false;
+  }
+  sweepZones.length = 0;
+  advanceSweepQueue();
+}
+
+/**
+ * 스윕 대기열을 통째로 비운다. `creepZones.length = 0`과 같은 자리(전투
+ * 종료·재시작)에서 같이 부른다 — invariants가 "전투 밖에는 안 남는다"를
+ * 그 즉시 검사할 수 있어야 한다.
+ */
+function clearSweepQueue(): void {
+  sweepZones.length = 0;
+  sweepPendingWaves.length = 0;
+  sweepBoss = null;
+  sweepBurstCharged = false;
 }
 
 /**
@@ -1832,6 +2452,12 @@ function tickBlink(boss: Cat, dt: number): void {
   }
 }
 
+/** `makeTelegraph`의 결과를 `telegraph`·`telegraph2`에 나눠 담는다. */
+function assignTelegraph(boss: Cat, made: MadeTelegraph | null): void {
+  boss.telegraph = made?.primary ?? null;
+  boss.telegraph2 = made?.secondary ?? null;
+}
+
 /** 보스의 체력 문턱을 보고 예고를 걸거나 터뜨린다. */
 function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   if (!boss.alive) return;
@@ -1858,7 +2484,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
     // 자리에서 예고"). thresholdIdx는 페이드를 시작할 때부터 그대로였으므로
     // 이 예고가 원래 걸렸어야 할 패턴과 정확히 같다.
     updateBossPhase(boss, bossKit(boss.breed.id));
-    boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
+    assignTelegraph(boss, makeTelegraph(boss, foes, boss.thresholdIdx, tally));
     boss.thresholdIdx += 1;
     return;
   }
@@ -1867,12 +2493,31 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
 
   if (boss.telegraph) {
     boss.telegraph.fuse -= dt;
+    // 극성(polarity)의 두 번째 존은 같은 도화선을 그대로 따라간다 — 독립
+    // 타이머를 두면 반쪽만 먼저 터지는 순간이 생겨 "동시에 뜬 것"이 아니게 된다.
+    if (boss.telegraph2) boss.telegraph2.fuse = boss.telegraph.fuse;
     if (boss.telegraph.fuse <= 0) {
-      fireTelegraph(boss, foes, tally);
+      fireTelegraph(boss, foes, tally, boss.telegraph);
+      if (boss.telegraph2) fireTelegraph(boss, foes, tally, boss.telegraph2);
       boss.telegraph = null;
+      boss.telegraph2 = null;
     }
     return; // 예고 중에는 다음 문턱을 밟아도 겹쳐 걸지 않는다
   }
+
+  /**
+   * 순차 스윕(sweep) 대기열이 이 보스 몫으로 아직 돌고 있으면 다음 문턱을
+   * 안 밟는다. sweep은 `boss.telegraph`를 안 채우므로(B3) 바로 위의
+   * `if (boss.telegraph)` 가드가 못 잡는데, 그대로 두면 스윕이 진행되는
+   * 동안에도 보스가 계속 다음 문턱을 넘겨 **다른 패턴(quake·gather·cone)의
+   * 회피 요구까지 겹쳐 쌓는다** — 스윕 자체는 자원(차지)을 아끼도록 고쳐도
+   * (`sweepBurstCharged`), 같은 자원을 노리는 경쟁자가 그 사이에 더 늘면
+   * 소용이 없다(실측: 이 가드 없이는 스윕이 뜨는 동안 gather가 겹쳐 걸려
+   * 남은 차지를 gather가 먼저 가져갔다 — SWEEP_DMG_MUL을 1.0으로 되돌린
+   * 뒤 sim 중앙값이 10에서 더 안 올랐다). "안전지대 춤 하나가 끝나야
+   * 비로소 다음 것" — 원본 헤이건의 리듬과도 맞다.
+   */
+  if (sweepBoss === boss && (sweepZones.length > 0 || sweepPendingWaves.length > 0)) return;
 
   /**
    * 취약 창의 **앞 절반은 순수 연타 타임**이다. 처음 조기 return을 걷어냈을
@@ -1931,7 +2576,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
     if (boss.blink) return;
   }
   updateBossPhase(boss, kit);
-  boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
+  assignTelegraph(boss, makeTelegraph(boss, foes, boss.thresholdIdx, tally));
   boss.thresholdIdx += 1;
 }
 
@@ -2011,9 +2656,46 @@ export function stepBattle(state: RunState, dtMs: number): void {
       head !== undefined &&
       resolveIntent(state, head)?.kind !== "strike";
     const intent = locked ? undefined : resolveIntent(state, state.pending.shift());
-    if (intent?.kind === "dodge" && state.dodgeCharges > 0 && doDodge(state)) {
-      state.dodgeCharges -= 1;
-      state.actCooldown = ACT_COOLDOWN_MS;
+    /**
+     * 부검용 카운터 — 큐에서 실제로 빠져나온(=소비된) 명시적 산개/집결 중
+     * **넣는 순간** 게이트가 열려 있었던 것만 센다.
+     *
+     * `!locked`가 "이번 스텝에 `head`가 실제로 `shift()`됐다"는 뜻이다(같은
+     * 참조이므로 `head`를 그대로 봐도 된다). 게이트가 열려 있었는지는
+     * `head.dual`(=`Intervention.dual`, main.ts가 넣는 순간 채운다)로 본다
+     * — 소비 시점에 `dualChoiceActive(state)`를 다시 물으면, 쿨다운에
+     * 막혀 늦게 소비되는 사이 극성이 이미 꺼져 있을 수 있어 분명히 골랐는데도
+     * 안 세어진다(실측: seed 4에서 입력 1회가 +0으로 셌다). `dual`은 사람이
+     * 직접 넣을 때만 채워지고(main.ts) 측정 봇(`bot-policy.mjs`)의 직접
+     * dodge/gather에는 없으므로, 봇 입력은 여기서 자동으로 빠진다.
+     */
+    if (!locked && (head?.kind === "dodge" || head?.kind === "gather") && head.dual === true) {
+      state.polarityChoices += 1;
+    }
+    /**
+     * 순차 스윕(sweep)만 예외 — 한 문턱의 두 파동(홀수 행→짝수 행)은 같은
+     * 하나의 "안전지대 춤" 기믹이라, 첫 파동에서 이미 차지를 냈으면 두
+     * 번째 파동은 몸을 다시 옮겨도 차지·쿨다운을 또 안 문다("개입 1회로
+     * 연쇄 전체를 넘긴다", 리뷰 (ㄷ)). `dodgeUsable`(위)이 그 무료 통로를
+     * 대신 열어 준다 — 차지가 이미 0이어도 이 예외가 적용돼야 두 번째
+     * 파동을 실제로 피할 수 있다(차지 게이트 `state.dodgeCharges > 0`만
+     * 보면 첫 파동이 마지막 남은 차지를 썼을 때 두 번째 파동은 몸을 움직일
+     * 방법조차 없어진다).
+     */
+    // 무료 통로는 **위험이 sweep뿐일 때**만. doDodge는 모든 존을 한 번에
+    // 처리하므로, 이 한정이 없으면 sweep 중에 뜬 보스 예고까지 공짜·무쿨다운
+    // 으로 피하는 길이 열린다(리뷰 A6 — 현재 킷 배치에선 미발현이지만
+    // sweep과 다른 예고를 같은 킷에 넣는 순간 터진다).
+    const bossTelegraphUp = state.enemy.some((c) => c?.alive && (c.telegraph || c.telegraph2));
+    const sweepFree = sweepZones.length > 0 && sweepBurstCharged && !bossTelegraphUp;
+    if (intent?.kind === "dodge" && dodgeUsable(state) && doDodge(state)) {
+      if (sweepFree) {
+        // 공짜 — 이미 이 스윕 문턱에서 차지를 썼다.
+      } else {
+        state.dodgeCharges -= 1;
+        state.actCooldown = ACT_COOLDOWN_MS;
+        if (sweepZones.length > 0) sweepBurstCharged = true;
+      }
     } else if (intent?.kind === "gather" && state.dodgeCharges > 0 && doGather(state)) {
       state.dodgeCharges -= 1;
       state.actCooldown = ACT_COOLDOWN_MS;
@@ -2036,11 +2718,23 @@ export function stepBattle(state: RunState, dtMs: number): void {
     const foes = foeBodies(state);
     tickDashes(foes, step);
     for (const e of foes) if (e.radius > 0) tickBoss(e, allies, step, state);
+    // 상주 장판(creep)은 특정 보스에 안 묶인다 — 보스가 순간이동하거나
+    // 죽어도 그 자리에 남아 있어야 하므로 tickBoss 루프 밖에서 따로 돈다.
+    tickCreepZones(allies, step);
+    // 순차 스윕(sweep) 대기열도 같은 이유로 tickBoss 루프 밖에서 돈다 —
+    // boss.telegraph가 계속 null인 채로(makeTelegraph의 sweep 분기 참고)
+    // 5행이 이어져야 하므로 보스의 다음 문턱 판단과 무관해야 한다.
+    tickSweepQueue(allies, state, step);
 
     // 양쪽 다 **진짜 고양이만** 센다. 소환수가 남았다고 판이 이어지면
     // 죽은 뒤에 분신이 대신 싸우는 시간이 생긴다.
     const realFoes = livingCats(state.enemy);
     if (realAllies.length === 0 || realFoes.length === 0) {
+      // 전투 종료 — 상주 장판·스윕 대기열은 이 전투 안에서만 산다. invariants가
+      // "전투 밖에는 남지 않는다"를 그 즉시 검사할 수 있어야 하므로 finishWave보다
+      // 먼저 비운다.
+      creepZones.length = 0;
+      clearSweepQueue();
       finishWave(state, realFoes.length === 0 && realAllies.length > 0);
       return;
     }
@@ -2117,6 +2811,8 @@ export function stepBattle(state: RunState, dtMs: number): void {
     separate(foes);
 
     if (state.battleElapsed >= battleTimeout(state)) {
+      creepZones.length = 0; // 위 승패 분기와 같은 이유
+      clearSweepQueue();
       finishWave(state, false, "timeout");
       return;
     }

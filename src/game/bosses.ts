@@ -28,6 +28,23 @@ import type { Breed, TelegraphShape } from "./types.ts";
  * 축을 세 개만 둔다 — 예고 패턴 순서, 순간이동 빈도, 취약 창의 길이와 시점.
  * 축이 더 늘면 플레이어가 무엇이 다른지 못 읽는다.
  */
+/**
+ * 예고 패턴 차례에 들어갈 수 있는 토큰.
+ *
+ * `TelegraphShape`(순수 기하) + 보스 전용 파생 패턴들. `patterns`·
+ * `phase2Patterns` 두 필드가 같은 유니온을 길게 반복해 적던 것을 하나로
+ * 묶었다 — 새 패턴을 추가할 때 자리 하나만 고치면 된다.
+ */
+export type BossPattern =
+  | TelegraphShape
+  | "gather"
+  | "stomp"
+  | "hearth"
+  | "quake"
+  | "creep"
+  | "sweep"
+  | "polarity";
+
 export interface BossKit {
   /**
    * 이 보스의 강도 배수. 체력과 광역 피해에 함께 곱한다.
@@ -54,7 +71,7 @@ export interface BossKit {
    * 생기는 원형이다 — 다른 넷이 전부 팀을 따라오는 것과 달리 이것만 자리가
    * 고정이라, **보스에게서 얼마나 떨어져 서느냐**가 대형의 결정이 된다.
    */
-  readonly patterns: readonly (TelegraphShape | "gather" | "stomp" | "hearth" | "quake")[];
+  readonly patterns: readonly BossPattern[];
   /**
    * 페이즈 2(문턱 인덱스 3부터 — battle.ts PHASE2_FROM_IDX)에서 바꿔 도는 패턴 차례. 없으면 페이즈 내내
    * `patterns`만 돈다.
@@ -68,7 +85,7 @@ export interface BossKit {
    * 문턱 순번 중간에서 이어받는다. 패턴은 순환표일 뿐 서사적 순서가 아니므로
    * 문제가 안 된다.
    */
-  readonly phase2Patterns?: readonly (TelegraphShape | "gather" | "stomp" | "hearth" | "quake")[];
+  readonly phase2Patterns?: readonly BossPattern[];
   /** 문턱 몇 개마다 순간이동하는가. 0이면 안 한다 */
   readonly teleportEvery: number;
   /** 취약 창이 열리는 체력 비율 */
@@ -109,13 +126,31 @@ export const BOSS_KITS: Record<number, BossKit> = {
   // 흩어지기)은 여전히 avoid가 주도한다.
   9: {
     power: 1.0,
-    patterns: ["quake", "stomp", "gather", "cone"],
-    // 페이즈 2 — 절반 밑으로 내려오면 gather가 두 번으로 늘어 avoid 일변에서
-    // "발구르기 사이사이 모여야 산다"로 성격이 바뀐다. stomp(보스 발밑 고정)를
-    // 빼는 이유: 페이즈 2는 취약 창(0.5) 바로 다음이라 근접이 붙어 있을
-    // 확률이 높은데, stomp까지 겹치면 "붙어서 때리기"와 "떨어져서 피하기"가
-    // 매 문턱 충돌해 무쇠발톱만 유독 어려워진다.
-    phase2Patterns: ["quake", "gather", "quake", "gather"],
+    // 발구르기(stomp) 하나를 순차 스윕(sweep)으로 바꿨다. 무쇠발톱은 첫 보스이자
+    // S2 중간보스로도 재사용되는 "가르치는" 킷이라 신규 패턴의 첫 노출 자리로
+    // 맞다 — 정체성(avoid 위주·거리 유지)은 그대로고, "발밑 고정" 대신 "행이
+    // 차례로 켜진다"는 새 읽기 하나만 얹는다. sweep 자체가 짧은 fuse(700ms)의
+    // line avoid 연쇄라 흩어지기 정체성과 어긋나지 않는다.
+    patterns: ["quake", "sweep", "gather", "cone"],
+    /**
+     * 페이즈 2. `thresholdIdx`가 페이즈 경계에서 리셋되지 않고 이어지므로
+     * (문턱 3부터), 이 배열에서 실제로 도는 자리는 idx 3,4,5 mod 4 = 3,0,1
+     * 이다(인덱스 2는 이 순환에서 한 번도 안 밟히는 죽은 자리 — 살금이
+     * phase2Patterns 주석과 같은 함정). 그래서 실제 발동 순서는
+     * [gather(인덱스3) → quake(인덱스0) → stomp(인덱스1)]이다.
+     *
+     * stomp(보스 발밑 고정)를 여기 인덱스1에 되살렸다 — 순차 스윕(sweep)이
+     * 패턴 1(phase1)에서 발구르기 자리를 대신하면서 stomp가 어느 킷에서도
+     * 안 뜨는 죽은 타입이 됐었다(리뷰 권고). stomp는 "보스 발밑에 서 있으면
+     * 맞는다"는 앞라인 압박이라 C2(앞라인 전진/후퇴, docs/raid-design.md)의
+     * 짝 기믹으로 남겨 둘 값이 있다. 페이즈 2의 **마지막**(idx5) 자리에
+     * 둔 이유: 페이즈 2 진입 직후(idx3~4)는 취약 창이 막 닫힌 뒤라 근접이
+     * 보스에 붙어 있을 확률이 높은데, 그 타이밍에 stomp까지 겹치면 "붙어서
+     * 때리기"와 "떨어져서 피하기"가 매 문턱 충돌한다(예전에 이 이유로 아예
+     * 뺐었다) — 순환 맨 끝에 두면 그 충돌 창을 피하면서도 stomp가 다시
+     * 노출된다.
+     */
+    phase2Patterns: ["quake", "stomp", "quake", "gather"],
     teleportEvery: 2,
     vulnerableAt: 0.5,
     vulnerableMs: 3000,
@@ -127,12 +162,16 @@ export const BOSS_KITS: Record<number, BossKit> = {
   10: {
     power: 0.85,
     patterns: ["gather", "line", "gather", "cone"],
-    // 페이즈 2 — 순서를 뒤집는다(cone,gather,line,gather). `thresholdIdx`가
+    // 페이즈 2 — 순서를 뒤집는다(cone,gather,line,polarity). `thresholdIdx`가
     // 페이즈 경계에서 리셋되지 않고 이어지므로(문턱 3부터), 남은 세 문턱이
-    // 실제로 도는 값은 [gather, cone, gather]로 바뀐다 — line(직선)이 한 번
-    // 줄고 gather가 그 자리를 메운다. 순간이동 리듬은 그대로 두고(붙었다
-    // 놓쳤다가 이 보스의 정체성이다) 판단의 무게만 모이기 쪽으로 기운다.
-    phase2Patterns: ["cone", "gather", "line", "gather"],
+    // 실제로 도는 값은 [polarity, cone, gather]다 — 배열 인덱스 2(line)는
+    // 이 순환에서 한 번도 안 밟히는 자리라(idx 3,4,5 mod 4 = 3,0,1) 거기 뭘
+    // 둬도 안 뜬다. 원래 거기 있던 gather 하나를 극성(polarity)으로 바꿨다:
+    // "모이기 위주라 답은 뭉치기"라는 정체성 위에 "판 반쪽은 모여야 하고
+    // 반쪽은 흩어져야 한다"를 한 번 얹는다. resolveIntent는 아직 극성을
+    // 산개로만 처리하므로(N5 설계 메모) 이 자리는 보이는 것만으로도 값이
+    // 있다 — 다음 단계(C1)가 수동 선택을 붙인다.
+    phase2Patterns: ["cone", "gather", "line", "polarity"],
     teleportEvery: 2,
     vulnerableAt: 0.6,
     vulnerableMs: 2600,
@@ -143,12 +182,21 @@ export const BOSS_KITS: Record<number, BossKit> = {
   11: {
     power: 1.0,
     patterns: ["hearth", "circle", "hearth", "cone"],
-    // 페이즈 2 — cone을 quake로 바꾼다. 화톳불(hearth, 가운데 행이 안전)과
-    // 땅울림(quake, 가운데 행이 위험)은 세로 자리가 정반대라, 둘을 같은
-    // 페이즈에 섞으면 "이번엔 어느 쪽 행이 안전한가"를 매번 다시 읽어야
-    // 한다. 서리귀는 제자리 보스라 모이기가 안 가르므로(위 주석) quake로
-    // 대비축을 만든다 — 화톳불 강조(배열엔 hearth 둘이지만 실제 순환(idx 3~5)에선 circle·hearth·quake로 한 번)에 그 반대 성격을 얹는다.
-    phase2Patterns: ["hearth", "quake", "hearth", "circle"],
+    // 페이즈 2 — 원래는 cone을 quake로 바꿨을 뿐이었다(화톳불·땅울림 대비축,
+    // 아래 참고). 이번엔 그 자리(배열 인덱스 3, 원래 circle)를 성장형 장판
+    // (creep)으로 다시 바꾼다 — 실제 순환은 idx 3,4,5가 배열 인덱스 3,0,1을
+    // 밟으므로(인덱스 2의 hearth 하나는 이 순환에서 죽은 자리) 새 순서는
+    // creep·hearth·quake다. 서리귀는 "제자리에서 원형만 던진다"는 정체성이라
+    // creep도 원형 avoid로 시작해(makeTelegraph의 circle 경로 재사용) 그
+    // 정체성을 깨지 않는다 — 다른 점은 터진 뒤 사라지지 않고 자란다는 것뿐.
+    // 얼음(서리귀) → 역병 계열로 이어지는 다음 웨이브 테마와도 파멸(Defile)
+    // 오마주가 자연스럽게 연결된다.
+    //
+    // 화톳불(hearth, 가운데 행이 안전)과 땅울림(quake, 가운데 행이 위험)은
+    // 세로 자리가 정반대라, 둘을 같은 페이즈에 섞으면 "이번엔 어느 쪽 행이
+    // 안전한가"를 매번 다시 읽어야 한다. 서리귀는 제자리 보스라 모이기가
+    // 안 가르므로(위 주석) quake로 대비축을 만든다.
+    phase2Patterns: ["hearth", "quake", "hearth", "creep"],
     teleportEvery: 0,
     vulnerableAt: 0.35,
     vulnerableMs: 4500,
@@ -230,6 +278,61 @@ export const BOSS_THRESHOLDS = [0.85, 0.7, 0.55, 0.4, 0.25, 0.1] as const;
 
 /** 예고가 뜨고 터질 때까지. 반응할 시간을 주되 늘어지지 않는 길이. */
 export const TELEGRAPH_FUSE_MS = 1200;
+
+/**
+ * 순차 스윕(sweep) 한 파동의 도화선.
+ *
+ * **파동 단위(리뷰 (ㄷ), C3)로 바뀌면서 700ms(행 하나짜리 점멸)를 버렸다.**
+ * 행 0→4를 순차로 점멸시키던 예전 설계는 문턱 하나가 최대 5번의 개별
+ * 회피를 요구했는데, 이 게임의 공용 자원(`ACT_COOLDOWN_MS` 1초·
+ * `dodgeCharges` 보스전당 2회)으로는 완벽하게 반응해도 그 빈도를 못
+ * 따라갔다(SWEEP_DMG_MUL 주석 참고). 홀수 행 묶음 → 짝수 행 묶음, 두
+ * 파동으로 바꾸면 문턱 하나가 요구하는 개입이 최대 2회로 줄고, 도화선을
+ * 쿨다운(1초)보다 넉넉히 길게 잡아야 "한 파동을 피한 뒤 다음 파동도 받을
+ * 여유"가 생긴다 — 1200ms(기본 예고)보다도 조금 더 여유를 둔다.
+ */
+export const SWEEP_FUSE_MS = 1400;
+
+/**
+ * 성장형 장판(creep)의 반경 성장 단계(칸). 첫 값이 스폰 시 반경이자 원래
+ * "circle avoid" 경고 반경이기도 하다(makeTelegraph가 그대로 쓴다).
+ */
+export const CREEP_RADIUS_STEPS = [0.9, 1.5, 2.2, 3.0] as const;
+
+/** 성장형 장판이 성장/피해를 재는 틱 간격(ms). */
+export const CREEP_TICK_MS = 700;
+
+/** 성장형 장판이 아무도 없는 채로 이만큼 지나면 소멸한다(ms). */
+export const CREEP_IDLE_DESPAWN_MS = 1400;
+
+/**
+ * 성장형 장판의 틱당 고정 피해 배수(보스 공격력 기준).
+ *
+ * 예고 회피 실패(telegraphHit)는 최대체력 비율이라 사실상 즉사에 가깝다
+ * (balance.ts의 telegraphDmg=1.277). creep은 "소량 고정 피해"가 설계 —
+ * 반경이 자라며 벗어나기 어려워지는 것 자체가 압박이지, 틱 하나하나가
+ * 치명적이면 회피할 필요 없이 그냥 죽는 장판이 된다. 보스 공격력의 절반을
+ * 고정값으로 쓴다 — 웨이브 램프를 따라 같이 커지되(공격력이 이미 램프를
+ * 탄다) 평타 한 대보다는 가볍다.
+ */
+export const CREEP_DMG_MUL = 0.5;
+
+/**
+ * 순차 스윕(sweep) 한 파동의 피해 배수. `telegraphHit`(battle.ts)이 재는
+ * `frac`에 곱한다.
+ *
+ * **1.0(원래 avoid 배율) — 피해를 눌러서 자원 문제를 가리지 않는다.**
+ * 예전엔 행 0→4 순차(700ms 간격 5회)가 공용 자원(쿨다운 1초·차지 2회)을
+ * 못 따라가서 이 배율을 0.25까지 낮춰 "맞아도 소량"으로 눌렀는데, 그건
+ * 진짜 문제(자원 예산과 안 맞는 빈도)를 가리는 것이었다 — 실제로 0.15까지
+ * 더 낮춰도 sim 중앙값이 11에서 안 움직였다(막다른 길이라는 증거). 진짜
+ * 수정은 빈도 쪽이다 — `SWEEP_FUSE_MS`가 파동 단위로 바뀌어(리뷰 (ㄷ))
+ * 문턱 하나가 요구하는 개입이 최대 2회로 줄고 도화선도 쿨다운보다 넉넉해
+ * 졌으므로, **제대로 피하면 이 배율이 얼마든 안 맞는다** — 다른 avoid
+ * 패턴(quake·cone 등)과 같은 배율로 되돌려 "피해야 할 이유"를 정직하게
+ * 남긴다.
+ */
+export const SWEEP_DMG_MUL = 1.0;
 
 /**
  * 보스가 순간이동으로 옮겨 앉는 자리(적 진영 기준 열, 행).
