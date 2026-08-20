@@ -11,7 +11,7 @@
  *
  * 실행: npm run dodge:test
  */
-import { inTelegraph, stepBattle } from "../src/game/battle.ts";
+import { clearBattleFx, creepZones, hazardsActive, inTelegraph, stepBattle, sweepZones } from "../src/game/battle.ts";
 import { BALANCE } from "../src/game/balance.ts";
 import { walkMap, leaveShop } from "./bot-policy.mjs";
 import { isBossStep, STAGE_STEPS } from "../src/game/map.ts";
@@ -33,7 +33,17 @@ function check(name, ok, detail = "") {
  * 쓰면 gather 표본이 영영 없으므로, 모임을 재려면 gather 킷(살금이 10)을
  * 직접 세워야 한다. 체력·공격은 원래 보스 것을 물려받아 스케일을 지킨다.
  */
-function bossFightWithTelegraph(arrange, seed = 1, bossBreedId = null) {
+/**
+ * @param want 발동 시점을 잡을 예고를 고른다. 기본은 아무 예고나 — 특정
+ *   패턴(순차 스윕 등)만 노리려면 `tg.fuseMax`처럼 그 패턴만 갖는 값으로
+ *   가려낸다. 원하는 예고가 뜰 때까지 계속 지나친다.
+ * @param respond 예고를 기다리는 동안 매 스텝 불린다. 기본은 아무것도 안
+ *   한다(1~8절의 기존 계약 그대로) — 첫 예고만 있으면 충분했다. **순번이
+ *   있는 패턴**(순차 스윕 등)처럼 두 번째 이상의 문턱을 기다려야 하면, 그
+ *   전 문턱들을 안 피하고 지나칠 때 팀이 먼저 전멸할 수 있다. 그럴 때만
+ *   반응 함수를 넘겨 앞선 예고를 스스로 피하게 한다.
+ */
+function bossFightWithTelegraph(arrange, seed = 1, bossBreedId = null, want = () => true, respond = () => {}) {
   const s = newRun(seed);
   // 보스 웨이브를 **찾는다**. 번호를 박아 두면 주기를 바꿀 때 조용히 깨진다 —
   // 실제로 보스를 5웨이브마다에서 3웨이브마다로 옮겼을 때 이 테스트가 저격
@@ -76,9 +86,10 @@ function bossFightWithTelegraph(arrange, seed = 1, bossBreedId = null) {
   // 예고가 뜬 것만으로는 부족하다. **위험 구간 안에 아군이 실제로 들어간**
   // 순간을 잡아야 회피가 할 일이 있다.
   for (let i = 0; i < 600; i++) {
+    respond(s);
     stepBattle(s, 100);
     if (s.phase !== "battle") return null;
-    const boss = s.enemy.find((c) => c?.telegraph);
+    const boss = s.enemy.find((c) => c?.telegraph && want(c.telegraph));
     if (!boss?.telegraph) continue;
     const inside = s.ally.filter((c) => c?.alive && inTelegraph(boss.telegraph, c.fx, c.fy));
     if (inside.length > 0) return { s, boss };
@@ -448,6 +459,206 @@ console.log("회피 동작 검사\n");
     check(`${name} 예고: 발동 시점 성공률 90% 이상`, rate >= 90,
       `${t.ok}/${t.all}판 (${rate.toFixed(0)}%)`);
   }
+}
+
+// ── 10. 순차 스윕(sweep) 발동 시점 회피 ─────────────────────
+/**
+ * N4. 9절과 같은 방식(발동 순간 판정)을 **새 큐 구조(B3→C3)에 맞게 다시 짠다.**
+ *
+ * sweep은 더 이상 `boss.telegraph`에 안 산다 — 문턱 하나가 **파동 둘**(홀수
+ * 행 묶음 → 짝수 행 묶음)을 한 번에 `sweepZones`(battle.ts의 모듈 전역,
+ * `creepZones`와 같은 전례)에 예약하고, 그 뒤로는 보스의 판단과 무관하게
+ * 스스로 돈다. `bossFightWithTelegraph`의 `want(c.telegraph)`는
+ * `boss.telegraph`만 보므로 이제 sweep을 못 잡는다 — 이 절만 그 헬퍼를 안
+ * 쓰고 `sweepZones`를 직접 본다.
+ *
+ * **한 파동에 행이 여럿(최대 3개, 예: 0·2·4)이다.** 그중 하나만 걸렸다고
+ * 성공을 판정하면 안 된다 — 같은 파동의 나머지 행에 걸려 있어도 놓친다.
+ * 그래서 캡처 시점의 파동 전체(`sweepZones`의 스냅샷)를 기억해 두고, 그
+ * 파동이 통째로 꺼진 뒤 **행 전부**에 대해 무피해를 확인한다.
+ *
+ * "sweep 자체는 손대지 않는다"는 옛 respond의 조건문(`wantSweep` 예외)이
+ * 새 구조에서는 공짜로 성립한다 — sweep이 도는 동안 `boss.telegraph`가
+ * 계속 null이라 아래 act 조건(`s.enemy.some(c => c?.telegraph) || ...`)이
+ * 저절로 꺼진다.
+ */
+{
+  const PAD = BALANCE.telegraphBodyPad;
+  let all = 0;
+  let ok = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    /**
+     * `sweepZones`(와 `creepZones`)는 battle.ts의 모듈 전역이라 `newRun`이
+     * 안 건드린다 — 실제 게임은 전투가 끝날 때마다(finishWave 경로) 저절로
+     * 비워지지만, 이 절은 sweep 행 하나가 터지는 순간 곧바로 다음 시드로
+     * 넘어가 전투를 안 끝낸다. 안 비우면 이전 시드의 미완료 큐가 다음 시드로
+     * 새어 들어간다(실측: 그대로 두면 40시드 중 26개가 엉뚱한 행에서 실패했다).
+     */
+    clearBattleFx();
+    const s = newRun(seed);
+    let bossStep = 2;
+    for (let i = 0; i < STAGE_STEPS; i++) {
+      s.step = i;
+      if (isBossStep(i)) {
+        bossStep = i;
+        break;
+      }
+    }
+    s.step = bossStep;
+    s.wave = bossStep + 1;
+    walkMap(s);
+    leaveShop(s);
+    if (currentKind(s) !== "boss") continue;
+    s.ally = emptyBoard();
+    clustered(s);
+    buildEnemyWave(s);
+    // 무쇠발톱(9)으로 강제한다 — sweep을 쓰는 유일한 킷이다.
+    const bi = s.enemy.findIndex((c) => c && c.radius > 0);
+    if (bi >= 0) {
+      const prev = s.enemy[bi];
+      const bossBreed = BOSS_BREEDS.find((b) => b.id === 9);
+      const swapped = makeCat(bossBreed, "enemy", prev.cell);
+      swapped.maxHp = prev.maxHp;
+      swapped.hp = prev.hp;
+      swapped.atk = prev.atk;
+      swapped.radius = prev.radius;
+      swapped.fx = prev.fx;
+      swapped.fy = prev.fy;
+      s.enemy[bi] = swapped;
+    }
+    startBattle(s);
+
+    // sweep이 뜨기 전까지는 act로 앞선 문턱(무쇠발톱 첫 자리 quake)을 스스로
+    // 처리한다 — 그걸 넘겨야 sweep(둘째 자리)이 뜬다. 위험 구간 안에 아군이
+    // 실제로 들어간 순간만 표본으로 잡는다(9절과 같은 기준).
+    let wave = null; // 캡처 시점 파동 전체(행 여러 개)의 스냅샷
+    const first = () => sweepZones[0] ?? null;
+    for (let t = 0; t < 600 && s.phase === "battle" && !wave; t++) {
+      if (
+        s.dodgeCharges > 0 &&
+        (s.enemy.some((c) => c?.telegraph) || s.enemy.some((c) => c?.alive && c.vulnerableMs > 0))
+      ) {
+        s.pending.push({ kind: "act" });
+      }
+      stepBattle(s, 100);
+      if (sweepZones.length > 0) {
+        const inside = s.ally.filter((c) => c?.alive && sweepZones.some((z) => inTelegraph(z, c.fx, c.fy)));
+        if (inside.length > 0) wave = [...sweepZones];
+      }
+    }
+    if (!wave) continue;
+
+    s.dodgeCharges = 9; // 실효성 검사이므로 자원 부족과 섞지 않는다
+    s.pending.push({ kind: "act" });
+    // 이 파동(`wave`)이 터질 때까지만 돈다 — 터지면 `sweepZones`의 첫 원소가
+    // 다음 파동으로 바뀌거나(참조가 달라짐) 큐가 빈다(길이 0), 둘 다
+    // 아래 조건을 깬다.
+    while (sweepZones.length > 0 && first() === wave[0] && s.phase === "battle") {
+      stepBattle(s, 16);
+    }
+    // 파동에 속한 행 전부에 대해 무피해를 확인한다 — 하나만 보면 같은
+    // 파동의 나머지 행에 걸린 것을 놓친다.
+    const wrong = s.ally.filter((c) => c?.alive && wave.some((z) => inTelegraph(z, c.fx, c.fy, PAD)));
+    all += 1;
+    if (wrong.length === 0) ok += 1;
+  }
+  if (all === 0) {
+    console.log("  표본 없음: 순차 스윕 — 40시드 안에 sweep 예고가 안 나왔다");
+  } else {
+    const rate = (ok / all) * 100;
+    check("순차 스윕: 발동 시점 성공률 90% 이상", rate >= 90, `${ok}/${all}판 (${rate.toFixed(0)}%)`);
+  }
+}
+
+// ── 11. hazardsActive — creep/sweep만 떠 있어도 참 (하네스 실명 재발 방지) ──
+/**
+ * 2차 반려 진단: "96.6%를 못 보는 봇으로 잰 수치는 '게임이 어려워졌다'와
+ * '봇이 눈이 멀었다'를 구분하지 못한다." — creep·sweep은 `state.enemy[].
+ * telegraph`가 아니라 battle.ts의 별도 배열(`creepZones`·`sweepZones`)에
+ * 산다. `s.enemy.some(c => c?.telegraph)`만 보는 사본이 하나라도 다시
+ * 생기면 그 사본은 이 스텝을 "위험 없음"으로 잘못 읽는다 — 이 절이 그
+ * 사본 갈라짐을 관문에서 잡는다.
+ *
+ * 문턱을 강제로 옮겨서 잰다(자연 진행을 기다리지 않는다) — 도달 자체가
+ * 아니라 "도달했을 때 hazardsActive가 참인가"만 재는 절이라, 몇백 스텝을
+ * 태워 자연스럽게 그 지점까지 가는 것은 낭비다.
+ */
+{
+  function forceHazard(bossId, thresholdIdx, hpFrac, extra) {
+    let checked = 0;
+    let ok = 0;
+    for (let seed = 1; seed <= 40 && checked < 10; seed++) {
+      clearBattleFx();
+      const s = newRun(seed);
+      let bossStep = 2;
+      for (let i = 0; i < STAGE_STEPS; i++) {
+        s.step = i;
+        if (isBossStep(i)) {
+          bossStep = i;
+          break;
+        }
+      }
+      s.step = bossStep;
+      s.wave = bossStep + 1;
+      walkMap(s);
+      leaveShop(s);
+      if (currentKind(s) !== "boss") continue;
+      s.ally = emptyBoard();
+      clustered(s);
+      buildEnemyWave(s);
+      const bi = s.enemy.findIndex((c) => c && c.radius > 0);
+      if (bi < 0) continue;
+      const prev = s.enemy[bi];
+      const bossBreed = BOSS_BREEDS.find((b) => b.id === bossId);
+      const swapped = makeCat(bossBreed, "enemy", prev.cell);
+      swapped.maxHp = prev.maxHp;
+      swapped.hp = prev.hp;
+      swapped.atk = prev.atk;
+      swapped.radius = prev.radius;
+      swapped.fx = prev.fx;
+      swapped.fy = prev.fy;
+      s.enemy[bi] = swapped;
+      startBattle(s);
+      const boss = s.enemy.find((c) => c && c.radius > 0);
+      if (!boss) continue;
+      boss.thresholdIdx = thresholdIdx;
+      boss.vulnerableUsed = true;
+      boss.hp = Math.round(boss.maxHp * hpFrac);
+      if (extra) extra(boss);
+      for (let t = 0; t < 60 && s.phase === "battle"; t++) {
+        s.dodgeCharges = Math.max(s.dodgeCharges, 9);
+        const active = bossId === 9 ? sweepZones.length > 0 : creepZones.length > 0;
+        if (active && !s.enemy.some((c) => c?.telegraph)) {
+          checked += 1;
+          if (hazardsActive(s)) ok += 1;
+          break;
+        }
+        if (s.enemy.some((c) => c?.telegraph) || s.enemy.some((c) => c?.alive && c.vulnerableMs > 0)) {
+          s.pending.push({ kind: "act" });
+        }
+        stepBattle(s, 100);
+      }
+    }
+    return { checked, ok };
+  }
+
+  // sweep: 무쇠발톱(9) phase1 패턴 [quake, sweep, gather, cone] — 인덱스1이 sweep.
+  const sw = forceHazard(9, 1, 0.69);
+  check(
+    "hazardsActive: sweep만 떠 있어도(boss.telegraph는 null) 참",
+    sw.checked > 0 && sw.ok === sw.checked,
+    `${sw.ok}/${sw.checked}`,
+  );
+
+  // creep: 서리귀(11) phase2 패턴 [hearth, quake, hearth, creep] — 문턱 idx3(=인덱스3)이 creep.
+  const cr = forceHazard(11, 3, 0.39, (boss) => {
+    boss.phase2 = true;
+  });
+  check(
+    "hazardsActive: creep만 떠 있어도(boss.telegraph는 null) 참",
+    cr.checked > 0 && cr.ok === cr.checked,
+    `${cr.ok}/${cr.checked}`,
+  );
 }
 
 console.log(failed === 0 ? "\n전부 통과 — 회피는 위험 구간만 비우고, 비운 채로 유지된다" : `\n${failed}건 실패`);

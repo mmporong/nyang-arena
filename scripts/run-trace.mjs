@@ -10,7 +10,7 @@
  * 실행: npm run trace [시드] [--dodge]
  */
 import { walkMap, leaveShop } from "./bot-policy.mjs";
-import { stepBattle } from "../src/game/battle.ts";
+import { hazardsActive, stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, startBattle, unitCap, relicActive, currentKind } from "../src/game/run.ts";
 import { livingCats, CLASS_ORDER, CLASS_SHORT, zeroByClass } from "../src/game/types.ts";
 
@@ -85,7 +85,9 @@ for (let guard = 0; guard < 200; guard++) {
   const before = livingCats(s.ally).length;
 
   while (s.phase === "battle") {
-    const up = s.enemy.some((c) => c?.telegraph);
+    // hazardsActive(battle.ts) — s.enemy[].telegraph만 보면 상주 장판(creep)·
+    // 순차 스윕(sweep) 대기열이 떠 있는 동안 "예고 없음"으로 잘못 읽는다.
+    const up = hazardsActive(s);
     if (up && !wasUp) telegraphs += 1;
     wasUp = up;
     if (DODGE && up && s.dodgeCharges > 0) {

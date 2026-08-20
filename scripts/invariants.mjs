@@ -11,7 +11,7 @@
  * 여기서는 수십만 스텝을 본다. 처음 깨진 자리에서 시드와 웨이브를 함께
  * 남기므로 재현이 바로 된다.
  */
-import { stepBattle, SUMMON_CAP } from "../src/game/battle.ts";
+import { creepZones, stepBattle, sweepZones, SUMMON_CAP } from "../src/game/battle.ts";
 import * as RUN from "../src/game/run.ts";
 import { newRun, startBattle, unitCap, currentKind } from "../src/game/run.ts";
 import { BOARD_COLS, BOARD_ROWS, livingCats } from "../src/game/types.ts";
@@ -52,6 +52,27 @@ function check(s, where) {
   // 함께 시작하고, 그 분신은 이미 사라진 주인을 uid로 가리킨다.
   if (s.phase !== "battle" && s.summons.length > 0) {
     fail("전투 밖에 소환수가 남았다", `${where} ${s.summons.length}마리`);
+  }
+  /**
+   * N1. 상주 장판(creep)도 같은 이유로 전투 안에서만 산다.
+   *
+   * `creepZones`는 battle.ts의 모듈 전역이라 `s`(RunState)에 안 묶인다 —
+   * `stepBattle`이 전투가 끝나는 두 지점(전멸 판정·타임아웃) 모두에서
+   * `finishWave`보다 먼저 명시적으로 비운다. 여기서 못 잡으면 그 보장이
+   * 조용히 깨져도 300판 6만 스텝을 눈으로 볼 방법이 없다.
+   */
+  if (s.phase !== "battle" && creepZones.length > 0) {
+    fail("전투 밖에 상주 장판이 남았다", `${where} ${creepZones.length}개`);
+  }
+  /**
+   * N2. 순차 스윕(sweep) 대기열도 같은 이유로 전투 안에서만 산다.
+   *
+   * `sweepZones`도 battle.ts의 모듈 전역이라 `s`에 안 묶인다 — `stepBattle`이
+   * 전투가 끝나는 두 지점(전멸 판정·타임아웃)과 `clearBattleFx`에서
+   * `clearSweepQueue`로 비운다(N1과 같은 계약).
+   */
+  if (s.phase !== "battle" && sweepZones.length > 0) {
+    fail("전투 밖에 순차 스윕 대기열이 남았다", `${where} ${sweepZones.length}개`);
   }
   for (const side of ["ally", "enemy"]) {
     const n = s.summons.filter((c) => c.side === side).length;
@@ -95,6 +116,8 @@ function check(s, where) {
     // 죽은 보스의 예고가 남으면 화면에 유령 장판이 그려지고, blink가 남으면
     // 반쯤 사라진 채 얼어붙는다. 영상 검수에서 실제로 잡힌 버그라 불변식으로 박는다.
     if (!c.alive && c.telegraph) fail("죽었는데 예고가 남아 있다", `${where} ${who}`);
+    // 극성(polarity)의 두 번째 동시 예고도 같은 이유로 검사한다.
+    if (!c.alive && c.telegraph2) fail("죽었는데 예고2(극성)가 남아 있다", `${where} ${who}`);
     if (!c.alive && c.blink) fail("죽었는데 blink가 남아 있다", `${where} ${who}`);
 
     if (!finite(c.fx) || !finite(c.fy)) fail("좌표가 유한하지 않다", `${where} ${who} (${c.fx},${c.fy})`);
@@ -184,7 +207,7 @@ for (let seed = 1; seed <= RUNS; seed++) {
   const { bossForIndex } = await import("../src/game/bosses.ts");
   const { BOSSES_PER_STAGE } = await import("../src/game/map.ts");
   // 테마 작성 시점의 보스 조합. 의도적으로 조합을 바꿨다면 이 스냅도 갱신할 것.
-  const SNAP = { 1: [9, 10] };
+  const SNAP = { 1: [9, 10], 2: [9, 11] };
   for (const [stageStr, want] of Object.entries(SNAP)) {
     const stage = Number(stageStr);
     if (!stageTheme(stage).backdropScene) continue; // 강제 씬이 없으면 무관

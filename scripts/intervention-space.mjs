@@ -15,7 +15,7 @@
  * 실행: npm run intervention
  */
 import { walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
-import { stepBattle } from "../src/game/battle.ts";
+import { dodgeUsable, hazardsActive, hazardZones, stepBattle } from "../src/game/battle.ts";
 import { livingCats } from "../src/game/types.ts";
 import { buyOffer, newRun, startBattle, relicActive, currentKind } from "../src/game/run.ts";
 
@@ -25,9 +25,17 @@ const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
 const DT = 100;
 
-/** 지금 예고가 떠 있는가. 봇이 화면을 보는 것과 같은 정보다. */
+/**
+ * 지금 예고가 떠 있는가. 봇이 화면을 보는 것과 같은 정보다.
+ *
+ * `hazardsActive`(battle.ts) 하나로 판정한다 — 전에는 `s.enemy.some(c =>
+ * c?.telegraph)`만 봐서 상주 장판(creep)·순차 스윕(sweep) 대기열이 떠 있는
+ * 동안(둘 다 `state.enemy[].telegraph`에 안 산다) 이 봇이 "위험 없음"으로
+ * 잘못 읽었다 — 그 스텝엔 개입을 아예 안 넣으므로, sweep이 어려워졌다는
+ * 신호가 실제로는 "이 사본이 못 봤다"였다(2차 반려 진단).
+ */
 function telegraphUp(state) {
-  return state.enemy.some((c) => c?.telegraph);
+  return hazardsActive(state);
 }
 
 /** 취약 창이 열려 있는가. 이때 버튼은 약점 공격이 된다. */
@@ -35,10 +43,15 @@ function windowOpen(state) {
   return state.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
 }
 
-/** 지금 떠 있는 예고가 요구하는 것. 장판 색이 알려주는 정보와 같다. */
+/**
+ * 지금 떠 있는 예고가 요구하는 것. 장판 색이 알려주는 정보와 같다.
+ *
+ * `hazardZones`의 첫 항목을 본다 — 보스 telegraph(있으면 항상 먼저 들어간다)
+ * 를 최우선으로 하고, creep·sweep만 떠 있으면 그 항목을 본다(둘 다
+ * mode:"avoid"라 "dodge"로 정확히 해석된다).
+ */
 function telegraphMode(state) {
-  const c = state.enemy.find((x) => x?.telegraph);
-  return c?.telegraph?.mode ?? null;
+  return hazardZones(state)[0]?.mode ?? null;
 }
 
 const POLICIES = {
@@ -138,7 +151,11 @@ function play(policy, seed) {
        */
       if (up) {
         upFor += 1;
-        if (s.dodgeCharges > 0 && policy.dodge(upFor, seen)) {
+        // dodgeUsable(battle.ts) — 순차 스윕(sweep)의 두 번째 파동은 차지가
+        // 0이어도 첫 파동에서 낸 값으로 공짜로 통과한다("개입 1회로 연쇄
+        // 전체를 넘긴다"). `s.dodgeCharges > 0`만 보면 그 무료 순간을 이
+        // 하네스가 아예 안 눌러 실제보다 어렵게 잰다.
+        if (dodgeUsable(s) && policy.dodge(upFor, seen)) {
           const need = telegraphMode(s);
           const kind =
             policy.read === false

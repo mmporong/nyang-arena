@@ -28,7 +28,7 @@
  *
  * 실행: npm run formation
  */
-import { stepBattle, inTelegraph } from "../src/game/battle.ts";
+import { hazardZones, inTelegraph, stepBattle } from "../src/game/battle.ts";
 import { makeCat, newRun, startBattle } from "../src/game/run.ts";
 import { BOSS_BREEDS, BOSS_RADIUS, bossKit } from "../src/game/bosses.ts";
 import { breedById } from "../src/game/breeds.ts";
@@ -277,7 +277,11 @@ function fight(formation, archetype, seed, intervene, hp) {
     if (s.phase !== "battle") break;
     if (respond) respond(s);
     // 이번 스텝에 터질 예고를 터지기 직전에 잡는다.
-    const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
+    // `hazardZones`(battle.ts)를 쓴다 — 보스 telegraph가 있으면 그게 먼저
+    // 들어가 기존과 동일하게 행동하고, 상주 장판(creep)·순차 스윕(sweep)만
+    // 떠 있는 스텝도 이제 놓치지 않는다(전에는 그 스텝의 노출이 통째로
+    // 빠졌다).
+    const tg = hazardZones(s)[0];
     const firing = tg && tg.fuse <= 100;
     const before = firing ? livingCats(s.ally) : null;
     stepBattle(s, 100);

@@ -13,6 +13,7 @@ import { buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, sync
 import { isBossStep, openLanes } from "../src/game/map.ts";
 import { rng } from "../src/game/rng.ts";
 import { livingCats } from "../src/game/types.ts";
+import { dodgeUsable, hazardsActive } from "../src/game/battle.ts";
 
 /**
  * 예고를 읽고 반응한다. 사람처럼 조금 늦고 가끔 놓친다 —
@@ -37,6 +38,21 @@ export function makeBossBot() {
     const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
     if (!tg || s.dodgeCharges <= 0) {
       lastTelegraph = null;
+      /**
+       * `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 —
+       * 상주 장판(creep)·순차 스윕(sweep) 대기열은 `s.enemy`의 telegraph가
+       * 아니라 battle.ts의 별도 배열이라 위 `tg` 검사엔 안 걸린다. 사람이
+       * act 버튼을 누르면 resolveIntent의 기본값이 알아서 회피로 푸는데,
+       * 이 봇은 act가 아니라 dodge/gather를 직접 박아 넣으므로 그 기본
+       * 경로를 안 탄다 — 여기서 한 번 더 봐 준다. `dodgeUsable`을 쓰는
+       * 이유는 스윕 두 번째 파동이 차지 0에서도 공짜로 통하기 때문이다
+       * (`s.dodgeCharges > 0`만 보면 그 무료 순간을 봇이 아예 시도조차
+       * 안 해서 "개입 1회로 연쇄 전체를 넘긴다"는 설계가 있으나 마나가
+       * 된다 — 실측: 이 사본을 안 고치고는 sim 중앙값이 10에서 안 올랐다).
+       */
+      if (hazardsActive(s) && dodgeUsable(s)) {
+        s.pending.push({ kind: "dodge" });
+      }
       return;
     }
     since = tg === lastTelegraph ? since + 1 : 0;

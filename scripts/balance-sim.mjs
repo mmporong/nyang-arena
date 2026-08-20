@@ -10,7 +10,7 @@
  * 실행: npm run sim
  */
 import { walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
-import { stepBattle } from "../src/game/battle.ts";
+import { dodgeUsable, hazardsActive, stepBattle } from "../src/game/battle.ts";
 import { buyOffer, newRun, relicActive, rerollOffers, startBattle, currentKind } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
 
@@ -143,6 +143,16 @@ function playOne(seed) {
       if (!tg) lastTelegraph = null;
       const open = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
       if (open) s.pending.push({ kind: "act" });
+      // `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 —
+      // 상주 장판(creep)·순차 스윕(sweep) 대기열은 s.enemy의 telegraph가
+      // 아니라 battle.ts의 별도 배열이다. act로 밀면 resolveIntent 기본값이
+      // 회피를 고르므로, 여기서 존재만 확인해 밀어 주면 된다 — 판단은 여전히
+      // 게임이 한다. `dodgeUsable`을 쓰는 이유는 스윕 두 번째 파동이 차지
+      // 0에서도 공짜로 통하기 때문이다 — `dodgeCharges > 0`만 보면 그 무료
+      // 순간을 아예 시도조차 안 한다.
+      else if (hazardsActive(s) && dodgeUsable(s)) {
+        s.pending.push({ kind: "act" });
+      }
     }
 
     // 전투가 끝나는 틱에는 battleElapsed가 리셋될 수 있으므로 직전 값을 들고 있는다.
