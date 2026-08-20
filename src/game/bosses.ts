@@ -55,6 +55,20 @@ export interface BossKit {
    * 고정이라, **보스에게서 얼마나 떨어져 서느냐**가 대형의 결정이 된다.
    */
   readonly patterns: readonly (TelegraphShape | "gather" | "stomp" | "hearth" | "quake")[];
+  /**
+   * 페이즈 2(문턱 인덱스 3부터 — battle.ts PHASE2_FROM_IDX)에서 바꿔 도는 패턴 차례. 없으면 페이즈 내내
+   * `patterns`만 돈다.
+   *
+   * **스테이지 우두머리(`Cat.stageBoss`)에게만 적용된다.** 중간보스는 걸음
+   * 하나를 채우는 자리라 성격이 끝까지 같아야 "이 보스는 이렇게 잡는다"가
+   * 흔들리지 않는다. 전환의 무게는 걸음의 끝(우두머리)에만 실린다.
+   *
+   * `battle.ts`의 `makeTelegraph`가 `boss.thresholdIdx`를 그대로 이어서
+   * 이 배열에 돌린다 — 페이즈 2 진입이 인덱스 0부터 다시 시작하지 않고
+   * 문턱 순번 중간에서 이어받는다. 패턴은 순환표일 뿐 서사적 순서가 아니므로
+   * 문제가 안 된다.
+   */
+  readonly phase2Patterns?: readonly (TelegraphShape | "gather" | "stomp" | "hearth" | "quake")[];
   /** 문턱 몇 개마다 순간이동하는가. 0이면 안 한다 */
   readonly teleportEvery: number;
   /** 취약 창이 열리는 체력 비율 */
@@ -87,16 +101,58 @@ export interface BossKit {
 export const BOSS_KITS: Record<number, BossKit> = {
   // 무쇠발톱 — 육중하게 **발밑을 구른다.** 발구르기·원형 위주라 답은 흩어지기.
   //   느리게 걸어오므로 거리를 벌 시간이 있다.
-  9: { power: 1.0, patterns: ["quake", "stomp", "quake", "cone"], teleportEvery: 2, vulnerableAt: 0.5, vulnerableMs: 3000 },
+  //
+  // 패턴 셋째 자리를 quake에서 gather로 바꿨다. 무쇠발톱은 항상 첫 보스라
+  // 청록(모임)을 한 번도 못 보고 살금이(둘째 보스, id 10)에서 처음 만나면
+  // "이 색은 뭐지"가 정예 난이도에서 시작된다. 첫 보스 안에서 한 번은
+  // 가르쳐야 살금이가 시험이 된다. avoid 셋 · gather 하나면 정체성(발구르기·
+  // 흩어지기)은 여전히 avoid가 주도한다.
+  9: {
+    power: 1.0,
+    patterns: ["quake", "stomp", "gather", "cone"],
+    // 페이즈 2 — 절반 밑으로 내려오면 gather가 두 번으로 늘어 avoid 일변에서
+    // "발구르기 사이사이 모여야 산다"로 성격이 바뀐다. stomp(보스 발밑 고정)를
+    // 빼는 이유: 페이즈 2는 취약 창(0.5) 바로 다음이라 근접이 붙어 있을
+    // 확률이 높은데, stomp까지 겹치면 "붙어서 때리기"와 "떨어져서 피하기"가
+    // 매 문턱 충돌해 무쇠발톱만 유독 어려워진다.
+    phase2Patterns: ["quake", "gather", "quake", "gather"],
+    teleportEvery: 2,
+    vulnerableAt: 0.5,
+    vulnerableMs: 3000,
+  },
   // 살금이 — 자리를 옮기며 **안전한 자리를 연다.** 모이기 위주라 답은 뭉치기.
   //   순간이동이 안전지대를 매번 다른 곳에 열어 주므로 모이기가 여기서만 산다.
   // teleportEvery를 1로 뒀더니 근접이 영영 못 붙어 W10 통과율이 1.1%였다.
   // 순간이동은 "붙었다 놓쳤다"의 리듬이어야지 추격전이 되면 안 된다.
-  10: { power: 0.85, patterns: ["gather", "line", "gather", "cone"], teleportEvery: 2, vulnerableAt: 0.6, vulnerableMs: 2600 },
+  10: {
+    power: 0.85,
+    patterns: ["gather", "line", "gather", "cone"],
+    // 페이즈 2 — 순서를 뒤집는다(cone,gather,line,gather). `thresholdIdx`가
+    // 페이즈 경계에서 리셋되지 않고 이어지므로(문턱 3부터), 남은 세 문턱이
+    // 실제로 도는 값은 [gather, cone, gather]로 바뀐다 — line(직선)이 한 번
+    // 줄고 gather가 그 자리를 메운다. 순간이동 리듬은 그대로 두고(붙었다
+    // 놓쳤다가 이 보스의 정체성이다) 판단의 무게만 모이기 쪽으로 기운다.
+    phase2Patterns: ["cone", "gather", "line", "gather"],
+    teleportEvery: 2,
+    vulnerableAt: 0.6,
+    vulnerableMs: 2600,
+  },
   // 서리귀 — 제자리에서 **원형만 던진다.** 답은 흩어지기이고, 무쇠발톱과 답은
   //   같지만 창이 늦게 열리고 길다 — 오래 버티고 한 번에 몰아치는 보스.
   //   모이기를 빼는 이유는 제자리 보스에게서 그 패턴이 아무것도 안 가르기 때문이다.
-  11: { power: 1.0, patterns: ["hearth", "circle", "hearth", "cone"], teleportEvery: 0, vulnerableAt: 0.35, vulnerableMs: 4500 },
+  11: {
+    power: 1.0,
+    patterns: ["hearth", "circle", "hearth", "cone"],
+    // 페이즈 2 — cone을 quake로 바꾼다. 화톳불(hearth, 가운데 행이 안전)과
+    // 땅울림(quake, 가운데 행이 위험)은 세로 자리가 정반대라, 둘을 같은
+    // 페이즈에 섞으면 "이번엔 어느 쪽 행이 안전한가"를 매번 다시 읽어야
+    // 한다. 서리귀는 제자리 보스라 모이기가 안 가르므로(위 주석) quake로
+    // 대비축을 만든다 — 화톳불 강조(배열엔 hearth 둘이지만 실제 순환(idx 3~5)에선 circle·hearth·quake로 한 번)에 그 반대 성격을 얹는다.
+    phase2Patterns: ["hearth", "quake", "hearth", "circle"],
+    teleportEvery: 0,
+    vulnerableAt: 0.35,
+    vulnerableMs: 4500,
+  },
 };
 
 export function bossKit(breedId: number): BossKit {

@@ -143,6 +143,16 @@ export interface RunState {
    */
   telegraphsSeen: number;
   telegraphsEaten: number;
+  /**
+   * 취약 창이 열린 채로 예고가 터진 횟수, 그리고 그중 실제로 피한 횟수.
+   *
+   * `battle.ts`의 tickBoss가 취약 창 동안에도 문턱 예고를 계속 진행하게
+   * 되면서([2]) 회피/집결과 약점 공격이 같은 순간에 부딪힐 수 있게 됐다.
+   * 얼마나 자주 겹치고 그때 얼마나 지켜냈는지가 이 축의 값을 재는 숫자다 —
+   * 판정에는 관여하지 않는 순수 부검용 카운터다.
+   */
+  vulnOverlapSeen: number;
+  vulnOverlapDodged: number;
 
   /**
    * 여정 지도.
@@ -786,6 +796,8 @@ export function newRun(seed?: number): RunState {
     lossReason: null,
     telegraphsSeen: 0,
     telegraphsEaten: 0,
+    vulnOverlapSeen: 0,
+    vulnOverlapDodged: 0,
     map: makeStage(1, runSeed),
     step: 0,
     nodeKind: null,

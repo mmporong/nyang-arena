@@ -400,6 +400,19 @@ export interface Cat {
    * 박아 두면 상태 전이와 무관하게 참을 유지한다.
    */
   stageBoss?: boolean;
+  /**
+   * 우두머리가 체력 절반 밑으로 내려와 페이즈 2 패턴으로 갈아탔는가.
+   *
+   * `blink`·`targetRef`와 같은 이유로 optional이다 — `run.ts`의 `makeCat`은
+   * 이 필드를 채우지 않는다(이 작업의 담당 파일이 아니라 손대지 않는다).
+   * 안 채워진 고양이(우두머리가 아니거나 아직 전환 전)는 `undefined`이고,
+   * `battle.ts` 전역에서 `false`와 똑같이 취급한다.
+   *
+   * 렌더가 "지금 막 전환됐다"를 프레임마다 다시 그리지 않으려면 전환 여부
+   * 자체가 상태로 남아야 한다 — 그 순간의 1회성 연출은 `Fx`의 `phaseShift`
+   * 종류가 대신한다(`battle.ts`).
+   */
+  phase2?: boolean;
 }
 
 export type Board = (Cat | null)[];

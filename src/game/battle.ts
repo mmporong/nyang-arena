@@ -1,5 +1,5 @@
 import { BALANCE } from "./balance.ts";
-import { BOSS_ANCHORS, BOSS_BREEDS, BOSS_THRESHOLDS, bossKit, TELEGRAPH_FUSE_MS } from "./bosses.ts";
+import { BOSS_ANCHORS, BOSS_BREEDS, BOSS_THRESHOLDS, bossKit, TELEGRAPH_FUSE_MS, type BossKit } from "./bosses.ts";
 import { rng } from "./rng.ts";
 import {
   BOARD_COLS,
@@ -158,7 +158,8 @@ export type FxKind =
   | "ember" // 위로 떠오르는 불티 (불씨)
   | "frost" // 얼음 결정 (빙결)
   | "burst" // 장판 모양 그대로 채워지는 섬광 (예고 발동)
-  | "bossdeath"; // 보스가 죽는 순간의 확장 링 3겹
+  | "bossdeath" // 보스가 죽는 순간의 확장 링 3겹
+  | "phaseShift"; // 우두머리가 페이즈 2로 갈아타는 순간 (1회성). render.ts가 충격파 링과 플래시로 그린다.
 
 export interface Fx {
   kind: FxKind;
@@ -819,7 +820,11 @@ function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | nu
  * WoW 레이드의 버스트 창과 같은 구조다.
  */
 function doStrike(state: RunState): boolean {
-  const boss = state.enemy.find((c) => c?.alive && c.radius > 0 && c.vulnerableMs > 0);
+  // 부재(gone) 중인 보스는 대상이 아니다 — damage()가 어차피 0으로 막는데
+  // 여기서 콤보만 오르면 "때렸는데 안 깎이는" 거짓 화면이 된다.
+  const boss = state.enemy.find(
+    (c) => c?.alive && c.radius > 0 && c.vulnerableMs > 0 && !(c.blink && c.blink.phase === "gone"),
+  );
   if (!boss) return false;
 
   boss.strikeCombo = Math.min(BALANCE.strikeComboMax, boss.strikeCombo + 1);
@@ -963,13 +968,21 @@ function tickDashes(cats: Cat[], dt: number): void {
  * `dodge`·`gather`·`strike`를 직접 지정한 것은 그대로 통과시킨다. 측정
  * 스크립트가 "늘 흩어지기만", "거꾸로 읽기" 같은 나쁜 정책을 일부러 돌려
  * 개입의 값을 재는 데 쓴다.
+ *
+ * **우선순위: 예고가 활성이면 회피/집결이 약점 공격을 이긴다.**
+ * `tickBoss`가 취약 창 **후반부**에는 문턱 예고를 허용하므로([2]), 창이
+ * 열린 중에도 예고가 뜰 수 있다 — 그 순간은 몸을 지키는 쪽이 급하다.
+ * 예고가 없을 때만 취약 창을 본다. 겹칠 때 이 우선순위 때문에 그 스텝은
+ * 회피/집결로 소비되고 약점 공격은 못 나간다 — 취약 창 연타가 "열리면
+ * 무조건 누른다"였던 것이 이제 진짜 선택이 된다(부검은 `vulnOverlapSeen`·
+ * `vulnOverlapDodged`).
  */
 function resolveIntent(state: RunState, intent: Intervention | undefined): Intervention | undefined {
   if (intent?.kind !== "act") return intent;
-  if (state.enemy.some((c) => c?.alive && c.vulnerableMs > 0)) return { kind: "strike" };
   const tg = state.enemy.find((c) => c?.telegraph)?.telegraph;
-  if (!tg) return { kind: "dodge" }; // 예고가 없으면 doDodge가 알아서 아무 일도 안 한다
-  return tg.mode === "gather" ? { kind: "gather" } : { kind: "dodge" };
+  if (tg) return tg.mode === "gather" ? { kind: "gather" } : { kind: "dodge" };
+  if (state.enemy.some((c) => c?.alive && c.vulnerableMs > 0)) return { kind: "strike" };
+  return { kind: "dodge" }; // 예고도 취약 창도 없으면 doDodge가 알아서 아무 일도 안 한다
 }
 
 /** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
@@ -1405,6 +1418,46 @@ function centroid(cats: Cat[]): { fx: number; fy: number } {
 }
 
 /**
+ * 우두머리 전용 페이즈 2가 시작되는 문턱 인덱스.
+ *
+ * 처음엔 체력 비율(≤50%)로 쟀는데, 피해가 덩어리로 들어와 idx 2(문턱 0.55)
+ * 검사 시점에 이미 절반 밑인 판이 대부분이었다 — 리뷰 실측에서 살금이는
+ * 95%가 idx 2에서 전환해, "인덱스 3에서 갈아탄다"는 페이즈 2 패턴 설계가
+ * 통째로 어긋났다. **인덱스로 직접 재면 전환 지점이 결정적**이고, 각 보스의
+ * phase2Patterns 주석이 말하는 순환(idx 3부터)이 실제와 일치한다.
+ */
+const PHASE2_FROM_IDX = 3;
+
+/**
+ * 우두머리가 절반 밑으로 내려오면 페이즈 2로 전환한다.
+ *
+ * **스테이지 우두머리(`stageBoss`)만** 대상이다 — 중간보스까지 페이즈를 나누면
+ * 걸음 하나짜리 보스도 성격이 도중에 바뀌어 "이 보스는 이렇게 잡는다"가
+ * 흔들린다. 전환의 무게는 걸음의 끝에만 싣는다.
+ *
+ * `boss.phase2`가 이미 참이면 다시 켜지 않는다 — 그래야 `phaseShift` Fx가
+ * 전환되는 그 한 순간에만 뜬다. 렌더가 매 프레임 다시 그리는 것이 아니라
+ * 상태 변화 자체를 여기서 한 번만 감지해야 한다.
+ */
+function updateBossPhase(boss: Cat, kit: BossKit): void {
+  if (boss.phase2 === true) return;
+  if (boss.stageBoss !== true || kit.phase2Patterns === undefined) return;
+  if (boss.thresholdIdx < PHASE2_FROM_IDX) return;
+  boss.phase2 = true;
+  pushFx({
+    kind: "phaseShift",
+    fx: boss.fx,
+    fy: boss.fy,
+    tx: 0,
+    ty: 0,
+    radius: boss.radius * 1.4,
+    angle: 0,
+    life: 640,
+    color: "#F0BA4A",
+  });
+}
+
+/**
  * 문턱 번호에 따라 예고를 만든다.
  *
  * 원형은 **무게중심**을 노린다. 흩어져 있으면 한가운데가 비어 아무도 안 맞고,
@@ -1412,11 +1465,16 @@ function centroid(cats: Cat[]): { fx: number; fy: number } {
  *
  * 뭉침(gather)은 보스와 아군 사이에 선다. 이미 서 있는 자리에 그리면 공짜가
  * 되므로, 근접은 뒤로 원거리는 앞으로 와야 닿는 지점에 둔다.
+ *
+ * `idx`는 페이즈가 바뀌어도 리셋되지 않는다 — 페이즈 2가 시작되는 문턱(보통
+ * 인덱스 3)부터 `phase2Patterns`를 그 인덱스 그대로 돌린다. 패턴 배열은
+ * 순환표일 뿐 처음부터 봐야 하는 서사가 아니므로 문제가 안 된다.
  */
 function makeTelegraph(boss: Cat, foes: Cat[], idx: number): Telegraph | null {
   if (foes.length === 0) return null;
   const kit = bossKit(boss.breed.id);
-  const pattern = kit.patterns[idx % kit.patterns.length]!;
+  const patterns = boss.phase2 === true && kit.phase2Patterns !== undefined ? kit.phase2Patterns : kit.patterns;
+  const pattern = patterns[idx % patterns.length]!;
   const mode: TelegraphMode = pattern === "gather" || pattern === "hearth" ? "gather" : "avoid";
   const shape: TelegraphShape =
     pattern === "gather" || pattern === "stomp" || pattern === "hearth" || pattern === "quake"
@@ -1604,6 +1662,18 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
   const t = boss.telegraph;
   if (!t) return;
   tally.telegraphsSeen += 1;
+  /**
+   * 취약 창이 열린 채로 예고가 터지는 순간 — [2]가 만든 상충 지점이다.
+   * `vulnerableMs`는 tickBoss가 이미 이번 스텝에 깎아 뒀으므로, 여기서
+   * 0보다 크면 "지금도 여전히 취약하다"는 뜻이다.
+   *
+   * 인위적으로 겹침을 늘리지 않았으므로(문턱과 취약 창 로직을 그대로 두고
+   * 취약 창의 조기 return만 없앴다) 이 카운터는 순수하게 자연 발생 빈도와
+   * 그때 실제로 몸을 지켰는지를 잰다 — 부검·측정 전용이고 판정에는 관여하지
+   * 않는다.
+   */
+  const overlapping = boss.vulnerableMs > 0;
+  if (overlapping) tally.vulnOverlapSeen += 1;
   const ramp = bossRampFor(tally);
   const frac =
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
@@ -1652,7 +1722,9 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
      * 흩어질 수 있게 한다. 대가는 피해가 아니라 **다음 한 수**가 진다.
      */
     const outside = foes.filter((f) => !inTelegraph(t, f.fx, f.fy, BALANCE.telegraphBodyPad));
-    if (outside.length > 0) tally.telegraphsEaten += 1;
+    const avoided = outside.length === 0;
+    if (!avoided) tally.telegraphsEaten += 1;
+    if (overlapping && avoided) tally.vulnOverlapDodged += 1;
     for (const f of outside) {
       damage(f, telegraphHit(f, boss, frac), false);
       fireTelegraphHitFx(f, boss, hue);
@@ -1671,7 +1743,9 @@ function fireTelegraph(boss: Cat, foes: Cat[], tally: RunState): void {
     }
     // 한 마리라도 걸리면 실패로 친다. "몇 마리 맞았나"는 팀 크기에 따라 달라져
     // 판끼리 비교가 안 되지만, "피했나 못 피했나"는 언제나 같은 뜻이다.
-    if (caught > 0) tally.telegraphsEaten += 1;
+    const avoided = caught === 0;
+    if (!avoided) tally.telegraphsEaten += 1;
+    if (overlapping && avoided) tally.vulnOverlapDodged += 1;
   }
 }
 
@@ -1769,25 +1843,27 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
    * 생긴다. 그래서 취약 창·예고 로직 전체를 건너뛴다 — 페이드가 끝나야
    * 비로소 정상적인 보스 로직으로 돌아간다.
    */
+  // 취약 창 타이머는 무엇이 진행 중이든 흐른다. blink 분기보다 위에 있는
+  // 이유: 아래 조기 return들 뒤에 두면 창이 열린 채 순간이동이 겹칠 때
+  // 타이머가 최대 1.1초 얼어붙는다 — 리뷰 실측에서 실제로 잡힌 동결이다.
+  if (boss.vulnerableMs > 0) {
+    boss.vulnerableMs = Math.max(0, boss.vulnerableMs - dt);
+    if (boss.vulnerableMs === 0) boss.strikeCombo = 0;
+  }
+
   if (boss.blink) {
     tickBlink(boss, dt);
     if (boss.blink) return; // 아직 진행 중이면 이번 스텝은 여기서 끝난다.
     // 막 도착했다 — 미뤄 둔 예고를 이제 이 자리에서 건다("연출이 끝난
     // 자리에서 예고"). thresholdIdx는 페이드를 시작할 때부터 그대로였으므로
     // 이 예고가 원래 걸렸어야 할 패턴과 정확히 같다.
+    updateBossPhase(boss, bossKit(boss.breed.id));
     boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
     boss.thresholdIdx += 1;
     return;
   }
 
   const kit = bossKit(boss.breed.id);
-
-  // 취약 창이 열려 있는 동안에는 예고를 걸지 않는다. 이 3초가 플레이어의 차례다.
-  if (boss.vulnerableMs > 0) {
-    boss.vulnerableMs = Math.max(0, boss.vulnerableMs - dt);
-    if (boss.vulnerableMs === 0) boss.strikeCombo = 0;
-    return;
-  }
 
   if (boss.telegraph) {
     boss.telegraph.fuse -= dt;
@@ -1798,14 +1874,24 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
     return; // 예고 중에는 다음 문턱을 밟아도 겹쳐 걸지 않는다
   }
 
+  /**
+   * 취약 창의 **앞 절반은 순수 연타 타임**이다. 처음 조기 return을 걷어냈을
+   * 때는 창을 연 문턱이 소비되지 않은 채 이 검사로 흘러 **창이 열린 지
+   * 100ms 만에 예고가 반드시 걸렸다** — 자유 창 시간이 100%에서 15%로
+   * 무너졌고(리뷰 실측), 그건 "가끔 오는 진짜 선택"이 아니라 창의 처형이다.
+   * 뒷 절반부터만 문턱이 발화하므로 겹침은 사건으로 남고 창은 값을 지킨다.
+   */
+  if (boss.vulnerableMs > kit.vulnerableMs / 2) return;
+
   const frac = boss.hp / Math.max(1, boss.maxHp);
   const next = BOSS_THRESHOLDS[boss.thresholdIdx];
   if (next === undefined || frac > next) return;
 
   // 한 번 걸러 자리를 옮긴 뒤 그 자리에서 예고한다. 순서가 반대면 예고가
   // 뜬 곳과 터지는 곳이 달라져 화면이 거짓말을 한다.
-  // 취약 창은 문턱보다 먼저 본다. 여기서 예고를 걸면 창과 겹쳐 회피와 공격을
-  // 동시에 요구하게 되고, 버튼이 하나라 둘 다 못 한다.
+  // 창을 여는 분기가 예고보다 먼저다. 창 전반부는 위의 유예가 예고를 막아
+  // 연타 타임을 보장하고, 후반부에 문턱을 밟으면 그때는 겹칠 수 있다 —
+  // 그 순간의 버튼은 회피가 먼저다(resolveIntent와 buttonText가 같은 규칙).
   if (!boss.vulnerableUsed && frac <= kit.vulnerableAt) {
     boss.vulnerableUsed = true;
     boss.vulnerableMs = kit.vulnerableMs;
@@ -1824,13 +1910,27 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
     return;
   }
 
-  if (kit.teleportEvery > 0 && boss.thresholdIdx % kit.teleportEvery === 0) {
+  /**
+   * 창이 열려 있는 동안에는 자리를 옮기지 않는다. 옮기면 보스가 화면에서
+   * 사라진 채 취약 창만 남아 — 버튼은 "할퀴기!"인데 때릴 몸이 없다 —
+   * 리뷰 실측에서 보스전 75.6%가 이 상태를 겪었다.
+   *
+   * 이건 **연기가 아니라 그 문턱의 순간이동을 건너뛰는 것**이다. 아래
+   * `thresholdIdx += 1`은 그대로 실행되므로 다음 기회는 2문턱 뒤다 — 실측으로
+   * 전당 순간이동이 무쇠발톱 2.07→1.40회, 살금이 2.71→1.90회(−30%) 줄었다.
+   * 그래도 스킵을 택한다: 연기(teleportPending)는 새 상태가 blink·창과 다시
+   * 얽혀 방금 닫은 조합을 도로 열고, 살금이 튜닝 이력(bosses.ts)이 경계한
+   * 것은 "너무 잦음"(추격전)이지 하한이 아니다. 리듬이 부족해지면 이 가드가
+   * 아니라 teleportEvery로 되돌릴 것.
+   */
+  if (boss.vulnerableMs <= 0 && kit.teleportEvery > 0 && boss.thresholdIdx % kit.teleportEvery === 0) {
     teleportBoss(boss, Math.floor(boss.thresholdIdx / Math.max(1, kit.teleportEvery)));
     // 페이드가 시작됐으면 예고는 그게 끝난 뒤(이 함수 위쪽의 `blink` 분기)에
     // 건다. 목적지가 이미 지금 자리와 같아 `teleportBoss`가 아무 것도 안
     // 했으면(`blink`가 안 생겼으면) 그대로 이어서 평소처럼 예고를 건다.
     if (boss.blink) return;
   }
+  updateBossPhase(boss, kit);
   boss.telegraph = makeTelegraph(boss, foes, boss.thresholdIdx);
   boss.thresholdIdx += 1;
 }
