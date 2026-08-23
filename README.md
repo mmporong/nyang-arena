@@ -104,12 +104,12 @@ src/data/synergies.json 로 커밋
 npm run gen:synergies   # 생성 (키가 없으면 커밋된 후보를 쓴다)
 npm test                # 검증 — 적대 입력 11개 → 폐기 8, 통과 3(값은 눌림)
 npm run sim             # 시뮬 — 런 300회, 시드 1~300
-npm run verify          # 채택 — 결정 축 7개를 재고 기준 미달이면 exit 1
+npm run verify          # 채택 — 검증 6축을 재고 기준 미달이면 exit 1
 ```
 
 밸런스 파라미터를 "이게 재밌을 것 같다"로 정한 적이 없다. 스윕을 돌리고 판정을
 읽고 그대로 따랐고, 그래서 **지금도 관문 하나가 빨간 채로 있다**(지도 축 격차
-1.2웨이브, 기준 1.5). 보상을 더 주는 것으로는 안 풀리고 판 구조를 바꿔야 한다는
+1.1웨이브, 기준 1.5). 보상을 더 주는 것으로는 안 풀리고 판 구조를 바꿔야 한다는
 진단까지 끝나 있고([`docs/gcon-plan.md` §5.4](docs/gcon-plan.md)), 다음 실험은
 [`docs/research-2026-08-23.md` §5](docs/research-2026-08-23.md)에 있다. 제출 당시
 빨갰던 유물 축은 그 뒤 구조를 바꿔 통과시켰다([`docs/submission.md` §4](docs/submission.md)).
@@ -186,7 +186,7 @@ npm run verify     # 위 전부 + 불변식 + 결정 축 전체 (관문)
 |---|---|
 | `dev` `build` `test` `sim` `verify` 등 | **없다.** Node 22.6+ 면 끝 |
 | `npm run docs` (PDF) | python3 + `pip install markdown` + Chrome/Chromium |
-| `npm run slice` (스프라이트 재생성) | python3 + Pillow + 원본 시트. **보통 필요 없다** — `public/sprites/`의 결과물 120장이 커밋돼 있다. 원본을 옮겼다면 `NYANG_SHEET=/경로/CatCharacterSheet.png npm run slice` |
+| `npm run slice` (스프라이트 재생성) | python3 + Pillow + 원본 시트. **보통 필요 없다** — `public/sprites/`의 결과물 186장이 커밋돼 있다. 원본을 옮겼다면 `NYANG_SHEET=/경로/CatCharacterSheet.png npm run slice` |
 | `npm run gen:synergies` | `OPENAI_API_KEY`. 없으면 커밋된 후보 파일을 쓴다 |
 
 `git clone` 주소가 SSH(`git@github.com:...`)라 새 기기에서는 SSH 키를 등록하거나
@@ -197,7 +197,9 @@ HTTPS로 바꿔야 한다.
 TypeScript · Vite · Canvas 2D · Web Audio. 엔진·프레임워크 없음.
 음악은 준비곡 하나가 지도·상점·배치·일반 전투를 통째로 흐르고, **보스전에만**
 0.8초 크로스페이드로 갈아탄다(일반 전투는 3~4초라 전용 곡을 두면 판이 토막 난다).
-음소거는 HUD 오른쪽 끝 또는 `M`.
+붉은 위험·청록 집결·금빛 취약 신호는 파일 요청 없이 Web Audio로 합성하고,
+같은 예고가 여러 프레임 유지돼도 상승 순간에만 한 번 울린다. 숨은 탭에서는
+게임 루프와 오디오를 함께 멈춘다. 음소거는 HUD 오른쪽 끝 또는 `M`.
 아트는 자체 제작 픽셀 고양이 20종 × 6포즈 시트를 `npm run slice`로 잘라 쓴다 —
 우리 8종, 악몽 8종, 보스 4종으로 스무 장을 다 쓴다. 그 위에 `npm run recolor`가
 밝기만 남기고 색을 갈아 우리 7종(직업별 셋째 넷 + 소환사 셋)·악몽 4종을 더 만들어
@@ -208,6 +210,8 @@ TypeScript · Vite · Canvas 2D · Web Audio. 엔진·프레임워크 없음.
 - **고양이 스프라이트·배경·전투 연출**: 자체 제작 (mmporong, 2026)
 - **UI 아이콘 13장**: [GUI Pro - Minimal Game Light](https://assetstore.unity.com/packages/2d/gui/gui-pro-minimal-game-light-355406) (Layer Lab) —
   생선·직업 4종·유물 8종. 흰 실루엣을 게임 색으로 틴트해서 쓴다
+- **UI 아이콘 4종**: `src/game/icons.ts`의 Canvas 2D 자체 구현 — 소환사·거울
+  부적·새끼 바구니·빈 방울. 별도 이미지 파일이나 외부 요청이 없다
 - **음악 4곡**: **Lyria**(Google, Gemini 경유)로 만들었다. 프롬프트는
   [`docs/audio-prompts.md`](docs/audio-prompts.md)에 그대로 있고, 받은 파일을
   어떻게 측정·마스터링해서 넣었는지도 같은 문서 §7에 있다

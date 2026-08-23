@@ -59,6 +59,94 @@ const CROSSFADE = 0.8;
 const MUTE_KEY = "nyang.muted";
 
 /* ------------------------------------------------------------------ */
+/* 보스 신호                                                           */
+/* ------------------------------------------------------------------ */
+
+export type BossSignal = "avoid" | "gather" | "vulnerable";
+
+/**
+ * 시제품을 분석해 얻은 구분 계약. `targetBrightnessHz`는 시제품 합성 결과의
+ * 스펙트럼 중심 측정값이며 아래 오실레이터 하나의 주파수가 아니다. 현재 구현은
+ * 이 값을 구분 목표로 삼되, 다시 렌더해 측정하기 전에는 달성했다고 주장하지 않는다.
+ */
+export const BOSS_SIGNAL_CONTRACT = {
+  avoid: { durationSec: 0.3, targetBrightnessHz: 1782, attackMs: 0 },
+  gather: { durationSec: 0.6, targetBrightnessHz: 2466, attackMs: 246 },
+  vulnerable: { durationSec: 0.9, targetBrightnessHz: 5745, attackMs: 3 },
+} as const satisfies Record<BossSignal, { durationSec: number; targetBrightnessHz: number; attackMs: number }>;
+
+interface SignalZone {
+  mode: "avoid" | "gather";
+  /** CreepZone만 갖는다. 값과 무관하게 상주 장판이면 새 예고음 대상이 아니다. */
+  idleMs?: number;
+}
+
+interface SignalBoss {
+  uid: string;
+  alive: boolean;
+  radius: number;
+  vulnerableMs: number;
+}
+
+export interface BossSignalSnapshot {
+  phase: string;
+  zones: readonly SignalZone[];
+  bosses: readonly (SignalBoss | null)[];
+}
+
+/**
+ * 전투 상태를 바꾸지 않는 순수 관찰기. 객체가 판에서 새로 보일 때만 신호를
+ * 내며, 한 스윕의 여러 행처럼 같은 프레임에 같은 모드가 여럿 떠도 한 번으로
+ * 합친다. 취약 UID는 창이 닫히면 집합에서 빠져 같은 보스의 재개방을 알린다.
+ */
+export function createBossSignalObserver(emit: (signal: BossSignal) => void): (snapshot: BossSignalSnapshot) => void {
+  let previousZones = new Set<SignalZone>();
+  let currentZones = new Set<SignalZone>();
+  let vulnerableUids = new Set<string>();
+  let currentVulnerable = new Set<string>();
+
+  return (snapshot) => {
+    if (snapshot.phase !== "battle") {
+      previousZones.clear();
+      currentZones.clear();
+      vulnerableUids.clear();
+      currentVulnerable.clear();
+      return;
+    }
+
+    currentZones.clear();
+    let avoidOpened = false;
+    let gatherOpened = false;
+    for (const zone of snapshot.zones) {
+      // 발동 뒤 남은 creep은 매 관찰마다 모양이 바뀌어도 다시 예고하지 않는다.
+      if ("idleMs" in zone) continue;
+      currentZones.add(zone);
+      if (!previousZones.has(zone)) {
+        if (zone.mode === "avoid") avoidOpened = true;
+        else gatherOpened = true;
+      }
+    }
+    const oldZones = previousZones;
+    previousZones = currentZones;
+    currentZones = oldZones;
+    if (avoidOpened) emit("avoid");
+    if (gatherOpened) emit("gather");
+
+    currentVulnerable.clear();
+    let opened = false;
+    for (const boss of snapshot.bosses) {
+      if (!boss || !boss.alive || boss.radius <= 0 || boss.vulnerableMs <= 0) continue;
+      currentVulnerable.add(boss.uid);
+      if (!vulnerableUids.has(boss.uid)) opened = true;
+    }
+    const oldVulnerable = vulnerableUids;
+    vulnerableUids = currentVulnerable;
+    currentVulnerable = oldVulnerable;
+    if (opened) emit("vulnerable");
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* 상태                                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -314,6 +402,97 @@ export function playSting(name: TrackName): void {
   src.connect(gain);
   releaseOnEnd(src, gain);
   src.start();
+}
+
+/**
+ * 파일 요청 없이 합성하는 보스 신호. 잠금 전과 음소거 중에는 오디오 노드를
+ * 하나도 만들지 않는다. 모든 발진기가 끝나면 이 신호가 만든 그래프를 뗀다.
+ */
+export function playBossSignal(signal: BossSignal): void {
+  if (!ac || !master || muted) return;
+
+  const start = ac.currentTime;
+  const spec = BOSS_SIGNAL_CONTRACT[signal];
+  const bus = ac.createGain();
+  bus.gain.value = 0.42;
+  bus.connect(master);
+
+  const oscillators: OscillatorNode[] = [];
+  const gains: GainNode[] = [];
+  const voices: Array<{ frequency: number; type: OscillatorType; offset: number; length: number; peak: number }> =
+    signal === "avoid"
+      ? [
+          { frequency: 840, type: "square", offset: 0, length: 0.12, peak: 0.18 },
+          { frequency: 1260, type: "square", offset: 0.15, length: 0.15, peak: 0.16 },
+        ]
+      : signal === "gather"
+        ? [
+            { frequency: 190, type: "sine", offset: 0, length: spec.durationSec, peak: 0.2 },
+            { frequency: 380, type: "triangle", offset: 0, length: spec.durationSec, peak: 0.1 },
+          ]
+        : [
+            { frequency: 880, type: "sine", offset: 0, length: spec.durationSec, peak: 0.14 },
+            { frequency: 1760, type: "sine", offset: 0, length: spec.durationSec, peak: 0.09 },
+            { frequency: 3520, type: "sine", offset: 0, length: spec.durationSec, peak: 0.055 },
+            { frequency: 5280, type: "sine", offset: 0, length: spec.durationSec, peak: 0.035 },
+          ];
+
+  let remaining = voices.length;
+  const release = () => {
+    remaining -= 1;
+    if (remaining > 0) return;
+    for (const osc of oscillators) {
+      try {
+        osc.disconnect();
+      } catch {
+        // 이미 떼였다
+      }
+    }
+    for (const gain of gains) {
+      try {
+        gain.disconnect();
+      } catch {
+        // 이미 떼였다
+      }
+    }
+    try {
+      bus.disconnect();
+    } catch {
+      // 이미 떼였다
+    }
+  };
+
+  for (const voice of voices) {
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    const voiceStart = start + voice.offset;
+    const voiceEnd = voiceStart + voice.length;
+    const attack = Math.min(voice.length * 0.8, spec.attackMs / 1000);
+    osc.type = voice.type;
+    osc.frequency.value = voice.frequency;
+    gain.gain.setValueAtTime(0.0001, voiceStart);
+    if (attack === 0) gain.gain.setValueAtTime(voice.peak, voiceStart);
+    else gain.gain.linearRampToValueAtTime(voice.peak, voiceStart + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, voiceEnd);
+    osc.connect(gain);
+    gain.connect(bus);
+    osc.onended = release;
+    oscillators.push(osc);
+    gains.push(gain);
+    osc.start(voiceStart);
+    osc.stop(voiceEnd);
+  }
+}
+
+/** 숨은 탭에서는 기존 컨텍스트만 멈춘다. 이 함수는 새 컨텍스트를 만들지 않는다. */
+export function setAudioVisibility(hidden: boolean): void {
+  if (!ac) return;
+  try {
+    const transition = hidden ? ac.suspend() : ac.resume();
+    void transition.catch(() => undefined);
+  } catch {
+    // 브라우저가 동기적으로 거부해도 게임 루프는 계속 돈다.
+  }
 }
 
 /* ------------------------------------------------------------------ */

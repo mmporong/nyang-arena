@@ -1,8 +1,8 @@
 /**
  * 아이콘.
  *
- * 전부 Canvas 2D 패스로 그린다. 외부 요청 0건이 제출 조건이라 아이콘 폰트도
- * SVG 스프라이트도 못 쓴다.
+ * 로컬 PNG 픽토그램과 Canvas 2D 패스를 함께 쓴다. 외부 요청 0건이 제출 조건이라
+ * 아이콘 폰트나 원격 SVG는 쓰지 않는다.
  *
  * 왜 글자 대신 그림인가 — **지도 칸과 자원은 훑어보는 물건**이다. "전투/정예/정찰"
  * 세 낱말은 길이가 같고 첫 글자도 안 겹치지만, 지름 30px 원 안에 넣으면 셋 다
@@ -40,13 +40,12 @@ function stroke(ctx: CanvasRenderingContext2D, size: number, color: string, rati
  * 진영색·직업색·켜짐 여부에 따라 같은 그림을 다른 색으로 써야 하므로 이게 중요하다.
  * 색을 입힌 결과는 캔버스에 캐시한다 — 매 프레임 합성하면 60fps에서 낭비다.
  */
-const ICON_NAMES = [
+const BITMAP_ICON_NAMES = [
   "fish",
   "cls-warrior",
   "cls-rogue",
   "cls-archer",
   "cls-mage",
-  "cls-summoner",
   "relic-iron_collar",
   "relic-shadow_claw",
   "relic-hawk_eye",
@@ -55,12 +54,19 @@ const ICON_NAMES = [
   "relic-the_swarm",
   "relic-crown",
   "relic-rainbow_bell",
+] as const;
+
+/** 외부 출처가 필요 없는 손그림 아이콘. 작은 크기에서도 윤곽이 갈리게 선으로 그린다. */
+const CODE_ICON_NAMES = [
+  "cls-summoner",
   "relic-mirror_charm",
   "relic-kitten_basket",
   "relic-hollow_bell",
 ] as const;
 
-export type IconName = (typeof ICON_NAMES)[number];
+type BitmapIconName = (typeof BITMAP_ICON_NAMES)[number];
+type CodeIconName = (typeof CODE_ICON_NAMES)[number];
+export type IconName = BitmapIconName | CodeIconName;
 
 const icons = new Map<string, HTMLImageElement>();
 const tintCache = new Map<string, HTMLCanvasElement>();
@@ -68,7 +74,7 @@ const tintCache = new Map<string, HTMLCanvasElement>();
 /** 전부 로드될 때까지 기다린다. 한 장 실패해도 게임은 떠야 하므로 폴백이 있다. */
 export async function loadIcons(): Promise<void> {
   await Promise.all(
-    ICON_NAMES.map(
+    BITMAP_ICON_NAMES.map(
       (name) =>
         new Promise<void>((resolve) => {
           const img = new Image();
@@ -85,7 +91,7 @@ export async function loadIcons(): Promise<void> {
 }
 
 /** 색을 입힌 사본. 원본은 흰색이므로 source-in 한 번이면 된다. */
-function tinted(name: IconName, color: string): HTMLCanvasElement | null {
+function tinted(name: BitmapIconName, color: string): HTMLCanvasElement | null {
   const img = icons.get(name);
   if (!img || !img.complete || img.naturalWidth === 0) return null;
 
@@ -106,6 +112,151 @@ function tinted(name: IconName, color: string): HTMLCanvasElement | null {
   return c;
 }
 
+function isCodeIconName(name: IconName): name is CodeIconName {
+  return (
+    name === "cls-summoner" ||
+    name === "relic-mirror_charm" ||
+    name === "relic-kitten_basket" ||
+    name === "relic-hollow_bell"
+  );
+}
+
+/** 소환사 — 소환진과 그 둘레에 나타나는 세 존재. */
+function drawSummonerIcon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  const u = size / 20;
+  ctx.save();
+  stroke(ctx, size, color, 0.105);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, u * 5.1, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, u * 2.15, -Math.PI * 0.2, Math.PI * 1.25);
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - u * 8.3);
+  ctx.arc(cx, cy - u * 6.9, u * 1.4, -Math.PI / 2, Math.PI * 1.5);
+  ctx.moveTo(cx - u * 5.9, cy + u * 5.5);
+  ctx.arc(cx - u * 4.8, cy + u * 4.6, u * 1.4, Math.PI * 0.8, Math.PI * 2.8);
+  ctx.moveTo(cx + u * 5.9, cy + u * 5.5);
+  ctx.arc(cx + u * 4.8, cy + u * 4.6, u * 1.4, Math.PI * 0.2, Math.PI * 2.2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** 거울 부적 — 세로 거울과 손잡이, 반사광 한 줄. */
+function drawMirrorIcon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  const u = size / 20;
+  ctx.save();
+  stroke(ctx, size, color, 0.11);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy - u * 1.8, u * 5.2, u * 6.6, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + u * 4.9);
+  ctx.lineTo(cx, cy + u * 8.1);
+  ctx.moveTo(cx - u * 2.2, cy + u * 8.1);
+  ctx.lineTo(cx + u * 2.2, cy + u * 8.1);
+  ctx.moveTo(cx - u * 2.7, cy - u * 4.2);
+  ctx.lineTo(cx + u * 1.2, cy - u * 6.1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 새끼 바구니 — 귀가 솟은 고양이 머리와 짜임 바구니. */
+function drawKittenBasketIcon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  const u = size / 20;
+  ctx.save();
+  stroke(ctx, size, color, 0.105);
+
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 4.8, cy - u * 1.4);
+  ctx.lineTo(cx - u * 4.2, cy - u * 6.8);
+  ctx.lineTo(cx - u * 1.2, cy - u * 4.5);
+  ctx.quadraticCurveTo(cx, cy - u * 5.2, cx + u * 1.2, cy - u * 4.5);
+  ctx.lineTo(cx + u * 4.2, cy - u * 6.8);
+  ctx.lineTo(cx + u * 4.8, cy - u * 1.4);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 7.2, cy - u * 1.2);
+  ctx.lineTo(cx - u * 5.7, cy + u * 7.2);
+  ctx.lineTo(cx + u * 5.7, cy + u * 7.2);
+  ctx.lineTo(cx + u * 7.2, cy - u * 1.2);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 6.2, cy + u * 2.1);
+  ctx.lineTo(cx + u * 6.2, cy + u * 2.1);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 빈 방울 — 속이 열린 종 몸체와 분리된 추. */
+function drawHollowBellIcon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  const u = size / 20;
+  ctx.save();
+  stroke(ctx, size, color, 0.11);
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 6.7, cy + u * 4.2);
+  ctx.quadraticCurveTo(cx - u * 4.8, cy + u * 1.1, cx - u * 4.8, cy - u * 2.3);
+  ctx.quadraticCurveTo(cx - u * 4.8, cy - u * 7.1, cx, cy - u * 7.1);
+  ctx.quadraticCurveTo(cx + u * 4.8, cy - u * 7.1, cx + u * 4.8, cy - u * 2.3);
+  ctx.quadraticCurveTo(cx + u * 4.8, cy + u * 1.1, cx + u * 6.7, cy + u * 4.2);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - u * 7.6, cy + u * 4.2);
+  ctx.lineTo(cx + u * 7.6, cy + u * 4.2);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx, cy + u * 7.1, u * 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawCodeIcon(
+  ctx: CanvasRenderingContext2D,
+  name: CodeIconName,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  if (name === "cls-summoner") drawSummonerIcon(ctx, cx, cy, size, color);
+  else if (name === "relic-mirror_charm") drawMirrorIcon(ctx, cx, cy, size, color);
+  else if (name === "relic-kitten_basket") drawKittenBasketIcon(ctx, cx, cy, size, color);
+  else drawHollowBellIcon(ctx, cx, cy, size, color);
+}
+
 /**
  * `(cx, cy)`를 중심으로 한 변이 `size`인 정사각형 안에 그린다.
  * @returns 그렸으면 true. false면 호출부가 폴백을 그려야 한다.
@@ -118,6 +269,10 @@ export function drawIcon(
   size: number,
   color: string,
 ): boolean {
+  if (isCodeIconName(name)) {
+    drawCodeIcon(ctx, name, cx, cy, size, color);
+    return true;
+  }
   const c = tinted(name, color);
   if (!c) return false;
   ctx.drawImage(c, cx - size / 2, cy - size / 2, size, size);

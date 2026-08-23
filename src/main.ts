@@ -1,4 +1,4 @@
-import { clearBattleFx, dualChoiceActive, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
+import { clearBattleFx, dualChoiceActive, hazardZones, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
 import { BALANCE } from "./game/balance.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
 import {
@@ -29,7 +29,15 @@ import { openLanes } from "./game/map.ts";
 import { cellToField, type Intervention } from "./game/types.ts";
 import { loadSprites } from "./game/sprites.ts";
 import { loadIcons } from "./game/icons.ts";
-import { playSting, setBed, toggleMute, unlockAudio } from "./game/audio.ts";
+import {
+  createBossSignalObserver,
+  playBossSignal,
+  playSting,
+  setAudioVisibility,
+  setBed,
+  toggleMute,
+  unlockAudio,
+} from "./game/audio.ts";
 
 const app = document.getElementById("app");
 const boot = document.getElementById("boot");
@@ -58,6 +66,7 @@ let hoverCell = -1;
  */
 let phaseChangedAt = 0;
 let lastPhase: RunState["phase"] = state.phase;
+const observeBossSignals = createBossSignalObserver(playBossSignal);
 
 /* ------------------------------------------------------------------ */
 /* 계측                                                                 */
@@ -670,6 +679,11 @@ function frame(now: number): void {
    * 그대로다. 이건 밸런스가 아니라 표현이라는 근거가 바로 이 분리다.
    */
   stepBattle(state, dt * BALANCE.battleSpeed);
+  observeBossSignals({
+    phase: state.phase,
+    zones: hazardZones(state),
+    bosses: state.enemy,
+  });
   setBed(musicFor(state));
   render(ctx!, layout, state, drag, hoverCell);
   /**
@@ -686,6 +700,7 @@ function frame(now: number): void {
 
 let paused = false;
 document.addEventListener("visibilitychange", () => {
+  setAudioVisibility(document.hidden);
   if (document.hidden || !paused) return;
   paused = false;
   // 떠난 동안의 시간을 한 번에 밀어 넣지 않도록 dt 기준점을 비운다.
