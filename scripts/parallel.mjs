@@ -57,8 +57,9 @@ export async function runSharded(scriptUrl, names, play, { runs, seed0 }) {
       out[t.name] = { start: t.start, results: arr };
     }
     parentPort.postMessage(out);
-    // 메시지가 나간 뒤 스크립트의 나머지(집계·판정)가 워커에서 돌면 안 된다.
-    await new Promise(() => {});
+    // 메시지를 보낸 뒤 워커를 끝낸다 — 아래 집계·판정 코드가 워커에서 돌면 안 되고,
+    // never-resolve await로 세워 두면 종료 시 "unsettled top-level await" 경고가 출력에 샌다.
+    process.exit(0);
   }
 
   const workers = workerCount();
