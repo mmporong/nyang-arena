@@ -27,7 +27,7 @@ if (!isMainThread) {
   console.warn = () => {};
 }
 
-export function workerCount() {
+function workerCount() {
   const env = Number(process.env.WORKERS);
   if (Number.isFinite(env) && env >= 1) return Math.floor(env);
   const cores = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length;
