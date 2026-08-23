@@ -800,6 +800,8 @@ function drawBoard(
       ctx.stroke();
     }
   }
+  // 하이라이트 칸은 캐시된 바탕(4.5% 크림) 위에 덧그린다 — 예전엔 그 칸만 13%였으니 엄밀히는
+  // 4.5%만큼 더 밝다. 눈으로 구분되지 않는 차이라 캐시를 두 장으로 가르지 않았다(의도).
   if (highlightCell >= 0 && highlightCell < BOARD_SIZE) {
     const cr = cellRect(L, side, highlightCell);
     roundRect(ctx, cr, L.cell * 0.16);
