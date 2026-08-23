@@ -95,10 +95,6 @@ Remove-Item Env:NYANG_SHEET
 한 동작당 한 장만 요구한다. 시작·회수는 기존 `idle/move`와 코드 트윈으로 연결해 원화 수를
 늘리지 않는다. 파생 ID 21~31은 현재 리컬러 매핑을 그대로 적용한다.
 
-ID 01의 `attack`·`hit` 동작 방향은 ChatGPT/Codex 앱 내장 이미지 생성으로 먼저 탐색했다.
-결과와 최종본으로 바로 쓸 수 없는 이유, 픽셀 아티스트 전달 조건은
-[`art-candidates/README.md`](art-candidates/README.md)에 기록한다.
-
 ### P1 — 능력과 상태를 구분하는 포즈
 
 | 에셋 | 새 원화 수 | 예상 런타임 수 | 규격 | 필요한 이유 |
