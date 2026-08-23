@@ -27,6 +27,16 @@ export const BALANCE = {
   scoutDodgeBonus: 2,
   /** 정예를 넘었을 때의 생선 배수. 저격대는 통과율이 낮으므로 값을 해야 한다. */
   eliteGoldMul: 1.6,
+  /**
+   * 도전 한 단계가 적 스탯에 곱하는 몫(+8%/단계).
+   *
+   * 재진입 고리다 — 죽은 화면에서 "도전 +1"을 고르면 다음 판의 적이 이만큼
+   * 세진다. 영구 파워 해금을 넣지 않는다는 원칙의 반대편 손잡이: 플레이어가
+   * 강해지는 대신 적이 세지고, 기록은 단계별로 따로 남는다(`run.ts`의
+   * `recordOutcome`). 기본 0단계는 곱이 1이라 시뮬·관문(`npm run verify`)에는
+   * 아무 영향이 없다 — 하네스는 전부 `newRun(seed)`로 0단계를 돈다.
+   */
+  challengeStep: 0.08,
 
   /**
    * 보스 처치 보너스 = (goldBase + wave*goldPerWave) × 이 값.

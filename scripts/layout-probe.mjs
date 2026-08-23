@@ -21,7 +21,7 @@
  */
 import { cellRect, computeLayout, fieldToScreen } from "../src/game/layout.ts";
 import { wrapLines } from "../src/game/theme.ts";
-import { rerollRect, healthBarGeom, offerRects } from "../src/game/render.ts";
+import { rerollRect, healthBarGeom, offerRects, gameoverGeometry } from "../src/game/render.ts";
 import { BOARD_SIZE, BOARD_COLS, cellToField } from "../src/game/types.ts";
 import { BOSS_RADIUS, SNIPER_RADIUS } from "../src/game/bosses.ts";
 
@@ -130,6 +130,53 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log("\n전부 통과 — HUD와 안내 문구는 어느 구성에서도 끝까지 보인다");
+
+/* ---------------------------------------------------------------- */
+/* 죽은 화면의 세 갈래 버튼                                            */
+/* ---------------------------------------------------------------- */
+
+/**
+ * 부검 판 바닥의 세 버튼(같은 시드 · 오늘의 시드 · 도전 +1)이 어느 기기에서도
+ * (1) 손가락 최소치(40px)를 지키고 (2) 판 안에 있고 (3) 판이 큰 버튼을 덮지 않고
+ * (4) 판이 화면 위로 나가지 않는지 본다. 줄 수가 가장 많은 판(무엇에 막혔나 ·
+ * 예고 성적 · 팀 · 판 종류 · 도감)으로 잰다 — 그보다 짧은 판은 더 여유롭다.
+ * 그림과 히트테스트가 같은 `gameoverGeometry`를 쓰므로 여기서 통과하면 손이
+ * 닿는 자리와 보이는 자리가 같다.
+ */
+const worstCase = {
+  lossReason: "wipe",
+  killer: { name: "무쇠발톱", hpFrac: 0.4, boss: true },
+  telegraphsSeen: 6,
+  kind: "challenge",
+  challenge: 3,
+};
+let goFailed = 0;
+console.log("\n죽은 화면 세 갈래 버튼 (최다 줄 기준)");
+console.log("기기               버튼 w×h   판 위끝  판 밑끝/큰버튼  판정");
+for (const [name, w, h] of DEVICES) {
+  const L = computeLayout(w, h);
+  const { panel, choices } = gameoverGeometry(L, worstCase);
+  const all = [choices.retry, choices.daily, choices.challenge];
+  const inside = all.every(
+    (r) => r.x >= panel.x && r.x + r.w <= panel.x + panel.w + 0.5 && r.y >= panel.y && r.y + r.h <= panel.y + panel.h + 0.5,
+  );
+  const finger = all.every((r) => r.h >= 40 && r.w >= 56);
+  const aboveButton = panel.y + panel.h <= L.button.y + 0.5;
+  const onScreen = panel.y >= 0;
+  const ok = inside && finger && aboveButton && onScreen;
+  if (!ok) goFailed++;
+  console.log(
+    `${name.padEnd(18)} ${String(Math.round(choices.retry.w)).padStart(4)}×${String(Math.round(choices.retry.h)).padEnd(4)} ` +
+      `${String(Math.round(panel.y)).padStart(6)}  ${String(Math.round(panel.y + panel.h)).padStart(6)}/${String(Math.round(L.button.y)).padEnd(6)}  ` +
+      (ok ? "OK" : "실패"),
+  );
+}
+if (goFailed > 0) {
+  console.log(`\n${goFailed}개 기기에서 실패 — 죽은 화면의 버튼이 작거나 판이 큰 버튼을 덮는다`);
+  process.exit(1);
+}
+console.log("전부 통과 — 세 갈래 버튼은 어느 기기에서도 손가락 크기이고 판 안에 있다");
+
 
 /* ---------------------------------------------------------------- */
 /* 카드 설명 줄바꿈                                                    */

@@ -21,6 +21,7 @@ import { drawScene, type Scene } from "./backdrop.ts";
 import { bossHint, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted } from "./audio.ts";
+import { BALANCE } from "./balance.ts";
 import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
@@ -34,6 +35,9 @@ import {
   bossIndexAt,
   bossesSeen,
   relicActive,
+  CODEX_TOTALS,
+  loadCodex,
+  type Codex,
   type Offer,
   type RunState,
 } from "./run.ts";
@@ -683,11 +687,12 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   );
   drawGoldPops(ctx, goldChip);
 
+  // 판 종류별 잣대 — 오늘의 시드는 그날, 도전은 그 단계의 기록을 보여준다.
   hudChip(
     ctx,
     { x: r.x + third * 2, y: r.y, w: third, h: r.h },
-    "최고 기록",
-    s.best > 0 ? String(s.best) : "-",
+    recordCaption(s),
+    s.modeBest > 0 ? String(s.modeBest) : "-",
     T.paperDim,
     "right",
   );
@@ -3727,6 +3732,66 @@ function drawNotice(
   });
 }
 
+/** 죽은 화면의 세 갈래 버튼 자리. 그림(`drawGameOver`)과 히트테스트(main.ts)가 같이 쓴다. */
+export interface GameoverGeometry {
+  panel: Rect;
+  choices: { retry: Rect; daily: Rect; challenge: Rect };
+}
+
+/**
+ * 부검 판의 기하.
+ *
+ * 줄 수가 판마다 다르므로(무엇에 막혔나 · 예고 성적 · 팀 · 판 종류 · 도감) 높이를
+ * 여기서 한 번만 계산하고, 세 갈래 버튼은 판 바닥에 깐다. 버튼 높이는 손가락
+ * 최소치(40px)를 지킨다 — `npm run probe`가 큰 버튼에 거는 기준과 같다.
+ */
+export function gameoverGeometry(L: Layout, s: RunState): GameoverGeometry {
+  const lines =
+    (s.lossReason === "timeout" || s.killer ? 1 : 0) +
+    (s.telegraphsSeen > 0 ? 1 : 0) +
+    1 +
+    (s.kind !== "free" ? 1 : 0) +
+    1;
+  const choiceH = Math.max(40, L.scale * 40);
+  const inset = L.scale * 12;
+  const panelW = Math.min(L.w * 0.86, L.scale * 560);
+  const panelH = L.scale * 174 + lines * L.scale * 20 + choiceH + L.scale * 30;
+  // 버튼 위로만 쓴다. 아래로 내려가면 유일한 행동이 판에 깔린다.
+  const top = Math.max(L.scale * 10, (L.button.y - panelH) / 2);
+  const panel: Rect = { x: L.w / 2 - panelW / 2, y: top, w: panelW, h: panelH };
+  const gap = Math.max(6, L.scale * 8);
+  const cw = (panel.w - inset * 2 - gap * 2) / 3;
+  const cy = panel.y + panel.h - inset - choiceH;
+  const at = (i: number): Rect => ({ x: panel.x + inset + i * (cw + gap), y: cy, w: cw, h: choiceH });
+  return { panel, choices: { retry: at(0), daily: at(1), challenge: at(2) } };
+}
+
+let codexCacheFor: RunState | null = null;
+let codexCache: Codex = { breeds: [], relics: [], bosses: [] };
+
+/** 죽은 화면은 매 프레임 그려지므로 도감은 판(RunState)당 한 번만 읽는다. */
+function codexFor(s: RunState): Codex {
+  if (codexCacheFor !== s) {
+    codexCache = loadCodex();
+    codexCacheFor = s;
+  }
+  return codexCache;
+}
+
+function modeLabel(s: RunState): string {
+  if (s.kind === "daily") return `오늘의 시드 ${s.dailyKey ?? ""}`.trim();
+  if (s.kind === "challenge") return `도전 ${s.challenge} · 적 +${Math.round(BALANCE.challengeStep * s.challenge * 100)}%`;
+  if (s.kind === "retry") return "같은 시드로 다시 한 판";
+  return "";
+}
+
+/** HUD·부검 막대가 쓰는 기록 이름. 판 종류별로 잣대가 다르다. */
+function recordCaption(s: RunState): string {
+  if (s.kind === "daily") return "오늘 최고";
+  if (s.kind === "challenge") return `도전 ${s.challenge} 최고`;
+  return "최고 기록";
+}
+
 function drawGameOver(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -3743,13 +3808,7 @@ function drawGameOver(
    * 너머로 비쳐 글자와 겹쳤다. 읽어야 할 것과 이미 끝난 것이 같은 자리에서
    * 싸우면 둘 다 안 읽힌다. 판을 깔아 안팎을 가른다.
    */
-  const lines =
-    (s.lossReason === "timeout" || s.killer ? 1 : 0) + (s.telegraphsSeen > 0 ? 1 : 0) + 1;
-  const panelW = Math.min(L.w * 0.86, L.scale * 560);
-  const panelH = L.scale * 174 + lines * L.scale * 20;
-  // 버튼 위로만 쓴다. 아래로 내려가면 유일한 행동이 판에 깔린다.
-  const top = Math.max(L.scale * 10, (L.button.y - panelH) / 2);
-  const panel = { x: L.w / 2 - panelW / 2, y: top, w: panelW, h: panelH };
+  const { panel, choices } = gameoverGeometry(L, s);
   bevelPanel(ctx, panel, L.scale * 12, "rgba(20,14,11,0.94)", "rgba(0,0,0,0.6)", 2);
 
   const cy = panel.y + L.scale * 76;
@@ -3818,13 +3877,22 @@ function drawGameOver(
   const team = CLASS_ORDER.map((c) => `${CLASS_SHORT[c]}${by[c]}`).join(" ");
   line(s.relics.length > 0 ? `${team} · ${s.relics.map((r) => r.name).join(" · ")}` : team, T.muted);
 
+  // 판의 종류와 도감. 기본 판이면 종류는 말하지 않는다 — 없는 얘기를 하면 화면만
+  // 길어진다. 도감은 정보 해금이다: 본 것이 쌓일 뿐 다음 판이 쉬워지지 않는다.
+  if (s.kind !== "free") line(modeLabel(s), T.paperDim, 800);
+  const cx = codexFor(s);
+  line(
+    `도감  고양이 ${cx.breeds.length}/${CODEX_TOTALS.breeds} · 유물 ${cx.relics.length}/${CODEX_TOTALS.relics} · 보스 ${cx.bosses.length}/${CODEX_TOTALS.bosses}`,
+    T.muted,
+  );
+
   /**
    * 최고 기록 대비 막대.
    *
    * "12웨이브"는 잘한 건지 못한 건지 알 수 없는 숫자다. 자기 최고 기록 옆에
    * 놓으면 그때서야 뜻이 생긴다 — 거의 다 왔는지, 한참 못 미쳤는지.
    */
-  const goal = Math.max(s.best, s.wave, 1);
+  const goal = Math.max(s.modeBest, s.wave, 1);
   const bw = Math.min(L.w * 0.5, L.scale * 320);
   const bh = Math.max(6, L.scale * 9);
   const bx = L.w / 2 - bw / 2;
@@ -3836,21 +3904,43 @@ function drawGameOver(
   ctx.fillStyle = s.recordBroken ? T.gold : T.ally;
   ctx.fill();
   // 최고 기록 눈금. 갱신한 판에는 내가 그 눈금이므로 그리지 않는다.
-  if (!s.recordBroken && s.best > 0) {
-    const tx = bx + (bw * s.best) / goal;
+  if (!s.recordBroken && s.modeBest > 0) {
+    const tx = bx + (bw * s.modeBest) / goal;
     ctx.fillStyle = T.gold;
     ctx.fillRect(tx - 1, byy - bh * 0.35, 2, bh * 1.7);
   }
 
   uiText(
     ctx,
-    s.recordBroken ? "최고 기록 갱신" : `최고 기록 ${s.best}웨이브`,
+    s.recordBroken ? `${recordCaption(s)} 갱신` : `${recordCaption(s)} ${s.modeBest}웨이브`,
     L.w / 2,
     byy + bh + L.scale * 14,
     L.scale * 14,
     s.recordBroken ? T.gold : T.muted,
     { align: "center", weight: 800 },
   );
+
+  /**
+   * 다음 판 세 갈래 — 같은 시드 · 오늘의 시드 · 도전 +1.
+   *
+   * 큰 버튼("다시 도전")은 같은 종류로 한 판 더이고, 여기 셋은 종류를 바꾼다.
+   * 부검 바로 아래 두는 이유는 "다음엔 뭘 다르게 하지"의 답이 나온 자리에서
+   * 바로 고르게 하려는 것이다 — 같은 판을 다시(내 선택 탓인지), 모두와 같은
+   * 판을(오늘의 시드), 더 센 판을(도전). 히트테스트는 `gameoverGeometry`를
+   * main.ts가 같이 써서 그림과 어긋나지 않는다.
+   */
+  uiText(
+    ctx,
+    `도전은 단계마다 적 +${Math.round(BALANCE.challengeStep * 100)}% · 기록은 종류별로 따로 남는다`,
+    L.w / 2,
+    choices.retry.y - L.scale * 11,
+    L.scale * 11,
+    T.muted,
+    { align: "center", maxWidth: panel.w - L.scale * 24 },
+  );
+  drawButtonFace(ctx, choices.retry, true, false, "같은 시드");
+  drawButtonFace(ctx, choices.daily, true, false, "오늘의 시드");
+  drawButtonFace(ctx, choices.challenge, true, false, `도전 ${s.challenge + 1}`);
 }
 
 /* ------------------------------------------------------------------ */

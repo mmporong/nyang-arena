@@ -337,3 +337,94 @@ if (mirrorFailures.length === 0) {
     process.exit(1);
   }
 }
+
+/**
+ * 재진입 고리 계약 — 판 종류별 기록·시드·도전 배수.
+ *
+ * 죽은 화면의 세 갈래(같은 시드·오늘의 시드·도전 +1)는 기록을 **종류별로** 따로
+ * 남겨야 하고, 하네스가 쓰는 `newRun(seed)`는 0단계라 어떤 수치도 바꾸면 안 된다.
+ * 노드에는 localStorage가 없다 — 없어도 게임이 돌아야 한다는 것이 첫 단언이고,
+ * 그다음은 가짜 저장소를 끼워 기록 규칙을 박는다.
+ */
+{
+  const run = await import("../src/game/run.ts");
+  const { BALANCE } = await import("../src/game/balance.ts");
+  const { openLanes } = await import("../src/game/map.ts");
+  const failures = [];
+
+  // 1) 저장소 없이: 기본 판은 free·0단계·기록 0
+  const bare = run.newRun(7);
+  if (bare.kind !== "free" || bare.challenge !== 0 || bare.dailyKey !== null || bare.modeBest !== 0 || bare.best !== 0)
+    failures.push("저장소 없이 newRun(seed)의 기본값(free·0단계·기록 0)이 다르다");
+
+  // 가짜 localStorage — 이 블록 안에서만 산다
+  const mem = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+    setItem: (k, v) => void mem.set(k, String(v)),
+    removeItem: (k) => void mem.delete(k),
+    clear: () => mem.clear(),
+  };
+  try {
+    // 2) 오늘의 시드: 같은 날 같은 값, 다른 날 다른 값, 키 형식
+    if (run.dailySeed("2026-08-23") !== run.dailySeed("2026-08-23")) failures.push("dailySeed가 결정적이지 않다");
+    if (run.dailySeed("2026-08-23") === run.dailySeed("2026-08-24")) failures.push("dailySeed가 날짜를 가르지 못한다");
+    if (run.dailyKeyToday(new Date(2026, 7, 23)) !== "2026-08-23") failures.push("dailyKeyToday 형식이 YYYY-MM-DD가 아니다");
+
+    // 3) 도전 배수: 같은 시드·같은 길에서 적 체력 합이 (1 + step×단계)배, 적 구성은 그대로
+    const a = run.newRun(11);
+    const b = run.newRun(11, { kind: "challenge", challenge: 2 });
+    const lane = openLanes(a.map, 0)[0];
+    run.chooseNode(a, lane);
+    run.chooseNode(b, lane);
+    const ids = (s) => s.enemy.filter(Boolean).map((c) => c.breed.id).join(",");
+    const hp = (s) => s.enemy.filter(Boolean).reduce((t, c) => t + c.maxHp, 0);
+    if (ids(a) !== ids(b)) failures.push("도전 단계가 적 구성(시드 결과)을 바꾼다");
+    const want = 1 + BALANCE.challengeStep * 2;
+    const got = hp(b) / hp(a);
+    if (Math.abs(got - want) > 0.03) failures.push(`도전 2단계 적 체력 배수 ${got.toFixed(3)} (기대 ${want.toFixed(2)})`);
+
+    // 4) 기록: 도전은 전체 최고를 안 건드리고 단계별로, 오늘의 시드는 그날+전체, 기본은 전체
+    const c = run.newRun(3, { kind: "challenge", challenge: 1 });
+    c.wave = 9;
+    run.finishWave(c, false);
+    if (run.loadBest() !== 0) failures.push("도전 판이 전체 최고 기록을 건드렸다");
+    if (run.loadChallengeBest(1) !== 9 || c.modeBest !== 9 || !c.recordBroken) failures.push("도전 1단계 기록이 9로 남지 않았다");
+    const d = run.newRun(3, { kind: "daily", dailyKey: "2026-08-23" });
+    d.wave = 6;
+    run.finishWave(d, false);
+    if (run.loadBest() !== 6 || run.loadDailyBest("2026-08-23") !== 6) failures.push("오늘의 시드 판이 그날 기록과 전체 최고를 둘 다 남기지 않았다");
+    const e = run.newRun(3);
+    e.wave = 4;
+    run.finishWave(e, false);
+    if (run.loadBest() !== 6 || e.recordBroken || e.modeBest !== 6) failures.push("기본 판이 더 낮은 웨이브로 기록을 덮거나 갱신으로 표시했다");
+    const codex = run.loadCodex();
+    if (codex.breeds.length < 3 || run.loadRuns().length !== 3) failures.push("도감·최근 판 목록이 쌓이지 않았다");
+
+    // 5) 다음 판 갈래: 종류와 시드가 약속대로
+    const r1 = run.nextRunFrom(c, "retry");
+    if (r1.kind !== "challenge" || r1.challenge !== 1 || r1.seed !== 3) failures.push("도전 판 같은 시드가 종류·단계·시드를 잃었다");
+    const r2 = run.nextRunFrom(d, "retry");
+    if (r2.kind !== "daily" || r2.dailyKey !== "2026-08-23" || r2.seed !== 3) failures.push("오늘의 시드 판 같은 시드가 종류를 잃었다");
+    const r3 = run.nextRunFrom(e, "retry");
+    if (r3.kind !== "retry" || r3.seed !== 3) failures.push("기본 판 같은 시드가 retry/같은 시드가 아니다");
+    const r4 = run.nextRunFrom(e, "challenge");
+    if (r4.kind !== "challenge" || r4.challenge !== 1) failures.push("도전 +1이 1단계를 만들지 않았다");
+    const r5 = run.nextRunFrom(c, "challenge");
+    if (r5.challenge !== 2) failures.push("도전 1에서 도전 +1이 2단계가 아니다");
+    const r6 = run.nextRunFrom(e, "daily");
+    if (r6.kind !== "daily" || r6.seed !== run.dailySeed(run.dailyKeyToday())) failures.push("오늘의 시드가 오늘 날짜의 시드가 아니다");
+    const r7 = run.nextRunFrom(c, "again");
+    if (r7.kind !== "challenge" || r7.challenge !== 1 || r7.seed === 3) failures.push("도전 판 다시 도전이 같은 단계·새 시드가 아니다");
+  } finally {
+    delete globalThis.localStorage;
+  }
+
+  console.log("\n재진입 고리 계약 (기록은 종류별로, 0단계는 하네스와 같다)");
+  if (failures.length === 0) {
+    console.log(`  OK   도전 배수 ${(1 + BALANCE.challengeStep * 2).toFixed(2)}배 · 오늘의 시드 결정적 · 기록이 종류별로 갈린다 · 같은 시드가 종류를 지킨다`);
+  } else {
+    for (const f of failures) console.log(`  실패 ${f}`);
+    process.exit(1);
+  }
+}

@@ -10,9 +10,9 @@ import {
   type NodeKind,
   type StageMap,
 } from "./map.ts";
-import { seedRng, shuffle } from "./rng.ts";
+import { mixSeed, seedRng, shuffle } from "./rng.ts";
 import { BREEDS, NIGHTMARE_BREEDS, breedById } from "./breeds.ts";
-import { BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
+import { BOSS_BREEDS, BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
 import {
   type Intervention,
   BOARD_COLS,
@@ -219,9 +219,52 @@ export interface RunState {
   forceRelic: boolean;
   /** 마지막에 나를 막은 것. 보스면 이름과 남은 체력이 함께 뜬다. */
   killer: { name: string; hpFrac: number; boss: boolean } | null;
+  /**
+   * 이 판의 종류. 죽은 화면의 세 버튼(같은 시드 · 오늘의 시드 · 도전 +1)이
+   * 고른다. 하네스는 전부 `free`다.
+   */
+  kind: RunKind;
+  /** 도전 단계. 0이면 기본. 적 스탯 배수 = 1 + challengeStep × 단계. */
+  challenge: number;
+  /** 오늘의 시드 판이면 그 날짜(YYYY-MM-DD, 기기 시간). 기록 키로 쓴다. */
+  dailyKey: string | null;
+  /**
+   * 이 판의 종류 기준 최고 기록 — 오늘의 시드는 그 날짜, 도전은 그 단계, 나머지는
+   * `best`와 같다. HUD와 죽은 화면의 막대가 이 값을 잣대로 쓴다.
+   */
+  modeBest: number;
+  /** 이 판에서 만난 보스·정예 이름. 도감용 — 판정 불개입. */
+  bossesMet: string[];
+}
+
+/**
+ * 판의 종류.
+ *
+ * - `free`: 새 시드. 시계에서 뽑는다(기본)
+ * - `retry`: 직전 판과 같은 시드. 지도·시너지·첫 카드가 같으므로 "운이 아니라
+ *   내 선택 탓"을 확인하는 자리다
+ * - `daily`: 날짜에서 뽑은 시드. 같은 날에는 누구나 같은 판을 받는다 — 서버 없이
+ *   성립하는 비동기 경쟁이다(리더보드는 없다, 기록은 기기에만 남는다)
+ * - `challenge`: 단계만큼 적이 센 판. 파워 해금 대신 제약을 더해 재진입을 만든다
+ */
+export type RunKind = "free" | "retry" | "daily" | "challenge";
+
+export interface NewRunOptions {
+  kind?: RunKind;
+  challenge?: number;
+  dailyKey?: string | null;
 }
 
 const BEST_KEY = "nyang-arena.best";
+/** JSON `{ [YYYY-MM-DD]: 최고 웨이브 }` */
+const DAILY_KEY = "nyang-arena.daily";
+/** JSON `{ [단계]: 최고 웨이브 }` */
+const CHALLENGE_KEY = "nyang-arena.challenge";
+/** JSON `Codex` — 데리고 있던 고양이·모은 유물·만난 보스의 누적 */
+const CODEX_KEY = "nyang-arena.codex";
+/** JSON 최근 판 기록 배열(최대 `RUN_LOG_MAX`) */
+const RUNS_KEY = "nyang-arena.runs";
+const RUN_LOG_MAX = 30;
 const SYNERGIES_PER_RUN = 3;
 
 /**
@@ -772,19 +815,225 @@ export function makeSummon(owner: Cat, spec: SummonSpec, index: number): Cat {
 }
 
 export function loadBest(): number {
+  const v = Number(storageGet(BEST_KEY));
+  return Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** 사파리 프라이빗 모드 등에서 저장이 실패해도 게임 진행에는 영향 없다(`storageSet`). */
+function saveBest(v: number): void {
+  storageSet(BEST_KEY, String(v));
+}
+
+/*
+ * 기기에 남는 기록 — 전부 `localStorage`이고, 없거나 막혀 있으면(노드 하네스,
+ * 프라이빗 모드) 조용히 빈 값을 쓴다. 네트워크는 여전히 0건이다.
+ */
+function storageGet(key: string): string | null {
   try {
-    const v = Number(localStorage.getItem(BEST_KEY));
-    return Number.isFinite(v) && v > 0 ? v : 0;
+    if (typeof localStorage === "undefined") return null;
+    return localStorage.getItem(key);
   } catch {
-    return 0;
+    return null;
   }
 }
 
-function saveBest(v: number): void {
+function storageSet(key: string, value: string): void {
   try {
-    localStorage.setItem(BEST_KEY, String(v));
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(key, value);
   } catch {
-    /* 사파리 프라이빗 모드 등에서 실패해도 게임 진행에는 영향 없음 */
+    /* 저장 실패는 게임 진행에 영향 없음 */
+  }
+}
+
+function loadJson<T>(key: string, fallback: T): T {
+  const raw = storageGet(key);
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 기기 시간 기준 오늘(YYYY-MM-DD). 오늘의 시드 키이자 표시 문구다. */
+export function dailyKeyToday(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * 날짜 → 시드. FNV-1a로 문자열을 32비트로 접고 `mixSeed`로 한 번 더 흩는다.
+ * 같은 날짜면 어느 기기에서나 같은 값이므로, 같은 날에는 모두 같은 판을 받는다.
+ */
+export function dailySeed(key: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return mixSeed(h >>> 0, 7);
+}
+
+export function loadDailyBest(key: string): number {
+  const v = loadJson<Record<string, number>>(DAILY_KEY, {})[key];
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+function saveDailyBest(key: string, v: number): void {
+  const all = loadJson<Record<string, number>>(DAILY_KEY, {});
+  all[key] = v;
+  storageSet(DAILY_KEY, JSON.stringify(all));
+}
+
+export function loadChallengeBest(level: number): number {
+  const v = loadJson<Record<string, number>>(CHALLENGE_KEY, {})[String(level)];
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+function saveChallengeBest(level: number, v: number): void {
+  const all = loadJson<Record<string, number>>(CHALLENGE_KEY, {});
+  all[String(level)] = v;
+  storageSet(CHALLENGE_KEY, JSON.stringify(all));
+}
+
+/** 도감 — 정보 해금이지 파워 해금이 아니다. 본 것이 쌓일 뿐 게임은 안 바뀐다. */
+export interface Codex {
+  breeds: number[];
+  relics: string[];
+  bosses: string[];
+}
+
+export const CODEX_TOTALS = {
+  breeds: BREEDS.length,
+  relics: RELICS.length,
+  // 우두머리 셋 + 정예(외눈이)
+  bosses: BOSS_BREEDS.length + 1,
+} as const;
+
+export function loadCodex(): Codex {
+  const c = loadJson<Partial<Codex>>(CODEX_KEY, {});
+  return {
+    breeds: Array.isArray(c.breeds) ? c.breeds.filter((v): v is number => typeof v === "number") : [],
+    relics: Array.isArray(c.relics) ? c.relics.filter((v): v is string => typeof v === "string") : [],
+    bosses: Array.isArray(c.bosses) ? c.bosses.filter((v): v is string => typeof v === "string") : [],
+  };
+}
+
+export interface RunRecord {
+  t: number;
+  wave: number;
+  seed: number;
+  kind: RunKind;
+  challenge: number;
+  dailyKey: string | null;
+}
+
+export function loadRuns(): RunRecord[] {
+  const v = loadJson<unknown>(RUNS_KEY, []);
+  return Array.isArray(v) ? (v as RunRecord[]) : [];
+}
+
+/** 판이 끝날 때 도감과 최근 판 목록을 갱신한다. 판정에는 관여하지 않는다. */
+function recordRun(state: RunState): void {
+  const codex = loadCodex();
+  const breeds = new Set(codex.breeds);
+  for (const c of state.ally) if (c) breeds.add(c.breed.id);
+  const relics = new Set(codex.relics);
+  for (const r of state.relics) relics.add(r.id);
+  const bosses = new Set(codex.bosses);
+  for (const b of state.bossesMet) bosses.add(b);
+  storageSet(
+    CODEX_KEY,
+    JSON.stringify({ breeds: [...breeds], relics: [...relics], bosses: [...bosses] } satisfies Codex),
+  );
+
+  const runs = loadRuns();
+  runs.push({
+    t: Date.now(),
+    wave: state.wave,
+    seed: state.seed,
+    kind: state.kind,
+    challenge: state.challenge,
+    dailyKey: state.dailyKey,
+  });
+  storageSet(RUNS_KEY, JSON.stringify(runs.slice(-RUN_LOG_MAX)));
+}
+
+/**
+ * 판이 끝났을 때 기록을 갱신한다.
+ *
+ * 기록은 판의 종류별로 따로 남는다. 도전 판은 적이 세므로 전체 최고를 건드리지
+ * 않고(같은 잣대가 아니다) 그 단계의 기록만 본다. 오늘의 시드는 기본 난이도라
+ * 전체 최고와 그날 기록을 둘 다 본다.
+ */
+function recordOutcome(state: RunState): void {
+  if (state.challenge === 0 && state.wave > state.best) {
+    state.best = state.wave;
+    state.recordBroken = true;
+    saveBest(state.best);
+  }
+  if (state.kind === "daily" && state.dailyKey) {
+    if (state.wave > state.modeBest) {
+      state.modeBest = state.wave;
+      state.recordBroken = true;
+      saveDailyBest(state.dailyKey, state.wave);
+    }
+  } else if (state.kind === "challenge") {
+    if (state.wave > state.modeBest) {
+      state.modeBest = state.wave;
+      state.recordBroken = true;
+      saveChallengeBest(state.challenge, state.wave);
+    }
+  } else {
+    state.modeBest = state.best;
+  }
+  recordRun(state);
+}
+
+/** 만난 보스·정예를 도감용으로 적어 둔다. 같은 이름은 한 번만. */
+function metBoss(state: RunState, name: string): void {
+  if (!state.bossesMet.includes(name)) state.bossesMet.push(name);
+}
+
+/** 도전 단계의 적 스탯 배수. 0단계는 1이라 하네스 수치가 그대로다. */
+function challengeMul(state: RunState): number {
+  return 1 + BALANCE.challengeStep * state.challenge;
+}
+
+export type NextChoice = "again" | "retry" | "daily" | "challenge";
+
+/**
+ * 죽은 화면에서 고른 다음 판.
+ *
+ * - `again`(큰 버튼·Space·Enter): 같은 종류로 한 판 더 — 기본은 새 시드, 오늘의
+ *   시드는 그대로 오늘의 시드, 도전은 같은 단계
+ * - `retry`: 같은 시드. 오늘의 시드·도전 판은 **종류를 유지한다** — 그날/그 단계의
+ *   기록 잣대가 그대로여야 "같은 판을 더 멀리 갔다"가 기록에 남는다. 기본 판만 `retry`다
+ * - `daily`: 오늘의 시드
+ * - `challenge`: 지금 단계 + 1, 새 시드
+ */
+export function nextRunFrom(s: RunState, choice: NextChoice): RunState {
+  switch (choice) {
+    case "retry":
+      return newRun(s.seed, {
+        kind: s.kind === "daily" ? "daily" : s.kind === "challenge" ? "challenge" : "retry",
+        challenge: s.challenge,
+        dailyKey: s.dailyKey,
+      });
+    case "daily": {
+      const key = dailyKeyToday();
+      return newRun(dailySeed(key), { kind: "daily", dailyKey: key });
+    }
+    case "challenge":
+      return newRun(undefined, { kind: "challenge", challenge: s.challenge + 1 });
+    case "again":
+    default:
+      if (s.kind === "daily" && s.dailyKey) return newRun(dailySeed(s.dailyKey), { kind: "daily", dailyKey: s.dailyKey });
+      if (s.challenge > 0) return newRun(undefined, { kind: "challenge", challenge: s.challenge });
+      return newRun();
   }
 }
 
@@ -792,8 +1041,11 @@ function saveBest(v: number): void {
  * @param seed 없으면 시계에서 뽑는다. 시뮬은 런마다 결정적 시드를 넘겨
  *   같은 명령이 같은 수치를 내게 한다.
  */
-export function newRun(seed?: number): RunState {
+export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
   const runSeed = seed ?? Date.now();
+  const kind: RunKind = opts.kind ?? "free";
+  const challenge = Math.max(0, Math.floor(opts.challenge ?? 0));
+  const dailyKey = kind === "daily" ? (opts.dailyKey ?? dailyKeyToday()) : null;
   seedRng(runSeed);
   uidSeq = 0;
   const pool = resolveSynergyPool();
@@ -840,6 +1092,16 @@ export function newRun(seed?: number): RunState {
     bonusDodge: 0,
     forceRelic: false,
     killer: null,
+    kind,
+    challenge,
+    dailyKey,
+    modeBest:
+      kind === "daily" && dailyKey
+        ? loadDailyBest(dailyKey)
+        : kind === "challenge"
+          ? loadChallengeBest(challenge)
+          : loadBest(),
+    bossesMet: [],
     seed: runSeed,
     pending: [],
     dodgeCharges: 0,
@@ -847,6 +1109,16 @@ export function newRun(seed?: number): RunState {
     relics: [],
     summons: [],
   };
+
+  // 판의 종류는 첫 문구가 말한다. 도전은 무엇이 달라졌는지, 오늘의 시드는 왜
+  // 같은 판인지를 한 줄로 — 설명 화면을 따로 두지 않는다.
+  if (kind === "daily" && dailyKey) {
+    state.notice = `오늘의 시드 ${dailyKey} — 오늘은 누구나 같은 판이다`;
+  } else if (kind === "challenge") {
+    state.notice = `도전 ${challenge} — 적이 ${Math.round(BALANCE.challengeStep * challenge * 100)}% 세다`;
+  } else if (kind === "retry") {
+    state.notice = "같은 시드 — 판은 그대로, 선택만 바꿀 수 있다";
+  }
 
   // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
   // 근접 둘과 원거리 하나를 섞어서 두 종류를 처음부터 보여준다.
@@ -1040,6 +1312,7 @@ function buildBossWave(state: RunState, wave: number, scale: number): void {
   state.enemy = emptyBoard();
 
   const breed = bossForIndex(bossIndexAt(state));
+  metBoss(state, breed.name);
   // 보드 한가운데(행 2, 열 2). 반경 1.5라 행 1~3 × 열 1~3을 덮는다.
   const bossCell = 2 * BOARD_COLS + 2;
   const boss = makeCat(breed, "enemy", bossCell);
@@ -1077,7 +1350,7 @@ export function buildEnemyWave(state: RunState): void {
   const w = state.wave;
   // 지도에서 고른 칸이 성격을 정한다. 보스 자리만 웨이브 번호가 정한다.
   const kind = currentKind(state);
-  const scale = Math.pow(BALANCE.enemyScale, w - 1);
+  const scale = Math.pow(BALANCE.enemyScale, w - 1) * challengeMul(state);
 
   if (kind === "boss") {
     buildBossWave(state, w, scale);
@@ -1117,6 +1390,7 @@ export function buildEnemyWave(state: RunState): void {
   if (kind === "snipe") {
     const cell = 2 * BOARD_COLS + (BOARD_COLS - 1);
     const sniper = makeCat(SNIPER_BREED, "enemy", cell);
+    metBoss(state, SNIPER_BREED.name);
     sniper.radius = SNIPER_RADIUS;
     sniper.maxHp = Math.round(sniper.maxHp * scale * BALANCE.sniperHpMul);
     sniper.hp = sniper.maxHp;
@@ -1455,11 +1729,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
     state.killer = worst
       ? { name: worst.breed.name, hpFrac: worst.hp / worst.maxHp, boss: worst.radius > 0 }
       : null;
-    if (state.wave > state.best) {
-      state.best = state.wave;
-      state.recordBroken = true;
-      saveBest(state.best);
-    }
+    recordOutcome(state);
     setNotice(state, `${state.wave}웨이브 도달`);
     return;
   }

@@ -2,6 +2,7 @@ import { clearBattleFx, dualChoiceActive, spawnArrivalFx, spawnLevelUpFx, stepBa
 import { BALANCE } from "./game/balance.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
 import {
+  gameoverGeometry,
   mapNodeRects,
   offerRects,
   render,
@@ -17,9 +18,11 @@ import {
   mapStep,
   moveCat,
   newRun,
+  nextRunFrom,
   rerollOffers,
   setNotice,
   startBattle,
+  type NextChoice,
   type RunState,
 } from "./game/run.ts";
 import { openLanes } from "./game/map.ts";
@@ -214,13 +217,20 @@ function onPrimaryAction(): void {
     case "map":
       break;
     case "gameover":
-      clearBattleFx();
-      state = newRun();
-      // 새 판의 막이 오른다. 첫 부팅 때는 아직 잠겨 있어 안 울리고,
-      // 여기서부터는 울린다 — 소리는 사용자 입력 없이 못 낸다.
-      playSting("title");
+      startNextRun("again");
       break;
   }
+}
+
+/**
+ * 죽은 화면에서 다음 판으로. 어느 갈래든(큰 버튼·세 버튼·키) 여기를 지난다.
+ * 새 판의 막이 오른다. 첫 부팅 때는 아직 잠겨 있어 안 울리고, 여기서부터는
+ * 울린다 — 소리는 사용자 입력 없이 못 낸다.
+ */
+function startNextRun(choice: NextChoice): void {
+  clearBattleFx();
+  state = nextRunFrom(state, choice);
+  playSting("title");
 }
 
 /**
@@ -315,6 +325,23 @@ canvas.addEventListener("pointerdown", (e) => {
 
   // 페이즈가 막 바뀌었으면 이 탭은 이전 화면을 향한 것이다. 버린다.
   if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
+
+  // 죽은 화면의 세 갈래(같은 시드 · 오늘의 시드 · 도전 +1). 큰 버튼보다 먼저 본다 —
+  // 판 안에 있으므로 겹치지는 않지만, 순서를 정해 두면 나중에 겹쳐도 규칙이 남는다.
+  if (state.phase === "gameover") {
+    const { choices } = gameoverGeometry(layout, state);
+    const pick: NextChoice | null = rectHas(choices.retry, x, y)
+      ? "retry"
+      : rectHas(choices.daily, x, y)
+        ? "daily"
+        : rectHas(choices.challenge, x, y)
+          ? "challenge"
+          : null;
+    if (pick) {
+      startNextRun(pick);
+      return;
+    }
+  }
 
   if (rectHas(layout.button, x, y)) {
     if (state.phase === "battle") {
@@ -541,6 +568,13 @@ window.addEventListener("keydown", (e) => {
     case "Digit3":
     case "Digit4": {
       const slot = Number(e.code.slice(5)) - 1;
+      if (state.phase === "gameover") {
+        // 죽은 화면의 세 갈래를 1·2·3으로. 화면의 버튼 순서와 같다. 4는 버튼이
+        // 없으므로 아무 일도 안 한다 — 지도 단축키로 새지 않게 여기서 끝낸다.
+        const pick = (["retry", "daily", "challenge"] as const)[slot];
+        if (pick) startNextRun(pick);
+        return;
+      }
       if (state.phase === "map") {
         // 지도에서는 고를 수 있는 칸만 순서대로 센다. 갈 수 없는 칸을 세면
         // 번호가 화면과 어긍난다.
