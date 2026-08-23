@@ -672,8 +672,26 @@ function frame(now: number): void {
   stepBattle(state, dt * BALANCE.battleSpeed);
   setBed(musicFor(state));
   render(ctx!, layout, state, drag, hoverCell);
+  /**
+   * 탭이 숨겨지면 루프를 세운다. 브라우저는 숨은 탭의 rAF를 1fps 안팎으로 줄이는데, 그 틈에
+   * `dt`가 100ms로 잘려 게임 시간이 10분의 1 속도로 기어가고 배터리는 계속 쓴다. 세워 두면
+   * 돌아왔을 때 떠난 자리에서 그대로 이어진다 — 전투 중에 탭을 바꿔도 판이 흘러가 있지 않다.
+   */
+  if (document.hidden) {
+    paused = true;
+    return;
+  }
   requestAnimationFrame(frame);
 }
+
+let paused = false;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !paused) return;
+  paused = false;
+  // 떠난 동안의 시간을 한 번에 밀어 넣지 않도록 dt 기준점을 비운다.
+  last = 0;
+  requestAnimationFrame(frame);
+});
 
 async function boot0(): Promise<void> {
   // 둘을 나란히 기다린다. 아이콘은 33KB뿐이라 스프라이트보다 먼저 끝난다.

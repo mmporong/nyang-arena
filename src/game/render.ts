@@ -231,6 +231,12 @@ function dayProgress(wave: number): number {
   return ((wave - 1) % STAGE_WAVES) / (STAGE_WAVES - 1);
 }
 
+/**
+ * 배경 어둠 그라디언트는 레이아웃에만 의존한다. 매 프레임 `createLinearGradient`(4 µs)를 다시
+ * 만들던 것을 레이아웃 키로 기억한다 — 컨텍스트마다 따로(그라디언트는 만든 컨텍스트에 묶인다).
+ */
+const bgGradientCache = new WeakMap<CanvasRenderingContext2D, { key: string; g: CanvasGradient }>();
+
 function drawBackground(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   ctx.fillStyle = T.ink;
   ctx.fillRect(0, 0, L.w, L.h);
@@ -246,12 +252,18 @@ function drawBackground(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
    */
   const top = L.notice.y + L.notice.h;
   const bottom = L.offersPanel.y;
-  const g = ctx.createLinearGradient(0, 0, 0, L.h);
-  g.addColorStop(0, "rgba(9,6,5,0.80)");
-  g.addColorStop(Math.max(0.02, Math.min(0.98, top / L.h)), "rgba(9,6,5,0.30)");
-  g.addColorStop(Math.max(0.03, Math.min(0.99, bottom / L.h)), "rgba(9,6,5,0.42)");
-  g.addColorStop(1, "rgba(9,6,5,0.86)");
-  ctx.fillStyle = g;
+  const key = `${L.w}|${L.h}|${top}|${bottom}`;
+  let hit = bgGradientCache.get(ctx);
+  if (!hit || hit.key !== key) {
+    const g = ctx.createLinearGradient(0, 0, 0, L.h);
+    g.addColorStop(0, "rgba(9,6,5,0.80)");
+    g.addColorStop(Math.max(0.02, Math.min(0.98, top / L.h)), "rgba(9,6,5,0.30)");
+    g.addColorStop(Math.max(0.03, Math.min(0.99, bottom / L.h)), "rgba(9,6,5,0.42)");
+    g.addColorStop(1, "rgba(9,6,5,0.86)");
+    hit = { key, g };
+    bgGradientCache.set(ctx, hit);
+  }
+  ctx.fillStyle = hit.g;
   ctx.fillRect(0, 0, L.w, L.h);
 }
 
@@ -722,6 +734,51 @@ function drawMute(ctx: CanvasRenderingContext2D, L: Layout, muted: boolean): voi
 /* 보드와 고양이                                                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 격자(25칸 × 2진영)는 하이라이트 칸 하나를 빼면 프레임마다 완전히 같다. 그런데 매 프레임
+ * roundRect 50개 + fill/stroke 100번을 다시 그렸다 — 전투 프레임의 7~10%였다(2026-08-23 성능
+ * 분석). 레이아웃·진영·DPR이 같으면 한 번 구운 그림을 붙이고, 하이라이트 칸만 위에 덧그린다.
+ * 노드 하네스는 이 함수를 부르지 않으므로 `document`는 호출 시점에만 만진다.
+ */
+const boardGridCache = new Map<string, { canvas: HTMLCanvasElement; x: number; y: number; w: number; h: number }>();
+
+function boardGridImage(L: Layout, side: Side): { canvas: HTMLCanvasElement; x: number; y: number; w: number; h: number } | null {
+  if (typeof document === "undefined") return null;
+  const dpr = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2);
+  const first = cellRect(L, side, 0);
+  const last = cellRect(L, side, BOARD_SIZE - 1);
+  // 선 굵기(1px)가 칸 밖으로 반 픽셀 나가므로 2px 여유를 둔다.
+  const pad = 2;
+  const x = Math.floor(Math.min(first.x, last.x) - pad);
+  const y = Math.floor(Math.min(first.y, last.y) - pad);
+  const w = Math.ceil(Math.max(first.x + first.w, last.x + last.w) + pad) - x;
+  const h = Math.ceil(Math.max(first.y + first.h, last.y + last.h) + pad) - y;
+  const key = `${side}|${x},${y},${w},${h}|${L.cell}|${L.gap}|${dpr}`;
+  const hit = boardGridCache.get(key);
+  if (hit) return hit;
+  // 레이아웃이 자주 바뀌진 않지만(리사이즈·국면 전환) 무한히 쌓이지 않게 한다.
+  if (boardGridCache.size > 8) boardGridCache.clear();
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(w * dpr));
+  canvas.height = Math.max(1, Math.round(h * dpr));
+  const c = canvas.getContext("2d");
+  if (!c) return null;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.translate(-x, -y);
+  for (let i = 0; i < BOARD_SIZE; i++) {
+    const cr = cellRect(L, side, i);
+    roundRect(c, cr, L.cell * 0.16);
+    c.fillStyle = "rgba(239,224,198,0.045)";
+    c.fill();
+    c.strokeStyle = "rgba(239,224,198,0.10)";
+    c.lineWidth = 1;
+    c.stroke();
+  }
+  const entry = { canvas, x, y, w, h };
+  boardGridCache.set(key, entry);
+  return entry;
+}
+
 function drawBoard(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -729,16 +786,27 @@ function drawBoard(
   accent: string,
   highlightCell: number,
 ): void {
-  for (let i = 0; i < BOARD_SIZE; i++) {
-    const cr = cellRect(L, side, i);
+  const grid = boardGridImage(L, side);
+  if (grid) {
+    ctx.drawImage(grid.canvas, grid.x, grid.y, grid.w, grid.h);
+  } else {
+    for (let i = 0; i < BOARD_SIZE; i++) {
+      const cr = cellRect(L, side, i);
+      roundRect(ctx, cr, L.cell * 0.16);
+      ctx.fillStyle = "rgba(239,224,198,0.045)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(239,224,198,0.10)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+  if (highlightCell >= 0 && highlightCell < BOARD_SIZE) {
+    const cr = cellRect(L, side, highlightCell);
     roundRect(ctx, cr, L.cell * 0.16);
-    ctx.fillStyle =
-      i === highlightCell
-        ? "rgba(244,227,193,0.13)"
-        : "rgba(239,224,198,0.045)";
+    ctx.fillStyle = "rgba(244,227,193,0.13)";
     ctx.fill();
-    ctx.strokeStyle = i === highlightCell ? accent : "rgba(239,224,198,0.10)";
-    ctx.lineWidth = i === highlightCell ? 2.5 : 1;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2.5;
     ctx.stroke();
   }
 }
@@ -1041,7 +1109,8 @@ function drawCat(
     } else {
       ctx.drawImage(src, x, y, size, size);
     }
-    ctx.filter = "none";
+    // filter 대입은 빈 값("none")이어도 drawImage 단가를 1.6배로 올린다 — 켰을 때만 끈다.
+    if (cat.flash > 0) ctx.filter = "none";
   } else {
     ctx.fillStyle = cat.side === "ally" ? T.ally : T.enemy;
     roundRect(ctx, { x, y, w: size, h: size }, size * 0.2);
@@ -4173,6 +4242,22 @@ export function render(
   const shake = bossDeathShake(L);
   ctx.save();
   ctx.translate(shake.x, shake.y);
+
+  /**
+   * 지도 국면은 `drawMap`이 화면 전체를 0.98 알파로 덮는다. 그 아래 판·고양이·연출·하단 띠는
+   * 보이지 않는데도 매 프레임 1,000번 가까이 그려지고 있었다(지도 프레임의 60~70%). 덮일 것은
+   * 건너뛴다 — 배경·HUD는 남겨 0.98 너머로 비치는 색이 그대로다.
+   */
+  const covered = s.phase === "map";
+  if (covered) {
+    ctx.restore();
+    drawMap(ctx, L, s, drag);
+    drawNotice(ctx, L, s);
+    drawButton(ctx, L, s);
+    watchTransitions(s);
+    drawCurtain(ctx, L);
+    return;
+  }
 
   drawDivider(ctx, L);
   drawSideLabels(ctx, L);
