@@ -6,8 +6,7 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { newRun, startBattle } from "../src/game/run.ts";
-import { livingCats } from "../src/game/types.ts";
-import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES, BUY_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = 300;
 /**
@@ -20,81 +19,6 @@ const RUNS = 300;
  */
 const mapPick = MAP_POLICIES["무작위"];
 
-const byCost = (a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
-
-/**
- * **로스터를 읽고 한쪽으로 민다.**
- *
- * 여태 구매 정책은 전부 카드 자체만 봤다 — 값이 싼가 비싼가, 영입인가 강화인가.
- * 그래서 "무작위로 사는 봇과 최선 봇의 중앙값이 똑같이 12"라는 결과가 나왔고,
- * 거기서 "구매에는 깊이가 없다"고 결론을 냈다.
- *
- * 그런데 그 결론은 **읽고 사는 정책을 한 번도 안 재 본 상태**에서 내린 것이다.
- * `npm run relics`가 직업 몰빵으로 평균 13.8 → 18.2를 만든다는 것을 이미 알고
- * 있었으므로, 구매 축에도 같은 것이 있을 수 있다.
- *
- * 이 정책은 지금 내 팀에서 가장 많은 직업을 세고 그쪽으로 민다. 카드가 아니라
- * **상태를 보는** 최초의 구매 정책이다. 교체 카드도 쓴다 — 지금까지 모든 정책이
- * `replace`를 맨 뒤로 밀어 두고 있었는데, 몰빵에는 곁가지를 쳐내는 수단이 필요하다.
- */
-function pivot(state, afford, useRelics = true) {
-  const count = new Map();
-  for (const c of livingCats(state.ally)) {
-    count.set(c.breed.cls, (count.get(c.breed.cls) ?? 0) + 1);
-  }
-  let want = null;
-  let most = -1;
-  for (const [cls, n] of count) {
-    if (n > most) {
-      most = n;
-      want = cls;
-    }
-  }
-  if (!want) return [...(useRelics ? afford : afford.filter((o) => o.kind !== "relic"))].sort(byCost)[0] ?? null;
-  const mine = (o) => o.breed?.cls === want;
-  const pool = useRelics ? afford : afford.filter((o) => o.kind !== "relic");
-  return (
-    // 몰빵 직업의 유물이 최우선 — 조건을 이미 채우고 있으므로 대가만 남지 않는다.
-    (useRelics ? pool.find((o) => o.kind === "relic" && o.relic?.condition?.cls === want) : null) ??
-    [...pool].filter((o) => o.kind === "upgrade" && mine(o)).sort(byCost)[0] ??
-    [...pool].filter((o) => o.kind === "recruit" && mine(o)).sort(byCost)[0] ??
-    // 곁가지를 몰빵 직업으로 바꾼다. 조건(3마리 이상)을 채우는 유일한 지렛대일 때가 있다.
-    [...pool].filter((o) => o.kind === "replace" && mine(o)).sort(byCost)[0] ??
-    [...pool].filter((o) => o.kind !== "relic" && o.kind !== "replace").sort(byCost)[0] ??
-    null
-  );
-}
-
-const POLICIES = {
-  "아무것도 안 삼": () => null,
-  "무작위 구매": (afford) => afford[Math.floor(seeded() * afford.length)],
-  "가장 싼 것": (afford) => [...afford].sort((a, b) => a.cost - b.cost)[0],
-  "가장 비싼 것(현재)": (afford) => [...afford].sort(byCost)[0],
-  "강화만": (afford) => afford.filter((o) => o.kind === "upgrade")[0] ?? null,
-  "영입만": (afford) => afford.filter((o) => o.kind === "recruit")[0] ?? null,
-  "몰빵 피벗(로스터를 읽음)": (afford, state) => pivot(state, afford),
-  /**
-   * 같은 피벗인데 유물만 안 산다.
-   *
-   * 구매 축의 깊이가 **유물 축의 그림자인지**를 가르는 칸이다. 몰빵 피벗은
-   * 직업을 모으는 정책이고 유물 조건도 직업 수라, 둘이 같은 것을 재고 있을
-   * 수 있다. 유물을 끄고도 깊이가 남으면 두 축은 독립이다.
-   */
-  "몰빵 피벗(유물 제외)": (afford, state) => pivot(state, afford, false),
-};
-
-/**
- * 봇의 "무작위 구매" 선택용 난수.
- *
- * 게임 자체의 난수는 `newRun(seed)`가 잡는다 — 예전에는 이 시드가 게임까지
- * 제어한다고 주석에 적혀 있었지만 사실이 아니었고, 그래서 같은 코드를 두 번
- * 돌리면 중앙값이 13, 13, 14로 흔들렸다.
- */
-let seed = 12345;
-function seeded() {
-  seed = (seed * 1664525 + 1013904223) >>> 0;
-  return seed / 4294967296;
-}
 
 function run(pick, runSeed) {
   const s = newRun(runSeed);
@@ -132,8 +56,8 @@ const p90 = (a) => pct(a, 0.9);
 console.log("정책                  최소   p10   p25  중앙값   p75   p90   최대   평균");
 const means = {};
 const bySeed = {};
-for (const [name, pick] of Object.entries(POLICIES)) {
-  seed = 12345;
+for (const [name, pick] of Object.entries(BUY_POLICIES)) {
+  // 무작위 구매의 난수는 런 시드에서 나온다(bot-policy `buyRng`) — 정책마다 되감을 전역 LCG가 더는 없다.
   const raw = [];
   for (let i = 0; i < RUNS; i++) raw.push(run(pick, i + 1));
   bySeed[name] = raw;

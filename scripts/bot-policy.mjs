@@ -9,17 +9,22 @@
  * 그래서 **모든 측정 봇이 같은 기준선 위에서** 보스를 넘고, 그 위에서 재려는
  * 축만 바꾼다.
  */
-import { buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
+import { bossIndexAt, buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
 import { isBossStep, openLanes } from "../src/game/map.ts";
-import { rng } from "../src/game/rng.ts";
-import { livingCats } from "../src/game/types.ts";
+import { makeRng, mixSeed, rng } from "../src/game/rng.ts";
+import { BOARD_COLS, livingCats } from "../src/game/types.ts";
+import { bossForIndex } from "../src/game/bosses.ts";
 import { dodgeUsable, hazardsActive } from "../src/game/battle.ts";
 
 /**
  * 예고를 읽고 반응한다. 사람처럼 조금 늦고 가끔 놓친다 —
  * 완벽하게 반응하는 봇은 상한이지 기준선이 아니다.
  */
-export function makeBossBot() {
+/**
+ * @param read 예고 색을 읽는가. false면 **늘 산개**(뭉침 예고에도 흩어진다) — intervention-space의
+ *   "늘 탭만"과 같은 뜻이고, clear-space의 "무의식" 봇이 쓴다. 기본 true.
+ */
+export function makeBossBot({ read = true } = {}) {
   let lastTelegraph = null;
   let since = 0;
   let seen = 0;
@@ -60,7 +65,7 @@ export function makeBossBot() {
     lastTelegraph = tg;
     // 네 번에 한 번 놓치고 두 틱 늦게 반응한다.
     if (seen % 4 !== 3 && since >= 2) {
-      s.pending.push({ kind: tg.mode === "gather" ? "gather" : "dodge" });
+      s.pending.push({ kind: read && tg.mode === "gather" ? "gather" : "dodge" });
     }
   };
 }
@@ -246,5 +251,235 @@ export const MAP_POLICIES = {
       if (elite !== undefined) return elite;
     }
     return find("battle") ?? open[0];
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* 구매 정책 — decision-space·clear-space가 쓴다 (2026-08-23 여기로 모음)   */
+/* ------------------------------------------------------------------ */
+
+const byCost = (a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
+
+/**
+ * **로스터를 읽고 한쪽으로 민다.**
+ *
+ * 여태 구매 정책은 전부 카드 자체만 봤다 — 값이 싼가 비싼가, 영입인가 강화인가.
+ * 그래서 "무작위로 사는 봇과 최선 봇의 중앙값이 똑같이 12"라는 결과가 나왔고,
+ * 거기서 "구매에는 깊이가 없다"고 결론을 냈다.
+ *
+ * 그런데 그 결론은 **읽고 사는 정책을 한 번도 안 재 본 상태**에서 내린 것이다.
+ * `npm run relics`가 직업 몰빵으로 평균 13.8 → 18.2를 만든다는 것을 이미 알고
+ * 있었으므로, 구매 축에도 같은 것이 있을 수 있다.
+ *
+ * 이 정책은 지금 내 팀에서 가장 많은 직업을 세고 그쪽으로 민다. 카드가 아니라
+ * **상태를 보는** 최초의 구매 정책이다. 교체 카드도 쓴다 — 지금까지 모든 정책이
+ * `replace`를 맨 뒤로 밀어 두고 있었는데, 몰빵에는 곁가지를 쳐내는 수단이 필요하다.
+ */
+function pivot(state, afford, useRelics = true) {
+  const count = new Map();
+  for (const c of livingCats(state.ally)) {
+    count.set(c.breed.cls, (count.get(c.breed.cls) ?? 0) + 1);
+  }
+  let want = null;
+  let most = -1;
+  for (const [cls, n] of count) {
+    if (n > most) {
+      most = n;
+      want = cls;
+    }
+  }
+  if (!want) return [...(useRelics ? afford : afford.filter((o) => o.kind !== "relic"))].sort(byCost)[0] ?? null;
+  const mine = (o) => o.breed?.cls === want;
+  const pool = useRelics ? afford : afford.filter((o) => o.kind !== "relic");
+  return (
+    // 몰빵 직업의 유물이 최우선 — 조건을 이미 채우고 있으므로 대가만 남지 않는다.
+    (useRelics ? pool.find((o) => o.kind === "relic" && o.relic?.condition?.cls === want) : null) ??
+    [...pool].filter((o) => o.kind === "upgrade" && mine(o)).sort(byCost)[0] ??
+    [...pool].filter((o) => o.kind === "recruit" && mine(o)).sort(byCost)[0] ??
+    // 곁가지를 몰빵 직업으로 바꾼다. 조건(3마리 이상)을 채우는 유일한 지렛대일 때가 있다.
+    [...pool].filter((o) => o.kind === "replace" && mine(o)).sort(byCost)[0] ??
+    [...pool].filter((o) => o.kind !== "relic" && o.kind !== "replace").sort(byCost)[0] ??
+    null
+  );
+}
+
+export const BUY_POLICIES = {
+  "아무것도 안 삼": () => null,
+  "무작위 구매": (afford, state) => afford[Math.floor(buyRng(state)() * afford.length)],
+  "가장 싼 것": (afford) => [...afford].sort((a, b) => a.cost - b.cost)[0],
+  "가장 비싼 것(현재)": (afford) => [...afford].sort(byCost)[0],
+  "강화만": (afford) => afford.filter((o) => o.kind === "upgrade")[0] ?? null,
+  "영입만": (afford) => afford.filter((o) => o.kind === "recruit")[0] ?? null,
+  "몰빵 피벗(로스터를 읽음)": (afford, state) => pivot(state, afford),
+  /**
+   * 같은 피벗인데 유물만 안 산다.
+   *
+   * 구매 축의 깊이가 **유물 축의 그림자인지**를 가르는 칸이다. 몰빵 피벗은
+   * 직업을 모으는 정책이고 유물 조건도 직업 수라, 둘이 같은 것을 재고 있을
+   * 수 있다. 유물을 끄고도 깊이가 남으면 두 축은 독립이다.
+   */
+  "몰빵 피벗(유물 제외)": (afford, state) => pivot(state, afford, false),
+};
+
+/**
+ * 봇의 "무작위 구매" 선택용 난수 — **런마다 그 런의 시드에서** 뽑는다.
+ *
+ * 예전에는 프로세스 전역 LCG 하나를 모든 런이 이어 썼다. 그러면 같은 런도 앞서 돈 런 수에 따라
+ * 다른 카드를 집고, 정책 순서를 바꾸거나 워커에 나누면 수치가 흔들린다. 게임 난수(`rng`)와는
+ * 갈라 둔다 — 게임 난수를 먹으면 구매 선택이 전투 난수를 밀어 다른 런이 된다.
+ */
+const buyRngs = new WeakMap();
+function buyRng(state) {
+  let r = buyRngs.get(state);
+  if (!r) {
+    r = makeRng(mixSeed(state.seed >>> 0, 0x5eed));
+    buyRngs.set(state, r);
+  }
+  return r;
+}
+
+/* ------------------------------------------------------------------ */
+/* 배치 정책 — placement-space·clear-space가 쓴다 (2026-08-23 여기로 모음)  */
+/* ------------------------------------------------------------------ */
+
+export function livingUnits(state) {
+  const out = [];
+  state.ally.forEach((c) => {
+    if (c && c.alive) out.push(c);
+  });
+  return out;
+}
+
+/**
+ * 고양이 목록을 원하는 셀로 옮긴다.
+ *
+ * 이전 구현은 `occupied()`가 준 보드 순서와 원하는 셀 목록의 순서가 어긋나서
+ * "역할 반대" 배치가 실제로는 역할을 뒤집지 않았다. 그래서 배치 격차가
+ * 2.3으로 과소 측정됐다. 고양이와 목적지를 같은 인덱스로 짝지어야 한다.
+ */
+function put(state, cats, wanted) {
+  cats.forEach((cat, i) => {
+    const to = wanted[i];
+    if (to === undefined) return;
+    const from = state.ally.indexOf(cat);
+    if (from >= 0 && from !== to) moveCat(state, from, to);
+  });
+}
+
+const CENTER_OUT = [2, 1, 3, 0, 4];
+/** 열 0이 우리 뒷줄, 열 4가 적과 맞닿는 앞줄이다. */
+const cellsIn = (col) => CENTER_OUT.map((r) => r * BOARD_COLS + col);
+
+/** (행, 열) → 셀 번호. formation-space의 cell()과 같은 규칙이다. */
+const c2 = (row, col) => row * BOARD_COLS + col;
+
+export const ARRANGERS = {
+  "그대로 (bestFreeCell)": null,
+
+  "한 칸에 몰기": (state) => {
+    const cells = [4, 3, 2, 1, 0].flatMap(cellsIn);
+    put(state, livingUnits(state), cells);
+  },
+
+  "역할 반대 (근접 뒤)": (state) => {
+    const u = livingUnits(state);
+    const melee = u.filter((c) => c.breed.kind === "melee");
+    const ranged = u.filter((c) => c.breed.kind === "ranged");
+    const front = cellsIn(BOARD_COLS - 1);
+    const back = cellsIn(0);
+    // 원거리를 앞줄에, 근접을 뒷줄에 — 정확히 반대로 세운다.
+    put(state, [...ranged, ...melee], [
+      ...ranged.map((_, i) => front[i % front.length]),
+      ...melee.map((_, i) => back[i % back.length]),
+    ]);
+  },
+
+  /**
+   * 감싸기 — 원거리를 가운데 두고 근접이 둘러싼다.
+   * `formation-space.mjs`의 같은 이름 대형과 자리를 맞춘다.
+   */
+  "감싸기 (원거리 보호)": (state) => {
+    const u = livingUnits(state);
+    const melee = u.filter((c) => c.breed.kind === "melee");
+    const ranged = u.filter((c) => c.breed.kind === "ranged");
+    const ring = [c2(1, 2), c2(2, 3), c2(3, 2), c2(0, 2), c2(4, 2), c2(2, 4)];
+    const core = [c2(1, 1), c2(2, 1), c2(3, 1), c2(0, 1), c2(4, 1), c2(2, 0)];
+    put(state, [...melee, ...ranged], [
+      ...melee.map((_, i) => ring[i % ring.length]),
+      ...ranged.map((_, i) => core[i % core.length]),
+    ]);
+  },
+
+  /**
+   * **다음 보스를 보고 대형을 고른다.** 상황을 읽는 유일한 정책이다.
+   *
+   * 나머지는 판 내내 같은 대형을 쓴다. 구매 축에서 똑같은 실수를 했다가
+   * 로스터를 읽는 정책을 넣으니 0.9가 2.5로 바뀌었다 — **재는 정책이 없으면
+   * 있는 깊이도 0으로 나온다.**
+   *
+   * 매핑은 `npm run formation`의 실측이다(예고당 잘못 선 마리수, 낮을수록 유리):
+   *   무쇠발톱  분산 2.00 · 뭉침 2.67 · 감싸기 2.83 · 정석 2.85
+   *   살금이    정석 1.82 · 감싸기 1.83 · 뭉침 2.00 · 분산 2.02
+   *   서리귀    감싸기 2.33 · 정석 2.48 · 분산 2.72 · 뭉침 2.83
+   */
+  "보스 읽고 고름": (state) => {
+    const boss = bossForIndex(bossIndexAt(state));
+    if (boss?.id === 9) return ARRANGERS["세로로 분산"](state); // 무쇠발톱 → 분산
+    if (boss?.id === 11) return ARRANGERS["감싸기 (원거리 보호)"](state); // 서리귀 → 감싸기
+    // 살금이(10)는 정석이 최선이고 그게 기본 배치와 같은 꼴이다.
+  },
+
+  "세로로 분산": (state) => {
+    const u = livingUnits(state);
+    const melee = u.filter((c) => c.breed.kind === "melee");
+    const ranged = u.filter((c) => c.breed.kind === "ranged");
+    const front = cellsIn(BOARD_COLS - 1);
+    const back = [...cellsIn(0), ...cellsIn(1)];
+    put(state, [...melee, ...ranged], [
+      ...melee.map((_, i) => front[i % front.length]),
+      ...ranged.map((_, i) => back[i % back.length]),
+    ]);
+  },
+  /**
+   * **같은 직업을 한 열에 세로로 붙인다.** 인접 보너스(`BALANCE.adjacencyAtk`, 2026-08-23 채택)를
+   * 최대로 받는 대형이다. 근접 직업은 앞 열(4·3)부터, 원거리는 뒷 열(0·1)부터 한 직업씩
+   * 차지한다. `CENTER_OUT` 순서(2·1·3·0·4)는 새 칸이 늘 앞서 놓은 칸과 맞닿는다.
+   *
+   * 측정에서 이 정책은 자동 배치보다 **못했다**(7.8 vs 8.3) — 보너스가 정답이 아니라 대형의
+   * 일부라는 증거로 남겨 둔다. 이득은 근접을 한 열에 세우는 "세로로 분산"이 가져간다.
+   */
+  "같은 직업 붙이기": (state) => {
+    const u = livingUnits(state);
+    const byClass = new Map();
+    for (const c of u) {
+      if (!byClass.has(c.breed.cls)) byClass.set(c.breed.cls, []);
+      byClass.get(c.breed.cls).push(c);
+    }
+    const meleeCols = [BOARD_COLS - 1, BOARD_COLS - 2, 2];
+    const rangedCols = [0, 1, 2];
+    let mi = 0;
+    let ri = 0;
+    const used = new Set();
+    const cats = [];
+    const cells = [];
+    for (const group of byClass.values()) {
+      const melee = group[0].breed.kind === "melee";
+      const cols = melee ? meleeCols : rangedCols;
+      const col = cols[Math.min(cols.length - 1, melee ? mi++ : ri++)];
+      for (const cat of group) {
+        let cell = cellsIn(col).find((x) => !used.has(x));
+        if (cell === undefined) {
+          for (const c of cols) {
+            cell = cellsIn(c).find((x) => !used.has(x));
+            if (cell !== undefined) break;
+          }
+        }
+        if (cell === undefined) continue;
+        used.add(cell);
+        cats.push(cat);
+        cells.push(cell);
+      }
+    }
+    put(state, cats, cells);
   },
 };

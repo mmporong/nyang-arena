@@ -14,7 +14,7 @@ set -uo pipefail
 # 관문 축 — 각 스크립트가 기준 미달이면 exit 1을 낸다. gold(생선 곡선)는 판정이 없는 관측이라
 # 따로 돌리고 세지 않는다 — 판정 없는 것을 축으로 세면 "7개 전부 기준 안"이 거짓이 된다.
 AXES=(sim decisions placement intervention map relics)
-OBSERVE=(gold)
+OBSERVE=(gold clear)
 failed=()
 
 for axis in "${AXES[@]}"; do
