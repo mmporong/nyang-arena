@@ -355,52 +355,13 @@ function drawCrown(
  */
 export function drawNodeIcon(
   ctx: CanvasRenderingContext2D,
-  kind: "battle" | "elite" | "shop" | "key" | "vault" | "offering" | "boss",
+  kind: "battle" | "elite" | "shop" | "boss",
   cx: number,
   cy: number,
   size: number,
   color: string,
 ): void {
-  if (kind === "offering") {
-    // 제물 — 아래로 향한 삼각형(잔/제단).
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1.5, size * 0.08);
-    ctx.beginPath();
-    ctx.moveTo(cx - size * 0.32, cy - size * 0.26);
-    ctx.lineTo(cx + size * 0.32, cy - size * 0.26);
-    ctx.lineTo(cx, cy + size * 0.34);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
-  } else if (kind === "key") {
-    // 별사탕 — 오각별. 생선(뼈다귀)과 확연히 다르게.
-    ctx.save();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    for (let i = 0; i < 10; i++) {
-      const r = i % 2 === 0 ? size * 0.36 : size * 0.15;
-      const a = -Math.PI / 2 + (i * Math.PI) / 5;
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  } else if (kind === "vault") {
-    // 금고 — 네모 안에 열쇠구멍.
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1.5, size * 0.08);
-    ctx.strokeRect(cx - size * 0.3, cy - size * 0.3, size * 0.6, size * 0.6);
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(cx, cy - size * 0.03, size * 0.09, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillRect(cx - size * 0.03, cy - size * 0.03, size * 0.06, size * 0.18);
-    ctx.restore();
-  } else if (kind === "shop") drawBone(ctx, cx, cy, size, color);
+  if (kind === "shop") drawBone(ctx, cx, cy, size, color);
   else if (kind === "boss") {
     drawPaw(ctx, cx, cy + size * 0.1, size * 0.82, color, true);
     drawCrown(ctx, cx, cy - size * 0.42, size * 0.72, color);

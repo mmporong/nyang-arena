@@ -11,7 +11,6 @@
  */
 import { bossIndexAt, buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
 import { isBossStep, openLanes } from "../src/game/map.ts";
-import { BALANCE } from "../src/game/balance.ts";
 import { makeRng, mixSeed, rng } from "../src/game/rng.ts";
 import { BOARD_COLS, livingCats } from "../src/game/types.ts";
 import { bossForIndex } from "../src/game/bosses.ts";
@@ -216,45 +215,6 @@ export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
  * 복제하면 반드시 갈라진다 — 그래서 `run.ts`에만 둔다.
  */
 export { leaveShop } from "../src/game/run.ts";
-
-/**
- * 열쇠/봉쇄 실험 전용 정책. `npm run map -- --keys`가 `MAP_POLICIES`에 합쳐 비교한다.
- * 실험이 꺼져 있으면 열쇠·금고가 안 나와 전부 "전투만"으로 접힌다.
- */
-export const OFFERING_MAP_POLICIES = {
-  // 제물이 보이면 무조건 바친다 — 여분이 있든 없든. 필요한 고양이도 바쳐 버린다.
-  "제물 몰빵": (open, row) => open.find((i) => row[i]?.kind === "offering") ?? open[0],
-  /**
-   * **여분이 있고 유물이 필요할 때만 바친다.** 로스터가 두껍고(4마리 이상) 유물이 적을 때(3 미만)만
-   * 제물로 간다 — 그때만 트레이드의 값이 양수다. 이 판단을 읽는 것이 값하면 지도에 깊이가 있다.
-   */
-  "제물 읽고 고름": (open, row, s) => {
-    const roster = s.ally.filter((c) => c && c.alive).length;
-    if (roster >= 4 && s.relics.length < 3) {
-      const o = open.find((i) => row[i]?.kind === "offering");
-      if (o !== undefined) return o;
-    }
-    return open.find((i) => row[i]?.kind === "battle") ?? open[0];
-  },
-};
-
-export const KEY_MAP_POLICIES = {
-  // 금고가 보이면 무조건 간다 — 열쇠가 있든 없든. 헛걸음을 그대로 맞는다.
-  "금고 몰빵": (open, row) => open.find((i) => row[i]?.kind === "vault") ?? open[0],
-  /**
-   * **열쇠를 먼저, 금고를 나중.** 금고가 여기 있고 별사탕이 있으면 연다. 별사탕이 없는데 열쇠
-   * 칸이 여기 있으면 챙긴다. 별사탕 없이 금고로 가는 헛걸음은 피한다. 이 순서를 읽는 것이 값하면
-   * 지도에 깊이가 있는 것이다.
-   */
-  "열쇠 계획": (open, row, s) => {
-    const vault = open.find((i) => row[i]?.kind === "vault");
-    const key = open.find((i) => row[i]?.kind === "key");
-    if (vault !== undefined && s.keys > 0) return vault; // 열쇠 있으면 금고를 연다
-    if (key !== undefined && s.keys === 0) return key; // 없으면 열쇠부터
-    // 금고만 있고 열쇠가 없으면 헛걸음이라 피한다.
-    return open.find((i) => row[i]?.kind === "battle") ?? open[0];
-  },
-};
 
 /** 길 고르기 정책들. `npm run map`이 이걸 비교한다. */
 export const MAP_POLICIES = {

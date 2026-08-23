@@ -1,5 +1,4 @@
 import { makeRng, mixSeed } from "./rng.ts";
-import { BALANCE } from "./balance.ts";
 
 /** 난수기 하나. 지도는 전투와 다른 줄기를 쓴다. */
 type Rand = () => number;
@@ -31,9 +30,6 @@ export type NodeKind =
   | "battle" // 평범한 전투. 안전하고 보상도 평범하다
   | "elite" // 저격대. 어렵지만 생선이 많고 유물 카드가 보장된다
   | "shop" // 전투 없음. 생선을 받고 카드를 더 본다
-  | "key" // 별사탕(열쇠)을 준다. 전투 없이 걸음만 먹는다
-  | "vault" // 금고. 열쇠가 있으면 유물을 열고, 없으면 헛걸음이다
-  | "offering" // 제물. 가장 약한 고양이를 바치고 유물을 얻는다
   | "boss"; // 스테이지의 끝. 모든 길이 여기서 만난다
 
 export interface MapNode {
@@ -192,12 +188,10 @@ function assignKinds(steps: number[][], stage: number, rng: Rand): NodeKind[][] 
     const first = step === 0;
     const kinds: NodeKind[] = [];
     let shopUsed = false;
-    let keyUsed = false;
-    let offeringUsed = false;
 
     for (let i = 0; i < lanes.length; i++) {
       // 앞 걸음이 통째로 정예/상점이었으면 이번엔 쉬어 간다.
-      const prevAllSpecial = prev.length > 0 && prev.every((k) => k === "elite" || k === "shop" || k === "key" || k === "vault" || k === "offering");
+      const prevAllSpecial = prev.length > 0 && prev.every((k) => k === "elite" || k === "shop");
       if (first || prevAllSpecial) {
         kinds.push("battle");
         continue;
@@ -208,15 +202,6 @@ function assignKinds(steps: number[][], stage: number, rng: Rand): NodeKind[][] 
       else if (!shopUsed && roll < eliteChance + 0.28) {
         shopUsed = true;
         kinds.push("shop");
-      } else if (BALANCE.mapKeys && !keyUsed && roll < eliteChance + 0.28 + 0.2) {
-        // 열쇠는 이른 걸음(0~2)에, 금고는 늦은 걸음(2~4)에 치우쳐 놓는다 — 열쇠 먼저 금고 나중이라야
-        // 순서를 읽는 것이 결정이 된다. 걸음당 하나(열쇠 또는 금고).
-        keyUsed = true;
-        kinds.push(step <= 2 ? "key" : "vault");
-      } else if (BALANCE.mapOffering && !offeringUsed && !first && roll < eliteChance + 0.28 + 0.2) {
-        // 제물은 첫 걸음엔 안 놓는다 — 바칠 여분 고양이가 아직 없다. 걸음당 하나.
-        offeringUsed = true;
-        kinds.push("offering");
       } else kinds.push("battle");
     }
     // 전투가 하나도 없으면 한 칸을 전투로 되돌린다.
@@ -375,12 +360,6 @@ export function nodeInfo(kind: NodeKind): { name: string; hint: string } {
     case "shop":
       // 종류 id는 shop이지만 하는 일은 정찰이다. 다음 보스를 대비하는 자리다.
       return { name: "숨 돌리기", hint: "아무것도 안 와요. 생선과 다시 뽑기, 다음 악몽에 쓸 회피까지 챙겨요" };
-    case "offering":
-      return { name: "제물", hint: "가장 약한 고양이를 바치고 유물을 얻어요. 여분이 있을 때만 이득이에요" };
-    case "key":
-      return { name: "별사탕", hint: "별사탕 하나를 챙겨요. 생선으로는 못 사요 — 금고를 여는 열쇠예요" };
-    case "vault":
-      return { name: "금고", hint: "별사탕이 있으면 유물을 열어요. 없으면 헛걸음이에요 — 열쇠를 먼저 챙기세요" };
     case "boss":
       return { name: "악몽", hint: "되풀이되는 거예요. 예고를 잘 보고 움직이세요" };
     // 보스별 안내는 bossHint가 따로 만든다 — 어느 보스가 오는지 알아야 해서다.
@@ -409,8 +388,6 @@ export function checkStage(map: StageMap): string[] {
     if (row.some((n) => n.kind === "boss")) problems.push(`${i}걸음에 보스가 섞였다`);
     if (!row.some((n) => n.kind === "battle")) problems.push(`${i}걸음에 전투가 없다`);
     if (row.filter((n) => n.kind === "shop").length > 1) problems.push(`${i}걸음에 상점이 둘`);
-    if (row.filter((n) => n.kind === "key" || n.kind === "vault").length > 1) problems.push(`${i}걸음에 열쇠·금고가 둘`);
-    if (row.filter((n) => n.kind === "offering").length > 1) problems.push(`${i}걸음에 제물이 둘`);
     if (i === 0 && row.some((n) => n.kind !== "battle")) problems.push("첫 걸음이 전투가 아니다");
     // 갈림길은 성격이 갈려야 한다. 전투 대 전투는 두 번 그린 같은 칸이다.
     if (i > 0 && row.length >= 2 && row.every((n) => n.kind === "battle")) {
