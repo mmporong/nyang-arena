@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "generatedFrom": {
-    "commit": "54c9869",
+    "commit": "44ee7bb",
     "dirty": false,
     "reproducible": true,
     "node": "v24.12.0",
@@ -71,7 +71,7 @@
     "dodgeCharges": 2
   },
   "build": {
-    "bundleBytes": 143584
+    "bundleBytes": 153462
   },
   "openIssues": [
     {
