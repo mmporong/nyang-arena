@@ -1119,7 +1119,15 @@ function drawCat(
   // `cat.alive`가 그대로 true라 위 분기 어느 것도 안 걸릴 수 있다.
   ctx.globalAlpha *= blinkFade;
 
-  const img = spriteFor(cat.breed.id, cat.pose);
+  /**
+   * 전투가 이미 주는 160ms 피격 플래시를 기존 `wink` 프레임과 묶는다.
+   * 새 전투 상태나 타이머를 만들지 않아 숨김 탭에서도 함께 멈추고, 공격·시전처럼
+   * `poseTimer`가 있는 사건은 덮지 않는다. 최종 `hit` 원화가 들어오면 이 선택만
+   * 선택적 액션 스프라이트로 갈아끼울 수 있다.
+   */
+  const visualPose: Pose =
+    cat.alive && cat.flash > 0 && cat.poseTimer <= 0 ? "wink" : cat.pose;
+  const img = spriteFor(cat.breed.id, visualPose);
   /**
    * 스테이지 테마의 잔몹 색조 — 버퍼에서 입힌 스프라이트로 바꿔치기한다.
    * 반전·플래시 등 아래 그리기 경로는 그대로 탄다. 보스(radius>0)와
