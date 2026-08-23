@@ -91,6 +91,25 @@ import {
 
 const CAT_SCALE = 0.66;
 
+/**
+ * 운영체제의 모션 축소 설정. 쿼리 객체는 한 번만 만들되 `matches`는 매번 읽어
+ * 실행 중 설정이 바뀌어도 다음 프레임부터 반영한다. Node 하네스가 이 모듈을
+ * 불러도 `window`에 닿지 않게 가드한다.
+ */
+const motionQuery =
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : null;
+
+function reducedMotion(): boolean {
+  return motionQuery?.matches ?? false;
+}
+
+/** 반복 맥동은 모션 축소에서 중간 밝기의 정지 상태로 남긴다. */
+function motionPulse(period: number): number {
+  return reducedMotion() ? 0.5 : 0.5 + 0.5 * Math.sin(performance.now() / period);
+}
+
 /** 시너지 트리거마다 고유색. TFT가 특성별로 색을 나누는 것과 같은 이유 — 한눈에 구분되게. */
 /**
  * 직업 색. 뱃지와 카드에서 같은 색을 쓴다.
@@ -389,11 +408,15 @@ function drawOneTelegraph(
     ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
     ctx.lineWidth = 2 + fill * 2;
     ctx.stroke();
-    // 안쪽에서 차오르는 원. 남은 시간이 한눈에 보인다.
+    // 중심을 채우면 고양이·체력바·피해 숫자를 덮는다. 남은 시간은 외곽에서
+    // 차오르는 도화선으로 옮겨, 위험의 시간축과 판의 정보 밀도를 함께 지킨다.
+    const from = -Math.PI / 2;
     ctx.beginPath();
-    ctx.arc(origin.x, origin.y, r * fill, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${hue},0.22)`;
-    ctx.fill();
+    ctx.arc(origin.x, origin.y, r * 0.9, from, from + Math.PI * 2 * fill);
+    ctx.strokeStyle = `rgba(${hue},${0.72 + fill * 0.28})`;
+    ctx.lineWidth = Math.max(3, L.cell * 0.07);
+    ctx.lineCap = "round";
+    ctx.stroke();
     if (gather) {
       concentric(ctx, origin.x, origin.y, r, hue, fill);
     } else {
@@ -495,7 +518,7 @@ function drawCreepZones(ctx: CanvasRenderingContext2D, L: Layout, zones: readonl
   const box = telegraphClipBox(L);
   const pitch = L.cell + L.gap;
   const hue = "255,63,110";
-  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+  const pulse = motionPulse(260);
 
   for (const z of zones) {
     const origin = fieldToScreen(L, z.fx, z.fy);
@@ -628,6 +651,13 @@ const GOLD_POP_MS = 900;
 
 /** 매 프레임 실제 값과 견줘 롤업을 다시 걸고, 늘었으면 뜨는 글자를 하나 더한다. */
 function trackGold(gold: number): void {
+  if (reducedMotion()) {
+    goldShown = gold;
+    goldFrom = gold;
+    goldTo = gold;
+    goldPops.length = 0;
+    return;
+  }
   if (goldShown < 0) {
     goldShown = gold;
     goldFrom = gold;
@@ -646,6 +676,10 @@ function trackGold(gold: number): void {
 
 /** 지금 화면에 보일 값. ease-out으로 목표를 향해 굴러간다. */
 function currentGoldShown(): number {
+  if (reducedMotion()) {
+    goldShown = goldTo;
+    return goldShown;
+  }
   const t = Math.min(1, (performance.now() - goldStartedAt) / GOLD_ROLLUP_MS);
   goldShown = Math.round(goldFrom + (goldTo - goldFrom) * easeOutCubic(t));
   return goldShown;
@@ -653,6 +687,10 @@ function currentGoldShown(): number {
 
 /** "+N" 이 카운터 위로 살짝 떠오르며 페이드아웃한다. 생선 그림 대신 숫자만 — 자리가 좁다. */
 function drawGoldPops(ctx: CanvasRenderingContext2D, chip: Rect): void {
+  if (reducedMotion()) {
+    goldPops.length = 0;
+    return;
+  }
   const now = performance.now();
   for (let i = goldPops.length - 1; i >= 0; i--) {
     const p = goldPops[i]!;
@@ -836,6 +874,7 @@ const VULN_HUE = "255,226,74";
 
 /** 콤보가 쌓일수록 빨리 뛴다. 연타의 보람이 화면에 남는다. */
 function vulnerablePulse(cat: Cat, t: number): number {
+  if (reducedMotion()) return 0.5;
   const speed = 380 - Math.min(cat.strikeCombo, 12) * 18;
   return 0.5 + 0.5 * Math.sin(t / speed);
 }
@@ -1333,7 +1372,7 @@ function drawSeizeMark(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
   for (const c of s.summons) if (c.alive && c.seized) marked.push(c);
   if (marked.length === 0) return;
 
-  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 160);
+  const pulse = motionPulse(160);
   for (const c of marked) {
     const { x: cx, y: cy } = fieldToScreen(L, c.fx, c.fy);
     const { bh, by } = healthBarGeom(L, c.side, c.radius, cy, c.sizeMul);
@@ -1606,6 +1645,7 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
   const now = performance.now();
   const dt = Math.min(48, fxLast ? now - fxLast : 16);
   fxLast = now;
+  const reduce = reducedMotion();
 
   const bw = Math.max(8, Math.round(L.w / FX_PIXEL));
   const bh = Math.max(8, Math.round(L.h / FX_PIXEL));
@@ -1625,19 +1665,24 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
   for (const f of fxs) {
     if (seeded.has(f)) continue;
     seeded.add(f);
-    const p = fieldToScreen(L, f.fx, f.fy);
-    seed(f, p.x, p.y, L.cell);
+    if (!reduce) {
+      const p = fieldToScreen(L, f.fx, f.fy);
+      seed(f, p.x, p.y, L.cell);
+    }
   }
-  stepParticles(dt);
+  if (reduce) particles.length = 0;
+  else stepParticles(dt);
 
   drawFxVectors(b, L);
 
   // 파티클 — 하나가 fillRect 한 번이다. 알파 대신 색 램프로 식는다.
-  for (const p of particles) {
-    const k = 1 - p.life / p.max;
-    const col = p.ramp[Math.min(p.ramp.length - 1, Math.floor(k * p.ramp.length + p.jit))]!;
-    b.fillStyle = col;
-    b.fillRect(Math.round(p.x / FX_PIXEL), Math.round(p.y / FX_PIXEL), p.size, p.size);
+  if (!reduce) {
+    for (const p of particles) {
+      const k = 1 - p.life / p.max;
+      const col = p.ramp[Math.min(p.ramp.length - 1, Math.floor(k * p.ramp.length + p.jit))]!;
+      b.fillStyle = col;
+      b.fillRect(Math.round(p.x / FX_PIXEL), Math.round(p.y / FX_PIXEL), p.size, p.size);
+    }
   }
 
   const prev = ctx.imageSmoothingEnabled;
@@ -1867,7 +1912,8 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
 /** 원거리 투사체. 피해는 이미 적용됐고 이건 순수 연출이다. */
 function drawShots(ctx: CanvasRenderingContext2D, L: Layout): void {
   for (const s of shots) {
-    const t = 1 - s.life / SHOT_LIFE_MS;
+    // 모션 축소에서는 궤적을 이동시키지 않고 피격점에 짧게 남긴다.
+    const t = reducedMotion() ? 1 : 1 - s.life / SHOT_LIFE_MS;
     const fx = s.fromX + (s.toX - s.fromX) * t;
     const fy = s.fromY + (s.toY - s.fromY) * t;
     const { x, y } = fieldToScreen(L, fx, fy);
@@ -1897,18 +1943,25 @@ function drawShots(ctx: CanvasRenderingContext2D, L: Layout): void {
   }
 }
 
-function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
+function drawPops(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const quiet = hazardsActive(s);
+  const reduce = reducedMotion();
   for (const p of damagePops) {
     const { x, y } = fieldToScreen(L, p.fx, p.fy);
     const t = 1 - p.life / POP_LIFE_MS;
     ctx.save();
-    ctx.globalAlpha = Math.max(0, 1 - t * t);
+    // 예고가 떠 있는 동안 일반 피해는 뒤로 물린다. 치명타·회복·빗나감은
+    // 판단 피드백이라 절반 이상 남기고, 나머지만 크게 낮춘다.
+    const important = p.crit || p.heal || p.text === "회피";
+    const emphasis = quiet ? (important ? 0.68 : 0.34) : 1;
+    const sizeScale = quiet ? (important ? 0.65 : 0.4) : 1;
+    ctx.globalAlpha = Math.max(0, 1 - t * t) * emphasis;
     // 같은 프레임에 뜬 숫자는 계단으로 민다. 흩뿌리기로는 셋이 겹치면 여전히
     // `72 61`처럼 붙어 읽혔다. 아래·오른쪽으로 미는 것은 위쪽이 보스와 HUD라서다.
     const ox = x + p.step * L.cell * 0.38;
-    const oy = y - L.cell * 0.34 - t * L.cell * 0.55 + p.step * L.cell * 0.4;
+    const oy = y - L.cell * 0.34 - (reduce ? 0 : t * L.cell * 0.55) + p.step * L.cell * 0.4;
     if (p.text === "회피") {
-      uiText(ctx, "빗나감", ox, oy, Math.max(9, L.cell * 0.16), T.paperDim, {
+      uiText(ctx, "빗나감", ox, oy, Math.max(9, L.cell * 0.16) * sizeScale, T.paperDim, {
         align: "center",
         weight: 700,
         outline: true,
@@ -1921,7 +1974,7 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout): void {
         p.text,
         ox,
         oy,
-        Math.max(1, L.cell * (p.crit ? 0.035 : 0.028)),
+        Math.max(1, L.cell * (p.crit ? 0.035 : 0.028)) * sizeScale,
         // 회복은 초록. 판 위에서 숫자가 뜨는 것은 늘 깎이는 일이었으므로,
         // 색이 안 갈리면 "+12"도 맞은 것으로 먼저 읽힌다.
         p.heal ? "#8FD9A8" : p.crit ? T.vuln : "#FFFFFF",
@@ -2167,6 +2220,7 @@ function hexA(hex: string, a: number): string {
  * 위상을 품종마다 어긋나게 준다. 셋이 동시에 깜빡이면 살아 있는 게 아니라 기계로 보인다.
  */
 function cardIdle(seed: number, t: number): { pose: Pose; bob: number } {
+  if (reducedMotion()) return { pose: "idle", bob: 0 };
   const cycle = 2600 + (seed % 5) * 260;
   const p = (t + seed * 430) % cycle;
   return {
@@ -2596,6 +2650,8 @@ interface BuyTween {
 const buyTweens: BuyTween[] = [];
 /** 150~250ms 중간값. 너무 길면 다음 카드를 가리고, 너무 짧으면 어디로 갔는지 안 읽힌다. */
 const BUY_TWEEN_MS = 210;
+/** 모션 축소에서는 비행을 없애고 도착점 확인만 짧게 남긴다. */
+const BUY_REDUCED_MS = 160;
 
 /**
  * 카드를 하나 산 순간 부른다. `main.ts`의 `buyWithFx`가 유일한 호출부다.
@@ -2620,27 +2676,34 @@ export function spawnBuyTween(offer: Offer, slot: number, cell: number | null): 
 function drawBuyTweens(ctx: CanvasRenderingContext2D, L: Layout): void {
   if (buyTweens.length === 0) return;
   const now = performance.now();
+  const reduce = reducedMotion();
   const rects = offerRects(L);
   for (let i = buyTweens.length - 1; i >= 0; i--) {
     const tw = buyTweens[i]!;
-    const t = (now - tw.startedAt) / BUY_TWEEN_MS;
+    const t = (now - tw.startedAt) / (reduce ? BUY_REDUCED_MS : BUY_TWEEN_MS);
     const from = rects[tw.slot];
-    if (t >= 1 || !from) {
+    if (t >= 1 || (!reduce && !from)) {
       buyTweens.splice(i, 1);
       continue;
     }
 
     const to = tw.cell === null ? L.allyBoard : cellRect(L, "ally", tw.cell);
+    const toCx = to.x + to.w / 2;
+    const toCy = to.y + to.h / 2;
     const e = easeOutCubic(t);
-    const fromCx = from.x + from.w / 2;
-    const fromCy = from.y + from.h / 2;
-    const cx = fromCx + (to.x + to.w / 2 - fromCx) * e;
-    const cy = fromCy + (to.y + to.h / 2 - fromCy) * e;
-    // 초반에 살짝 부풀었다가 도착할수록 줄어든다 — 튕겨 나가는 느낌.
-    const scale = t < 0.35 ? 1 + (t / 0.35) * 0.18 : 1.18 - ((t - 0.35) / 0.65) * 0.7;
-    // 절반 넘게 갈 때까지는 또렷하다가 도착 직전에 스러진다.
-    const alpha = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
-    const size = Math.min(from.w, from.h) * scale;
+    const fromCx = from ? from.x + from.w / 2 : toCx;
+    const fromCy = from ? from.y + from.h / 2 : toCy;
+    const cx = reduce ? toCx : fromCx + (toCx - fromCx) * e;
+    const cy = reduce ? toCy : fromCy + (toCy - fromCy) * e;
+    // 축소 설정에서는 크기 이동도 없애고 도착 지점에 정적인 확인만 남긴다.
+    const scale = reduce
+      ? 0.72
+      : t < 0.35
+        ? 1 + (t / 0.35) * 0.18
+        : 1.18 - ((t - 0.35) / 0.65) * 0.7;
+    const alpha = reduce ? 1 - t : t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
+    const basis = reduce ? Math.min(to.w, to.h) : Math.min(from?.w ?? to.w, from?.h ?? to.h);
+    const size = basis * scale;
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, alpha);
@@ -3305,7 +3368,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
 
     // 고를 수 있는 칸은 맥동한다. 여섯 칸 중 어디를 눌러야 하는지가 한눈에 보인다.
     if (pickable) {
-      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 260);
+      const pulse = motionPulse(260);
       ctx.save();
       ctx.beginPath();
       ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2 + L.scale * 4, 0, Math.PI * 2);
@@ -3525,7 +3588,7 @@ function drawButtonFace(
 
   // 살아난 순간을 놓치지 않게 테두리가 한 번 밝아진다. 예고는 1.2초뿐이다.
   if (pulse) {
-    const p = 0.5 + 0.5 * Math.sin(performance.now() / 150);
+    const p = motionPulse(150);
     ctx.save();
     roundRect(ctx, r, r.h * 0.26);
     ctx.strokeStyle = `rgba(255,255,255,${0.18 + p * 0.3})`;
@@ -3789,7 +3852,7 @@ function drawNotice(
    */
   if (s.noticeKind === "boss") {
     const since = trackNoticeChange(s.notice);
-    const grow = Math.min(1, (performance.now() - since) / 260);
+    const grow = reducedMotion() ? 1 : Math.min(1, (performance.now() - since) / 260);
     const scale = 0.82 + 0.18 * easeOutCubic(grow);
     uiText(ctx, s.notice, L.w / 2, cy, size * 1.3 * scale, T.gold, {
       align: "center",
@@ -4066,6 +4129,7 @@ interface Curtain {
 }
 
 const CURTAIN_MS = 1500;
+const CURTAIN_REDUCED_MS = 420;
 let curtain: Curtain | null = null;
 let curtainAt = 0;
 /** 무엇이 바뀌었는지 알려면 직전 값을 들고 있어야 한다. */
@@ -4074,7 +4138,8 @@ let seenStage = -1;
 let seenBosses = -1;
 
 function raise(title: string, sub: string): void {
-  curtain = { title, sub, life: CURTAIN_MS, max: CURTAIN_MS };
+  const life = reducedMotion() ? CURTAIN_REDUCED_MS : CURTAIN_MS;
+  curtain = { title, sub, life, max: life };
 }
 
 /** 상태의 변화를 보고 막을 올린다. 게임 코드는 이걸 모른다. */
@@ -4125,7 +4190,13 @@ function drawCurtain(ctx: CanvasRenderingContext2D, L: Layout): void {
 
   const t = 1 - curtain.life / curtain.max; // 0 → 1
   // 앞 12%에 들어오고, 뒤 35%에 나간다.
-  const alpha = t < 0.12 ? t / 0.12 : t > 0.65 ? 1 - (t - 0.65) / 0.35 : 1;
+  const alpha = reducedMotion()
+    ? 1
+    : t < 0.12
+      ? t / 0.12
+      : t > 0.65
+        ? 1 - (t - 0.65) / 0.35
+        : 1;
   const a = Math.max(0, Math.min(1, alpha));
 
   ctx.save();
@@ -4156,6 +4227,81 @@ function drawCurtain(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.restore();
 }
 
+/** 보스 출현은 전투 상태를 관찰하는 렌더 전용 사건이다. */
+interface BossArrival {
+  scale: number;
+  alpha: number;
+}
+
+let arrivalBossUid: string | null = null;
+let arrivalBossElapsed = 0;
+let arrivalFrameAt = 0;
+
+function bossArrival(s: RunState): BossArrival | null {
+  const boss =
+    s.phase === "battle" ? s.enemy.find((c) => c?.alive && c.radius > 0) : undefined;
+  if (!boss) {
+    arrivalBossUid = null;
+    arrivalBossElapsed = 0;
+    arrivalFrameAt = 0;
+    return null;
+  }
+  const now = performance.now();
+  if (boss.uid !== arrivalBossUid) {
+    arrivalBossUid = boss.uid;
+    arrivalBossElapsed = 0;
+    arrivalFrameAt = now;
+  } else {
+    // 숨김 탭에서는 rAF가 멈춘다. 절대시간을 빼면 그동안 연출만 소진되므로,
+    // 실제로 그린 프레임의 간격만 최대 48ms씩 누적한다.
+    arrivalBossElapsed += arrivalFrameAt ? Math.min(48, now - arrivalFrameAt) : 16;
+    arrivalFrameAt = now;
+  }
+
+  const sniper = boss.breed.id === SNIPER_BREED.id;
+  const reduce = reducedMotion();
+  const duration = reduce ? (sniper ? 180 : 240) : sniper ? 420 : boss.stageBoss === true ? 680 : 560;
+  const raw = Math.max(0, arrivalBossElapsed / duration);
+  if (raw >= 1) return null;
+
+  const settled = easeOutCubic(raw);
+  const zoom = sniper ? 0.018 : boss.stageBoss === true ? 0.035 : 0.028;
+  return {
+    scale: reduce ? 1 : 1 + zoom * (1 - settled),
+    // 모션 축소에서는 짧게 같은 프레임만 보여 주고 이동·확대는 없다.
+    alpha: reduce ? 0.18 : (sniper ? 0.16 : 0.24) * (1 - settled),
+  };
+}
+
+/**
+ * 출현 프레임은 판 안에만 깐다. HUD·버튼까지 어두워지면 조작 불능처럼 보이고,
+ * 채도 높은 새 색을 쓰면 예고 신호 셋과 경쟁하므로 종이색 명암만 쓴다.
+ */
+function drawBossArrivalFrame(ctx: CanvasRenderingContext2D, L: Layout, arrival: BossArrival): void {
+  const r = arenaBox(L);
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const radius = Math.hypot(r.w, r.h) / 2;
+
+  ctx.save();
+  roundRect(ctx, r, L.cell * 0.22);
+  ctx.clip();
+  const shade = ctx.createRadialGradient(cx, cy, Math.min(r.w, r.h) * 0.16, cx, cy, radius);
+  shade.addColorStop(0, "rgba(9,6,5,0)");
+  shade.addColorStop(1, `rgba(9,6,5,${arrival.alpha})`);
+  ctx.fillStyle = shade;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(0.7, arrival.alpha * 2.6);
+  roundRect(ctx, r, L.cell * 0.22);
+  ctx.strokeStyle = T.paperDim;
+  ctx.lineWidth = Math.max(1, L.cell * 0.035);
+  ctx.stroke();
+  ctx.restore();
+}
+
 /**
  * 보스가 죽는 순간의 화면 흔들림.
  *
@@ -4167,6 +4313,7 @@ function drawCurtain(ctx: CanvasRenderingContext2D, L: Layout): void {
  * 이 한 경우만 예외로 켠다.
  */
 function bossDeathShake(L: Layout): { x: number; y: number } {
+  if (reducedMotion()) return { x: 0, y: 0 };
   const dead = fxs.find((f) => f.kind === "bossdeath");
   if (!dead) return { x: 0, y: 0 };
   // 위상은 Fx에 실려 온다. s.step은 처치 직후 finishWave가 올려 못 믿는다.
@@ -4213,7 +4360,7 @@ function drawFinalPhaseOverlay(ctx: CanvasRenderingContext2D, L: Layout, s: RunS
   // 보스 발광 — 채널 내내 맥동하고, 마지막 창에서는 옅게 남는다.
   const { x: bx, y: by } = fieldToScreen(L, boss.fx, boss.fy);
   const size = catBodySize(L, boss.radius, boss.sizeMul);
-  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+  const pulse = motionPulse(180);
   const r = size * (0.7 + pulse * 0.18);
   const g = ctx.createRadialGradient(bx, by, size * 0.2, bx, by, r);
   const glowAlpha = stage === "channel" ? 0.5 + pulse * 0.25 : 0.2;
@@ -4242,8 +4389,17 @@ export function render(
   // 판·고양이·연출만 흔든다. HUD·상점·지도까지 흔들리면 화면 전체가 고장난
   // 것처럼 보인다.
   const shake = bossDeathShake(L);
+  const arrival = bossArrival(s);
   ctx.save();
   ctx.translate(shake.x, shake.y);
+  if (arrival && arrival.scale !== 1) {
+    const arena = arenaBox(L);
+    const cx = arena.x + arena.w / 2;
+    const cy = arena.y + arena.h / 2;
+    ctx.translate(cx, cy);
+    ctx.scale(arrival.scale, arrival.scale);
+    ctx.translate(-cx, -cy);
+  }
 
   /**
    * 지도 국면은 `drawMap`이 화면 전체를 0.98 알파로 덮는다. 그 아래 판·고양이·연출·하단 띠는
@@ -4265,6 +4421,7 @@ export function render(
   drawSideLabels(ctx, L);
   drawBoard(ctx, L, "ally", T.ally, hoverCell);
   drawBoard(ctx, L, "enemy", T.enemy, -1);
+  if (arrival) drawBossArrivalFrame(ctx, L, arrival);
   drawTelegraphs(ctx, L, s);
   drawCreepZones(ctx, L, creepZones);
 
@@ -4335,7 +4492,7 @@ export function render(
     }
   }
 
-  drawPops(ctx, L);
+  drawPops(ctx, L, s);
   ctx.restore();
 
   drawBottomZone(ctx, L, s);
