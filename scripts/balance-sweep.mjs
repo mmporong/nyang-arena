@@ -8,9 +8,9 @@
  * 실행: npm run sweep
  */
 import { BALANCE } from "../src/game/balance.ts";
-import { walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
+import { walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
+import { newRun, startBattle } from "../src/game/run.ts";
 
 const RUNS = Number(process.env.RUNS ?? 120);
 const MAX_WAVE = 80;
@@ -32,32 +32,13 @@ const mapPick = MAP_POLICIES["무작위"];
  */
 function playOne(seed) {
   const s = newRun(seed);
-  let rerolls = 0;
-  let lastWave = 0;
+  const shop = { rerolls: 0, lastWave: 0 };
   for (let guard = 0; guard < MAX_WAVE * 500; guard++) {
     if (s.phase === "gameover") return s.wave;
     if (s.phase === "reward") {
-      const afford = s.offers.filter((o) => o && o.cost <= s.gold)
-        // 봇은 시너지 적합도를 판단하지 못하므로 교체가 순손실이다. 실제 플레이어는
-        // 목표에 맞춰 쓰지만, 여기서는 다른 걸 못 살 때만 집는다.
-        .sort((a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost);
-      if (afford[0]) {
-        const pick = afford[0];
-        const before = s.offers.length;
-        if (!buyOffer(s, pick) && s.offers.length === before) {
-          s.offers = s.offers.map((o) => (o === pick ? null : o));
-        }
-        continue;
-      }
-      // 살 게 없고 생선이 남으면 다시 뽑는다. 잉여를 전력으로 바꾸는 실제 플레이 방식.
-      if (s.wave !== lastWave) {
-        lastWave = s.wave;
-        rerolls = 0;
-      }
-      if (rerolls < 4 && s.gold >= 12 && rerollOffers(s)) {
-        rerolls += 1;
-        continue;
-      }
+      // 구매·재추첨은 bot-policy의 `shopStep` 한 곳만 쓴다(무료 재추첨 포함). 사본은 늘 다르게
+      // 재는 쪽으로 갈라진다 — 여기 사본도 무료 재추첨이 없었다.
+      if (shopStep(s, shop) !== "leave") continue;
       leaveShop(s);
       continue;
     }

@@ -16,15 +16,8 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { BALANCE } from "../src/game/balance.ts";
-import {
-  buyOffer,
-  newRun,
-  rerollOffers,
-  startBattle,
-  unitCap,
-  upgradeCost,
-} from "../src/game/run.ts";
-import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
+import { newRun, startBattle, unitCap, upgradeCost } from "../src/game/run.ts";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 40;
@@ -38,11 +31,11 @@ function bump(wave, field, n = 1) {
   stat.set(wave, cur);
 }
 
-const byCost = (a, b) => (a.kind === "replace" ? 1 : 0) - (b.kind === "replace" ? 1 : 0) || b.cost - a.cost;
 
 function play(seed) {
   const s = newRun(seed);
   const respond = makeBossBot();
+  const shop = { rerolls: 0, lastWave: 0 };
   let prevGold = s.gold;
 
   for (let guard = 0; guard < MAX_WAVE * 4000; guard++) {
@@ -62,33 +55,10 @@ function play(seed) {
       }
 
       const before = s.gold;
-      for (let k = 0; k < 40; k++) {
-        const aff = affordable(s);
-        const pick = aff.length > 0 ? [...aff].sort(byCost)[0] : null;
-        if (!pick) break;
-        if (!buyOffer(s, pick)) s.offers = s.offers.map((o) => (o === pick ? null : o));
-      }
-      // balance-sim과 같은 재추첨 정책을 쓴다. 안 그러면 잔고가 부풀려져
-      // "생선이 남는다"가 봇의 게으름인지 게임의 문제인지 갈리지 않는다.
-      let rolls = 0;
-      while (rolls < 4 && s.gold >= 12 && rerollOffers(s)) {
-        rolls += 1;
-        for (let k = 0; k < 40; k++) {
-          const aff = affordable(s);
-          const pick = aff.length > 0 ? [...aff].sort(byCost)[0] : null;
-          if (!pick) break;
-          if (!buyOffer(s, pick)) s.offers = s.offers.map((o) => (o === pick ? null : o));
-        }
-      }
-      while (s.freeRerolls > 0) {
-        rerollOffers(s);
-        for (let k = 0; k < 40; k++) {
-          const aff = affordable(s);
-          const pick = aff.length > 0 ? [...aff].sort(byCost)[0] : null;
-          if (!pick) break;
-          if (!buyOffer(s, pick)) s.offers = s.offers.map((o) => (o === pick ? null : o));
-        }
-      }
+      // 구매·재추첨은 bot-policy의 `shopStep` 한 곳만 쓴다. 이 파일은 제 사본을 들고 있었고
+      // **무료/유료 재추첨 순서가 반대**였다 — 잔고가 다르게 재지면 "생선이 남는다"가 봇의 버릇인지
+      // 게임의 문제인지 갈리지 않는다. 사본은 늘 다르게 재는 쪽으로 갈라진다(AGENTS.md).
+      for (let k = 0; k < 200; k++) if (shopStep(s, shop) === "leave") break;
       bump(w, "spend", before - s.gold);
       bump(w, "held", s.gold);
 

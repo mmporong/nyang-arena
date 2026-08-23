@@ -5,9 +5,9 @@
  * 구매 정책 넷을 같은 조건에서 돌려 분포를 비교한다.
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
+import { newRun, startBattle } from "../src/game/run.ts";
 import { livingCats } from "../src/game/types.ts";
-import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
 const RUNS = 300;
 /**
@@ -99,20 +99,14 @@ function seeded() {
 function run(pick, runSeed) {
   const s = newRun(runSeed);
   const respond = makeBossBot();
-  let rerolls = 0;
-  let lastWave = 0;
+  const shop = { rerolls: 0, lastWave: 0 };
   for (let guard = 0; guard < 40000; guard++) {
     if (s.phase === "gameover") return s.wave;
     if (s.phase === "reward") {
-      const afford = affordable(s);
-      // 정책에 상태를 함께 넘긴다. 카드만 보는 정책은 두 번째 인자를 무시한다.
-      const choice = afford.length > 0 ? pick(afford, s) : null;
-      if (choice) {
-        if (!buyOffer(s, choice)) s.offers = s.offers.map((o) => (o === choice ? null : o));
-        continue;
-      }
-      if (s.wave !== lastWave) { lastWave = s.wave; rerolls = 0; }
-      if (rerolls < 4 && s.gold >= 12 && rerollOffers(s)) { rerolls += 1; continue; }
+      // 구매·재추첨은 bot-policy의 `shopStep` 한 곳만 쓴다. 이 파일은 제 사본을 들고 있었고 **무료
+      // 재추첨을 안 써서** 상점 칸의 보상을 버리고 있었다 — AGENTS.md가 네 번 적은 그 결함이다.
+      // 정책은 choose 인자로 넘긴다(카드만 보는 정책은 둘째 인자를 무시한다).
+      if (shopStep(s, shop, pick) !== "leave") continue;
       leaveShop(s);
       continue;
     }
