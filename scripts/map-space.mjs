@@ -14,6 +14,7 @@
  * 실행: npm run map
  */
 import { stepBattle } from "../src/game/battle.ts";
+import { runSharded } from "./parallel.mjs";
 import { newRun, startBattle } from "../src/game/run.ts";
 import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
@@ -70,12 +71,14 @@ console.log("정책          최소  p25  중앙값  p75  최대   평균   전�
 const means = {};
 /** 시드별 결과. 평균이 아니라 **판마다 최선이 갈리는가**를 보려고 모은다. */
 const perSeed = {};
-for (const [name, pick] of Object.entries(MAP_POLICIES)) {
+// 런은 워커에 나눠 돌리고(scripts/parallel.mjs) 원시 결과만 받는다. 집계는 아래 그대로다.
+const sharded = await runSharded(import.meta.url, Object.keys(MAP_POLICIES), (name, seed) => play(MAP_POLICIES[name], seed), { runs: RUNS, seed0: SEED0 });
+for (const name of Object.keys(MAP_POLICIES)) {
   const out = [];
   const tally = { battle: 0, elite: 0, shop: 0, boss: 0 };
   perSeed[name] = [];
   for (let i = 0; i < RUNS; i++) {
-    const r = play(pick, SEED0 + i + 1);
+    const r = sharded[name][i];
     out.push(r.wave);
     perSeed[name][i] = r.wave;
     for (const k of Object.keys(tally)) tally[k] += r.seen[k];

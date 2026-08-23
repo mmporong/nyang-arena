@@ -168,8 +168,12 @@ npm run dev        # 개발 서버
 npm run build      # 타입체크 + 프로덕션 빌드
 npm test           # 검증기 적대 테스트
 npm run sim        # 밸런스 시뮬레이션
-npm run verify     # 위 전부 + 결정 축 전체 (관문)
+npm run verify     # 위 전부 + 불변식 + 결정 축 전체 (관문)
 ```
+
+결정 축 측정(`relics`·`map`·`placement`)은 시드 블록을 워커에 나눠 돈다(`scripts/parallel.mjs`,
+기본 min(6, 코어−1)개). 결과는 순서대로 돌린 것과 바이트까지 같다 — `WORKERS=1 npm run map`과
+`npm run map`의 출력을 diff하면 확인된다. 집계는 워커가 아니라 원래 자리에서 한 벌만 한다.
 
 런타임 의존성 0개. 번들 크기는 `docs/generated/metrics-current.md`가 매번
 다시 재서 적는다 — **여기에 숫자를 적어 두면 낡는다.**

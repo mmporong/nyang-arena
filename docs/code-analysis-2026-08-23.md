@@ -146,6 +146,22 @@ CI에도 없다. CI(`.github/workflows/deploy.yml`)는 `test`·`probe`·`build`�
 검사(invariants, 615k 스텝)는 체인 밖이며, AGENTS.md가 네 번 밟았다고 기록한 "구매 정책 사본" 결함이
 `decision-space`·`balance-sweep`에 그대로 남아 있다. Top 10의 1~4번(전부 S~M, 저위험)이 이걸 닫는다.
 
-## 6. 처리 기록
+## 6. 처리 기록 (2026-08-23 같은 날)
 
-(후속 커밋에서 갱신)
+| # | 상태 | 커밋 | 비고 |
+|---|---|---|---|
+| 1 | 처리 | fa42f4a | `balance-sim`·`decision-space`에 exit 코드. `gold`는 판정이 없는 관측이라 `measure-all`의 OBSERVE로 분리해 세지 않는다 |
+| 2 | 처리 | fa42f4a | `verify`에 `invariants`(measure-all **앞** — `&&` 사슬이라 뒤에 두면 지도 축이 빨간 지금은 영영 안 돈다) |
+| 3 | 처리 | 2a45441 | `decision-space`·`balance-sweep`·`gold-curve` → `shopStep`. decisions 깊이 4.9 → 3.7(무작위 13.4 → 14.7, 무료 재추첨을 쓰게 됨), 판정 통과 유지 |
+| 4 | 처리 | fa42f4a | `bossesSeen`을 `isBossStep`/`BOSSES_PER_STAGE`로. sim 분포 동일 |
+| 5 | 처리 | fa42f4a | `loadRuns`/`RUNS_KEY`/`RunRecord` 삭제 + 테스트 단언 제거 |
+| 6 | 처리 | fa42f4a | `runSkill` default에 never 단언(패시브 `null`은 빈 결과) |
+| 7 | 처리 | fa42f4a | CI에 `dodge:test`·`invariants` |
+| 8 | 처리 | fa42f4a | `newRun`의 notice 직접 대입 → `setNotice` |
+| 9 | 보류 | — | `makeTelegraph` 분해는 battle.ts 전면 변경이라 8축 바이트 비교가 전제. 다음 작업 |
+| 10 | 보류 | — | 렌더 3대 함수 분할은 회귀 그물 먼저 |
+| 리뷰 M | 처리 | fa42f4a | `sameClassNeighbors` `cat.cell` O(1) + 가드 |
+
+추가로 발견: `npm run sim`(balance-sim)과 `npm run metrics`(metrics-gen)의 도달 웨이브 분포가 다르다
+(15/9/20/37 vs 14/8/20/36) — 두 도구의 런 정책 또는 시드 처리가 갈라져 있다. README의 sim 블록은
+sim 출력, intro·공개 수치는 metrics 기준으로 두었고, 원인 추적은 다음 작업.

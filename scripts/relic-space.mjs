@@ -11,6 +11,7 @@
  * 실행: npm run relics
  */
 import { stepBattle } from "../src/game/battle.ts";
+import { runSharded } from "./parallel.mjs";
 import { buyOffer, newRun, rerollOffers, startBattle } from "../src/game/run.ts";
 import { arrangeForRelics, makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
 
@@ -126,9 +127,10 @@ console.log("전략                   최소  p10  p25  중앙값  p75  p90  최
 const means = {};
 /** 시드 순서를 유지한 원본. 정렬본으로는 시드별 짝비교를 할 수 없다. */
 const bySeed = {};
-for (const [name, pick] of Object.entries(POLICIES)) {
-  const raw = [];
-  for (let i = 0; i < RUNS; i++) raw.push(play(pick, SEED0 + i + 1));
+// 런은 워커에 나눠 돌리고(scripts/parallel.mjs) 원시 결과만 받는다. 집계는 아래 그대로다.
+const sharded = await runSharded(import.meta.url, Object.keys(POLICIES), (name, seed) => play(POLICIES[name], seed), { runs: RUNS, seed0: SEED0 });
+for (const name of Object.keys(POLICIES)) {
+  const raw = sharded[name].slice();
   bySeed[name] = raw;
   const out = [...raw].sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;

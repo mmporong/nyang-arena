@@ -11,6 +11,7 @@
  * 실행: npm run placement
  */
 import { stepBattle } from "../src/game/battle.ts";
+import { runSharded } from "./parallel.mjs";
 import { buyOffer, moveCat, newRun, startBattle, bossIndexAt } from "../src/game/run.ts";
 import { bossForIndex } from "../src/game/bosses.ts";
 import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
@@ -209,9 +210,10 @@ const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 console.log(`런 ${RUNS}회 · 구매 정책 고정(가장 비싼 것) · 배치만 변경 · 시드 1~${RUNS}\n`);
 console.log("배치                    최소   p10   p25  중앙값   p75   p90   최대   평균");
 const means = {};
-for (const [name, arrange] of Object.entries(ARRANGERS)) {
-  const out = [];
-  for (let i = 0; i < RUNS; i++) out.push(play(arrange, SEED0 + i + 1));
+// 런은 워커에 나눠 돌리고(scripts/parallel.mjs) 원시 결과만 받는다. 집계는 아래 그대로다.
+const sharded = await runSharded(import.meta.url, Object.keys(ARRANGERS), (name, seed) => play(ARRANGERS[name], seed), { runs: RUNS, seed0: SEED0 });
+for (const name of Object.keys(ARRANGERS)) {
+  const out = sharded[name].slice();
   out.sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;
   means[name] = avg;
