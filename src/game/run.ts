@@ -27,6 +27,7 @@ import {
   type Board,
   type Breed,
   type Cat,
+  type ClassKind,
   type Side,
 } from "./types.ts";
 import {
@@ -217,6 +218,11 @@ export interface RunState {
   bonusDodge: number;
   /** 다음 카드 묶음에 유물을 반드시 한 장 섞는다. 정예 보상. */
   forceRelic: boolean;
+  /**
+   * 별사탕(열쇠) — 생선으로 못 사는 자원. 금고를 여는 데만 쓴다(지도 실험 #1). 플래그가 꺼져
+   * 있으면 늘 0이라 게임에 영향이 없다.
+   */
+  keys: number;
   /** 마지막에 나를 막은 것. 보스면 이름과 남은 체력이 함께 뜬다. */
   killer: { name: string; hpFrac: number; boss: boolean } | null;
   /**
@@ -433,6 +439,44 @@ export function setNotice(state: RunState, text: string, kind: NoticeKind = "nor
  * 그래도 **웨이브는 하나 지나간다** — 그게 상점의 대가다. 적은 웨이브마다
  * 복리로 세지므로, 힘을 사는 동안 상대도 세진다.
  */
+/** 지금 로스터에서 가장 많은 직업. 금고 유물이 이 직업을 노린다. */
+function dominantClass(state: RunState): ClassKind | null {
+  const count = new Map<ClassKind, number>();
+  for (const c of livingCats(state.ally)) count.set(c.breed.cls, (count.get(c.breed.cls) ?? 0) + 1);
+  let want: ClassKind | null = null;
+  let most = 0;
+  for (const [cls, n] of count) if (n > most) { most = n; want = cls; }
+  return want;
+}
+
+/**
+ * 금고를 연다. **열쇠(별사탕)가 있어야 유물이 나온다** — 없으면 헛걸음이라 위로금만 받는다.
+ * 그래서 금고로 가기 전에 열쇠 칸을 먼저 밟아야 하고, 그 순서가 경로 결정이 된다. 유물은 몰빵
+ * 직업을 노린다(조건을 이미 채우고 있으므로 대가만 남지 않는다). 전투가 없다.
+ */
+function resolveVault(state: RunState): void {
+  if (state.keys <= 0) {
+    state.gold += BALANCE.vaultEmptyGold;
+    setNotice(state, `금고가 잠겨 있어요 — 별사탕이 없어 그냥 지나쳤어요 (+${BALANCE.vaultEmptyGold})`);
+    return;
+  }
+  state.keys -= 1;
+  const owned = new Set(state.relics.map((r) => r.id));
+  const pool = RELICS.filter((r) => !owned.has(r.id));
+  const want = dominantClass(state);
+  const pick =
+    (want ? pool.find((r) => r.condition.kind === "class_count" && r.condition.cls === want) : undefined) ??
+    shuffle(pool)[0];
+  if (pick) {
+    state.relics.push(pick);
+    setNotice(state, `금고에서 ${pick.name}을(를) 열었어요`);
+  } else {
+    // 유물을 다 모았다 — 별사탕을 돌려준다.
+    state.keys += 1;
+    setNotice(state, "금고가 비어 있었어요 — 별사탕을 돌려받았어요");
+  }
+}
+
 export function chooseNode(state: RunState, idx: number): boolean {
   const step = mapStep(state);
   if (!openLanes(state.map, step).includes(idx)) return false;
@@ -442,6 +486,26 @@ export function chooseNode(state: RunState, idx: number): boolean {
   state.map.taken[step] = idx;
   state.nodeKind = node.kind;
   state.nodeWave = node.wave;
+
+  if (node.kind === "key") {
+    // 별사탕을 챙긴다. 상점처럼 걸음만 먹고 웨이브는 넘긴다.
+    state.keys += 1;
+    state.step += 1;
+    syncStage(state);
+    rollOffers(state);
+    state.phase = "reward";
+    setNotice(state, `별사탕을 챙겼어요 (${state.keys}개)`);
+    return true;
+  }
+
+  if (node.kind === "vault") {
+    resolveVault(state);
+    state.step += 1;
+    syncStage(state);
+    rollOffers(state);
+    state.phase = "reward";
+    return true;
+  }
 
   if (node.kind === "shop") {
     // 싸우지 않고 힘만 사는 자리. 생선과 무료 재추첨을 주고 웨이브를 넘긴다.
@@ -1064,6 +1128,7 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
     freeRerolls: 0,
     bonusDodge: 0,
     forceRelic: false,
+    keys: 0,
     killer: null,
     kind,
     challenge,

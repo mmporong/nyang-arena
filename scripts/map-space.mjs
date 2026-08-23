@@ -16,21 +16,32 @@
 import { stepBattle } from "../src/game/battle.ts";
 import { runSharded } from "./parallel.mjs";
 import { newRun, startBattle } from "../src/game/run.ts";
-import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES, KEY_MAP_POLICIES } from "./bot-policy.mjs";
+import { BALANCE } from "../src/game/balance.ts";
 
-const RUNS = Number(process.argv[2] ?? 1500);
+/**
+ * `--keys`: 열쇠/봉쇄 실험. 지도에 열쇠·금고 노드가 나오고(`BALANCE.mapKeys`), 순서를 읽는
+ * "열쇠 계획"이 눈감은 "금고 몰빵"·기존 정책들보다 나은지 본다. 플래그는 자리와 무관.
+ */
+const ARGS = process.argv.slice(2);
+const KEYS = ARGS.includes("--keys");
+const NUMS = ARGS.filter((a) => !a.startsWith("--"));
+if (KEYS) BALANCE.mapKeys = true;
+const POLICIES = KEYS ? { ...MAP_POLICIES, ...KEY_MAP_POLICIES } : MAP_POLICIES;
+
+const RUNS = Number(NUMS[0] ?? 1500);
 /**
  * 시드 오프셋. 잡음 바닥을 재려고 넣었다 — `relic-space`·`placement-space`와
  * 같은 이유다. 판정이 기준에 걸쳐 있을 때 그것이 신호인지 잡음인지는
  * 겹치지 않는 시드 블록으로 같은 코드를 다시 돌려야만 갈린다.
  */
-const SEED0 = Number(process.argv[3] ?? 0);
+const SEED0 = Number(NUMS[1] ?? 0);
 const MAX_WAVE = 60;
 
 function play(pick, seed) {
   const s = newRun(seed);
   const respond = makeBossBot();
-  const seen = { battle: 0, elite: 0, shop: 0, boss: 0 };
+  const seen = { battle: 0, elite: 0, shop: 0, key: 0, vault: 0, boss: 0 };
   const shop = { rerolls: 0, lastWave: 0 };
 
   for (let guard = 0; guard < MAX_WAVE * 4000; guard++) {
@@ -65,17 +76,21 @@ function play(pick, seed) {
 
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 
-console.log(`런 ${RUNS}회 · 구매·배치·개입 고정 · 길 고르기만 변경 · 시드 1~${RUNS}\n`);
-console.log("정책          최소  p25  중앙값  p75  최대   평균   전투/정예/상점");
+console.log(
+  `런 ${RUNS}회 · 구매·배치·개입 고정 · 길 고르기만 변경 · 시드 ${SEED0 + 1}~${SEED0 + RUNS}` +
+    (KEYS ? " · 열쇠 실험" : "") +
+    "\n",
+);
+console.log(`정책          최소  p25  중앙값  p75  최대   평균   전투/정예/상점${KEYS ? "/열쇠/금고" : ""}`);
 
 const means = {};
 /** 시드별 결과. 평균이 아니라 **판마다 최선이 갈리는가**를 보려고 모은다. */
 const perSeed = {};
 // 런은 워커에 나눠 돌리고(scripts/parallel.mjs) 원시 결과만 받는다. 집계는 아래 그대로다.
-const sharded = await runSharded(import.meta.url, Object.keys(MAP_POLICIES), (name, seed) => play(MAP_POLICIES[name], seed), { runs: RUNS, seed0: SEED0 });
-for (const name of Object.keys(MAP_POLICIES)) {
+const sharded = await runSharded(import.meta.url, Object.keys(POLICIES), (name, seed) => play(POLICIES[name], seed), { runs: RUNS, seed0: SEED0 });
+for (const name of Object.keys(POLICIES)) {
   const out = [];
-  const tally = { battle: 0, elite: 0, shop: 0, boss: 0 };
+  const tally = { battle: 0, elite: 0, shop: 0, key: 0, vault: 0, boss: 0 };
   perSeed[name] = [];
   for (let i = 0; i < RUNS; i++) {
     const r = sharded[name][i];
@@ -86,7 +101,7 @@ for (const name of Object.keys(MAP_POLICIES)) {
   out.sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;
   means[name] = avg;
-  const mix = `${(tally.battle / RUNS).toFixed(1)}/${(tally.elite / RUNS).toFixed(1)}/${(tally.shop / RUNS).toFixed(1)}`;
+  const mix = `${(tally.battle / RUNS).toFixed(1)}/${(tally.elite / RUNS).toFixed(1)}/${(tally.shop / RUNS).toFixed(1)}` + (KEYS ? `/${(tally.key / RUNS).toFixed(1)}/${(tally.vault / RUNS).toFixed(1)}` : "");
   console.log(
     `${name.padEnd(12)} ${String(out[0]).padStart(4)} ${String(pct(out, 0.25)).padStart(4)} ` +
       `${String(pct(out, 0.5)).padStart(6)} ${String(pct(out, 0.75)).padStart(4)} ` +
@@ -112,7 +127,7 @@ console.log(
  * 고정 최선과 신탁의 차이가 크면 "길이 안 갈린다"가 아니라 "**언제 어느 길인지**를
  * 게임이 안 알려준다"는 뜻이고, 그건 다른 문제이므로 다른 처방이 필요하다.
  */
-const names = Object.keys(MAP_POLICIES).filter((n) => n !== "무작위");
+const names = Object.keys(POLICIES).filter((n) => n !== "무작위");
 const wins = Object.fromEntries(names.map((n) => [n, 0]));
 let oracle = 0;
 for (let i = 0; i < RUNS; i++) {

@@ -468,3 +468,93 @@ if (mirrorFailures.length === 0) {
     process.exit(1);
   }
 }
+
+/**
+ * 지도 열쇠/봉쇄 실험 계약 — `BALANCE.mapKeys`.
+ *
+ * 꺼져 있으면 열쇠·금고가 안 나오고, 켜면 나오되 지도 계약(도달성·보스·전투 없는 걸음 없음)은
+ * 그대로여야 한다. 금고는 별사탕이 있어야 유물을 열고(별사탕 감소), 없으면 헛걸음(생선만).
+ */
+{
+  const { BALANCE } = await import("../src/game/balance.ts");
+  const map = await import("../src/game/map.ts");
+  const run = await import("../src/game/run.ts");
+  const failures = [];
+  const before = BALANCE.mapKeys;
+
+  BALANCE.mapKeys = false;
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const m = map.makeStage(1, seed);
+    if (m.steps.flat().some((n) => n.kind === "key" || n.kind === "vault")) failures.push(`실험이 꺼졌는데 시드 ${seed}에 열쇠/금고가 있다`);
+  }
+
+  BALANCE.mapKeys = true;
+  try {
+    let anyKey = false;
+    let anyVault = false;
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {
+      const m = map.makeStage(1, seed);
+      const flat = m.steps.flat();
+      if (flat.some((n) => n.kind === "key")) anyKey = true;
+      if (flat.some((n) => n.kind === "vault")) anyVault = true;
+      const problems = map.checkStage(m);
+      if (problems.length) failures.push(`시드 ${seed} checkStage: ${problems.join(" / ")}`);
+    }
+    if (!anyKey) failures.push("실험을 켰는데 시드 1~15 어디에도 열쇠가 없다");
+    if (!anyVault) failures.push("실험을 켰는데 시드 1~15 어디에도 금고가 없다");
+
+    // 금고 계약: 별사탕 있으면 유물+별사탕 감소, 없으면 헛걸음(생선만).
+    const withKey = run.newRun(3);
+    withKey.keys = 2;
+    withKey.gold = 20;
+    const relBefore = withKey.relics.length;
+    let hit = false;
+    for (let step = 0; step < map.STAGE_STEPS && !hit; step++) {
+      const row = withKey.map.steps[step] ?? [];
+      const open = map.openLanes(withKey.map, step);
+      const idx = open.find((i) => row[i]?.kind === "vault");
+      if (idx !== undefined) {
+        run.chooseNode(withKey, idx);
+        hit = true;
+        if (withKey.relics.length !== relBefore + 1) failures.push("금고(별사탕 있음)에서 유물이 안 늘었다");
+        if (withKey.keys !== 1) failures.push("금고를 열었는데 별사탕이 안 줄었다");
+      } else if (open.length) {
+        run.chooseNode(withKey, open[0]);
+        if (withKey.phase === "reward") run.leaveShop(withKey);
+        if (withKey.phase === "prepare") run.startBattle(withKey);
+        break;
+      }
+    }
+    const noKey = run.newRun(6);
+    noKey.keys = 0;
+    const goldBefore = noKey.gold;
+    let hit2 = false;
+    for (let step = 0; step < map.STAGE_STEPS && !hit2; step++) {
+      const row = noKey.map.steps[step] ?? [];
+      const open = map.openLanes(noKey.map, step);
+      const idx = open.find((i) => row[i]?.kind === "vault");
+      if (idx !== undefined) {
+        const rb = noKey.relics.length;
+        run.chooseNode(noKey, idx);
+        if (noKey.relics.length !== rb) failures.push("금고(별사탕 없음)에서 유물이 나왔다 — 헛걸음이어야 한다");
+        if (noKey.gold <= goldBefore) failures.push("금고 헛걸음인데 위로금이 없다");
+        hit2 = true;
+      } else if (open.length) {
+        run.chooseNode(noKey, open[0]);
+        if (noKey.phase === "reward") run.leaveShop(noKey);
+        if (noKey.phase === "prepare") run.startBattle(noKey);
+        break;
+      }
+    }
+  } finally {
+    BALANCE.mapKeys = before;
+  }
+
+  console.log("\n지도 열쇠/봉쇄 실험 계약 (꺼지면 없음 · 켜지면 등장·계약 유지 · 별사탕 있어야 금고가 열린다)");
+  if (failures.length === 0) {
+    console.log("  OK   꺼짐: 열쇠/금고 없음 / 켜짐: 둘 다 등장·checkStage 통과 / 별사탕 있으면 유물+별사탕 감소, 없으면 헛걸음");
+  } else {
+    for (const f of failures) console.log(`  실패 ${f}`);
+    process.exit(1);
+  }
+}
