@@ -167,6 +167,8 @@ npm ci
 npm run dev        # 개발 서버
 npm run build      # 타입체크 + 프로덕션 빌드
 npm test           # 검증기 적대 테스트
+npm run audio:runtime:test # Web Audio 스케줄·정리·음소거·숨김 전환
+npm run asset:test # 외부 아이콘 0장·Canvas 17종·186장 스프라이트 계약
 npm run sim        # 밸런스 시뮬레이션
 npm run verify     # 위 전부 + 불변식 + 결정 축 전체 (관문)
 ```
@@ -208,10 +210,8 @@ TypeScript · Vite · Canvas 2D · Web Audio. 엔진·프레임워크 없음.
 ## 라이선스 / 출처
 
 - **고양이 스프라이트·배경·전투 연출**: 자체 제작 (mmporong, 2026)
-- **UI 아이콘 13장**: [GUI Pro - Minimal Game Light](https://assetstore.unity.com/packages/2d/gui/gui-pro-minimal-game-light-355406) (Layer Lab) —
-  생선·직업 4종·유물 8종. 흰 실루엣을 게임 색으로 틴트해서 쓴다
-- **UI 아이콘 4종**: `src/game/icons.ts`의 Canvas 2D 자체 구현 — 소환사·거울
-  부적·새끼 바구니·빈 방울. 별도 이미지 파일이나 외부 요청이 없다
+- **UI 아이콘 17종**: `src/game/icons.ts`의 Canvas 2D 자체 구현 — 생선·직업
+  5종·유물 11종. 별도 이미지 파일·외부 라이선스·아이콘 요청이 없다
 - **음악 4곡**: **Lyria**(Google, Gemini 경유)로 만들었다. 프롬프트는
   [`docs/audio-prompts.md`](docs/audio-prompts.md)에 그대로 있고, 받은 파일을
   어떻게 측정·마스터링해서 넣었는지도 같은 문서 §7에 있다

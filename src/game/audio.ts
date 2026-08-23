@@ -57,6 +57,8 @@ const MASTER = 0.85;
 /** 준비곡 ↔ 보스곡 전환. 둘 다 A#(B♭)이라 겹쳐도 부딪히지 않는다(측정: -1.7dB). */
 const CROSSFADE = 0.8;
 const MUTE_KEY = "nyang.muted";
+/** 브라우저 빌드에서는 Vite base, Node 검증에서는 같은 출처 루트로 떨어진다. */
+const BASE_URL = import.meta.env?.BASE_URL ?? "/";
 
 /* ------------------------------------------------------------------ */
 /* 보스 신호                                                           */
@@ -204,7 +206,7 @@ function readMuted(): boolean {
  */
 export function unlockAudio(): void {
   if (ac) {
-    if (ac.state === "suspended") void ac.resume();
+    if (ac.state === "suspended") ignoreAudioTransition(() => ac!.resume());
     return;
   }
   try {
@@ -231,7 +233,7 @@ function load(name: TrackName): Promise<void> {
 
   const job = (async () => {
     if (!ac) return;
-    const url = `${import.meta.env.BASE_URL}bgm/${name}.${EXT}`;
+    const url = `${BASE_URL}bgm/${name}.${EXT}`;
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(String(res.status));
@@ -484,15 +486,19 @@ export function playBossSignal(signal: BossSignal): void {
   }
 }
 
+/** 브라우저별 Promise/동기 거부가 사용자 입력과 게임 루프를 끊지 않게 격리한다. */
+function ignoreAudioTransition(action: () => Promise<void>): void {
+  try {
+    void action().catch(() => undefined);
+  } catch {
+    // Safari 계열 구현이 동기적으로 거부해도 무음으로 계속한다.
+  }
+}
+
 /** 숨은 탭에서는 기존 컨텍스트만 멈춘다. 이 함수는 새 컨텍스트를 만들지 않는다. */
 export function setAudioVisibility(hidden: boolean): void {
   if (!ac) return;
-  try {
-    const transition = hidden ? ac.suspend() : ac.resume();
-    void transition.catch(() => undefined);
-  } catch {
-    // 브라우저가 동기적으로 거부해도 게임 루프는 계속 돈다.
-  }
+  ignoreAudioTransition(() => (hidden ? ac!.suspend() : ac!.resume()));
 }
 
 /* ------------------------------------------------------------------ */

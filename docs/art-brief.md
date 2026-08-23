@@ -21,7 +21,7 @@
 
 - **스프라이트 186장**: `public/sprites/NN_pose.png`, 31품종 × 6포즈(idle/sleep/wink/move/back/run).
   우리 8종 + 악몽 8종 + 보스/저격대. 로더는 `src/game/sprites.ts`(`spriteFor(breedId, pose)`).
-- **아이콘 논리 17종**: `public/icons/`의 PNG 13장 + `icons.ts`의 Canvas 패스 4종.
+- **아이콘 논리 17종**: `icons.ts`의 Canvas 2D 패스 17종 · 이미지 요청 0건.
 - **BGM**: `public/bgm/`(title/prepare/boss/outro, mp3+ogg). 오디오는 `src/game/audio.ts`.
 - **아트 소스 파이프라인**:
   - 원본 시트 `CatCharacterSheet.png`(20마리, **레포 밖** — `PKM/06_Ideas/assets/`, 환경변수

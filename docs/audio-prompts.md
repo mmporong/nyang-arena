@@ -222,9 +222,11 @@ Mood: the fight is over, someone is sitting down. Gentle, not sad.
 | **청록 예고** (모여) | `Low sustained hum swelling upward, soft synth pad with a slow attack, like an inhale. Warm and round, no transient.` | 0.6s | **길고 한 번, 부드러움** |
 | **금빛 취약 창** (때려) | `Bright bell shimmer, single struck glass chime with a long sparkling decay, ascending overtones. Rewarding, not alarming.` | 0.9s | **맑고 길게 반짝임** |
 
-셋의 길이·목표 밝기·어택 계약과 상태별 1회 재생은 자동 테스트로 고정했다. 다만
-현재 구현 파형의 스펙트럼 중심 재측정과 **눈을 감은 청취 구분**은 아직 하지
-않았다. 이 둘을 통과하기 전에는 음색 검수가 끝났다고 주장하지 않는다.
+셋의 길이·목표 밝기·어택 계약과 상태별 1회 재생뿐 아니라 실제 Web Audio 노드의
+시작·종료 시각, master 연결, 종료 후 해제, 음소거, 숨김 탭 suspend/resume까지
+자동 테스트로 고정했다. 다만 현재 구현 파형의 스펙트럼 중심 재측정과 **눈을 감은
+청취 구분**은 아직 하지 않았다. 이 둘을 통과하기 전에는 음색 검수가 끝났다고
+주장하지 않는다.
 
 ### 4-2. 전투
 
