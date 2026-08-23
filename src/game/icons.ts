@@ -355,30 +355,13 @@ function drawCrown(
  */
 export function drawNodeIcon(
   ctx: CanvasRenderingContext2D,
-  kind: "battle" | "elite" | "shop" | "event" | "boss",
+  kind: "battle" | "elite" | "shop" | "boss",
   cx: number,
   cy: number,
   size: number,
   color: string,
 ): void {
-  if (kind === "event") {
-    // 제단 — 마름모(돌려진 사각형) 테두리. 다른 칸과 한눈에 갈린다.
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1.5, size * 0.08);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - size * 0.34);
-    ctx.lineTo(cx + size * 0.34, cy);
-    ctx.lineTo(cx, cy + size * 0.34);
-    ctx.lineTo(cx - size * 0.34, cy);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * 0.08, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.restore();
-  } else if (kind === "shop") drawBone(ctx, cx, cy, size, color);
+  if (kind === "shop") drawBone(ctx, cx, cy, size, color);
   else if (kind === "boss") {
     drawPaw(ctx, cx, cy + size * 0.1, size * 0.82, color, true);
     drawCrown(ctx, cx, cy - size * 0.42, size * 0.72, color);

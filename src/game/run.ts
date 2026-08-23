@@ -10,7 +10,7 @@ import {
   type NodeKind,
   type StageMap,
 } from "./map.ts";
-import { mixSeed, rng, seedRng, shuffle } from "./rng.ts";
+import { mixSeed, seedRng, shuffle } from "./rng.ts";
 import { BREEDS, NIGHTMARE_BREEDS, breedById } from "./breeds.ts";
 import { BOSS_BREEDS, BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
 import {
@@ -27,7 +27,6 @@ import {
   type Board,
   type Breed,
   type Cat,
-  type ClassKind,
   type Side,
 } from "./types.ts";
 import {
@@ -434,59 +433,6 @@ export function setNotice(state: RunState, text: string, kind: NoticeKind = "nor
  * 그래도 **웨이브는 하나 지나간다** — 그게 상점의 대가다. 적은 웨이브마다
  * 복리로 세지므로, 힘을 사는 동안 상대도 세진다.
  */
-/** 지금 로스터에서 가장 많은 직업. 제단 유물이 이 직업을 노린다. */
-function dominantClass(state: RunState): ClassKind | null {
-  const count = new Map<ClassKind, number>();
-  for (const c of livingCats(state.ally)) count.set(c.breed.cls, (count.get(c.breed.cls) ?? 0) + 1);
-  let want: ClassKind | null = null;
-  let most = 0;
-  for (const [cls, n] of count) if (n > most) { most = n; want = cls; }
-  return want;
-}
-
-/**
- * 제단을 돌린다. **되돌릴 수 없다** — 그래서 이 길을 고르는 것이 결정이 된다.
- *
- * 생선이 모자라면 못 걸고 위로금만 받는다(그래서 빈손일 때 제단으로 가는 것은 손해다).
- * 걸면 `eventRelicChance`로 유물(몰빵 직업 우선 — 조건을 이미 채우고 있으므로 대가만 남지 않는다),
- * 아니면 가장 센 고양이가 지쳐 한 단계 내려간다. 스탯은 다음 전투의 applySynergies가 레벨에서
- * 다시 계산하므로 레벨만 내리면 된다. 게임 난수(`rng`)를 쓴다 — 시드로 재현되고, 소비가 전투
- * 난수를 밀지만 그건 구매·셔플과 같은 성질이다.
- */
-function resolveEvent(state: RunState): void {
-  if (state.gold < BALANCE.eventCost) {
-    state.gold += BALANCE.eventSkipGold;
-    setNotice(state, `제단이 열렸지만 생선이 모자라 그냥 지나쳤어요 (+${BALANCE.eventSkipGold})`);
-    return;
-  }
-  state.gold -= BALANCE.eventCost;
-  if (rng() < BALANCE.eventRelicChance) {
-    const owned = new Set(state.relics.map((r) => r.id));
-    const pool = RELICS.filter((r) => !owned.has(r.id));
-    const want = dominantClass(state);
-    const pick =
-      (want ? pool.find((r) => r.condition.kind === "class_count" && r.condition.cls === want) : undefined) ??
-      shuffle(pool)[0];
-    if (pick) {
-      state.relics.push(pick);
-      setNotice(state, `제단이 ${pick.name}을(를) 내줬어요`);
-    } else {
-      // 유물을 다 모았다 — 걸었지만 나올 게 없다. 생선만 돌려준다.
-      state.gold += BALANCE.eventCost;
-      setNotice(state, "제단이 비어 있었어요 — 생선을 돌려받았어요");
-    }
-  } else {
-    const cats = livingCats(state.ally);
-    const victim = [...cats].sort((a, b) => b.level - a.level || (a.uid < b.uid ? -1 : 1))[0];
-    if (victim && victim.level > 1) {
-      victim.level -= 1;
-      setNotice(state, `${victim.breed.name}이(가) 지쳐 한 단계 내려갔어요`);
-    } else {
-      setNotice(state, "도박이 빗나갔지만 잃을 게 없었어요");
-    }
-  }
-}
-
 export function chooseNode(state: RunState, idx: number): boolean {
   const step = mapStep(state);
   if (!openLanes(state.map, step).includes(idx)) return false;
@@ -496,16 +442,6 @@ export function chooseNode(state: RunState, idx: number): boolean {
   state.map.taken[step] = idx;
   state.nodeKind = node.kind;
   state.nodeWave = node.wave;
-
-  if (node.kind === "event") {
-    // 제단 — 전투 없이 생선을 걸고 돌린다. 상점처럼 걸음만 먹고 웨이브는 넘긴다.
-    resolveEvent(state);
-    state.step += 1;
-    syncStage(state);
-    rollOffers(state);
-    state.phase = "reward";
-    return true;
-  }
 
   if (node.kind === "shop") {
     // 싸우지 않고 힘만 사는 자리. 생선과 무료 재추첨을 주고 웨이브를 넘긴다.

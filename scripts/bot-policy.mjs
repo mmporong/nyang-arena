@@ -11,7 +11,6 @@
  */
 import { bossIndexAt, buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
 import { isBossStep, openLanes } from "../src/game/map.ts";
-import { BALANCE } from "../src/game/balance.ts";
 import { makeRng, mixSeed, rng } from "../src/game/rng.ts";
 import { BOARD_COLS, livingCats } from "../src/game/types.ts";
 import { bossForIndex } from "../src/game/bosses.ts";
@@ -216,29 +215,6 @@ export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
  * 복제하면 반드시 갈라진다 — 그래서 `run.ts`에만 둔다.
  */
 export { leaveShop } from "../src/game/run.ts";
-
-/**
- * 제단(도박) 실험 전용 길 고르기 정책. `npm run map -- --events`가 `MAP_POLICIES`에 합쳐 비교한다.
- * 실험이 꺼져 있으면 제단이 안 나와 전부 "전투만"으로 접힌다 — 그래서 기본 목록에는 안 넣는다.
- */
-export const EVENT_MAP_POLICIES = {
-  // 제단이 보이면 무조건 간다 — 상태를 안 읽는 도박꾼. 랜덤 약화를 그대로 맞는다.
-  "제단 몰빵": (open, row) => open.find((i) => row[i]?.kind === "event") ?? open[0],
-  /**
-   * **상태를 읽고 건다.** 생선이 여유롭고(걸 값 + 4 이상), 유물이 아직 적고(3 미만), 로스터가
-   * 두꺼울 때(4마리 이상)만 제단으로 간다 — 그때만 도박의 기대값이 양수다. 그 밖에는 전투.
-   * 이 조건이 맞으면 제단이 값을 하고, 눈감은 "제단 몰빵"보다 나아야 지도에 깊이가 있는 것이다.
-   */
-  "제단 읽고 고름": (open, row, s) => {
-    const roster = s.ally.filter((c) => c && c.alive).length;
-    const wantGamble = s.gold >= BALANCE.eventCost + 4 && s.relics.length < 3 && roster >= 4;
-    if (wantGamble) {
-      const e = open.find((i) => row[i]?.kind === "event");
-      if (e !== undefined) return e;
-    }
-    return open.find((i) => row[i]?.kind === "battle") ?? open[0];
-  },
-};
 
 /** 길 고르기 정책들. `npm run map`이 이걸 비교한다. */
 export const MAP_POLICIES = {
