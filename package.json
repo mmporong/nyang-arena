@@ -25,6 +25,7 @@
     "audio:test": "node --experimental-strip-types scripts/audio-signal-test.mjs",
     "audio:runtime:test": "node --experimental-strip-types scripts/audio-runtime-test.mjs",
     "asset:test": "node --experimental-strip-types scripts/asset-contract-test.mjs",
+    "qa:manual": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/manual-qa.ps1",
     "trace": "node --experimental-strip-types scripts/run-trace.mjs",
     "relics": "node --experimental-strip-types scripts/relic-space.mjs",
     "map": "node --experimental-strip-types scripts/map-space.mjs",

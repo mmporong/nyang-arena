@@ -169,9 +169,17 @@ npm run build      # 타입체크 + 프로덕션 빌드
 npm test           # 검증기 적대 테스트
 npm run audio:runtime:test # Web Audio 스케줄·정리·음소거·숨김 전환
 npm run asset:test # 외부 아이콘 0장·Canvas 17종·186장 스프라이트 계약
+npm run qa:manual  # Windows: 자동 사전점검 + 실제 화면·청취 2문항 QA
 npm run sim        # 밸런스 시뮬레이션
 npm run verify     # 위 전부 + 불변식 + 결정 축 전체 (관문)
 ```
+
+제출 직전 수동 확인은 `npm run qa:manual` 한 번으로 묶었다. 관련 자동 테스트·빌드와
+공개 HTML·JS·PNG·OGG 응답, 로컬/배포 번들 SHA-256 일치를 먼저 검사한 뒤 브라우저에 로컬 QA 페이지를 연다.
+사람은 실제 Canvas 아이콘의 6.3px/32px 식별성·900×320 배포 화면과 보스 BGM 위
+신호음 3종만 판정한다. 결과는 Git 비추적 증거
+`.omx/evidence/manual-qa-latest.md`에 기록된다. QA 페이지는 개발 서버 전용이며
+프로덕션 빌드에는 포함하지 않는다.
 
 결정 축 측정(`relics`·`map`·`placement`)은 시드 블록을 워커에 나눠 돈다(`scripts/parallel.mjs`,
 기본 min(6, 코어−1)개). 결과는 순서대로 돌린 것과 바이트까지 같다 — `WORKERS=1 npm run map`과
