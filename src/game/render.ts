@@ -16,9 +16,9 @@ import {
   sweepZones,
   type Fx,
 } from "./battle.ts";
-import { bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
+import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { bossHint, bossOffsetAt, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
+import { bossHint, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
@@ -32,9 +32,9 @@ import {
   currentKind,
   waveKindInfo,
   mapStep,
-  bossBreedAt,
-  bossBreedViaLane,
+  bossIndexAt,
   bossesSeen,
+  sameClassNeighbors,
   relicActive,
   CODEX_TOTALS,
   loadCodex,
@@ -3188,10 +3188,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     // 만날 보스가 몇 번째인가"를 세어 라벨을 붙였는데, 그러면 **지나간 보스 칸이
     // 다음 보스 이름으로 바뀌어** 한 지도에 같은 이름이 둘 뜬다.
     if (node.kind === "boss") {
-      // 실험 B: 앞 걸음을 아직 안 골랐으면 누가 설지 정해지지 않았다. 이름 대신 물음표 —
-      // 갈래마다 적힌 이름을 보고 고르라는 뜻이다.
-      const pending = BALANCE.mapBossByLane && bossOffsetAt(s.map, st) < 0;
-      const name = pending ? "?" : bossBreedAt(s, st).name;
+      const name = bossForIndex(bossIndexAt(s, st)).name;
       const weight = pickable ? 800 : 400;
       /**
        * 아이콘은 원 **안**, 이름은 원 **아래**.
@@ -3232,16 +3229,6 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
         (rect.w + grow * 2) * 0.72,
         hot ? T.paper : hue,
       );
-      // 실험 B: 보스 앞 칸에는 그 길 끝에 설 보스 이름을 작게 적는다. 길을 고르는 것이
-      // 곧 보스를 고르는 것이라는 정보를 화면에 둔다 — 정보 없는 결정은 결정이 아니다.
-      if (BALANCE.mapBossByLane && node.boss >= 0) {
-        const fs = Math.max(9, rect.w * 0.26);
-        uiText(ctx, bossBreedViaLane(s, st, node).name, rect.x + rect.w / 2, rect.y + rect.h + fs * 0.9, fs, hot ? T.paper : T.enemy, {
-          align: "center",
-          weight: pickable || taken ? 800 : 400,
-          outline: true,
-        });
-      }
     }
     ctx.restore();
 
@@ -3267,10 +3254,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   // 라벨과 **같은 인덱스**를 써야 한다. 이름은 살금이인데 설명은 무쇠발톱이
   // 나오던 자리다 — 여기만 앞의 보스 수를 안 세고 있었다.
   const bossLine =
-    hotNode?.kind !== "boss" ? null
-    : BALANCE.mapBossByLane && bossOffsetAt(s.map, step) < 0
-      ? "갈래마다 다른 악몽이 서요 — 앞 걸음에 적힌 이름을 보고 고르세요"
-      : bossHint(bossBreedAt(s, step).id);
+    hotNode?.kind === "boss" ? bossHint(bossForIndex(bossIndexAt(s, step)).id) : null;
   // 커서까지 바뀌어야 "누를 수 있다"가 끝까지 전달된다. 캔버스 게임은 이걸
   // 안 하면 그림처럼 보인다.
   ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
@@ -4224,6 +4208,22 @@ export function render(
   }
   drawList.sort((p, q) => p.y - q.y);
   for (const d of drawList) drawCat(ctx, L, d.cat, d.dimmed, s.map.stage);
+  // 인접 보너스 표시 — 배치하는 동안만. 같은 직업이 붙은 고양이 위에 얻는 공격 보너스를 적는다.
+  // 규칙을 글로 설명하는 대신 효과를 그 자리에 보여준다. 전투 중에는 숫자 팝과 겹쳐 뺀다.
+  if (BALANCE.adjacencyAtk > 0 && s.phase !== "battle" && s.phase !== "gameover") {
+    for (const cat of s.ally) {
+      if (!cat || !cat.alive) continue;
+      const n = sameClassNeighbors(s.ally, cat);
+      if (n === 0) continue;
+      const pct = Math.round(BALANCE.adjacencyAtk * Math.min(BALANCE.adjacencyMax, n) * 100);
+      const p = fieldToScreen(L, cat.fx, cat.fy);
+      uiText(ctx, `+${pct}%`, p.x, p.y - L.cell * 0.72, Math.max(10, L.cell * 0.26), T.gold, {
+        align: "center",
+        weight: 800,
+        outline: true,
+      });
+    }
+  }
   drawBossTargetMark(ctx, L, s);
   drawSeizeMark(ctx, L, s);
 

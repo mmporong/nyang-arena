@@ -9,8 +9,6 @@ import {
   STAGE_STEPS,
   type NodeKind,
   type StageMap,
-  bossOffsetAt,
-  type MapNode,
 } from "./map.ts";
 import { mixSeed, seedRng, shuffle } from "./rng.ts";
 import { BREEDS, NIGHTMARE_BREEDS, breedById } from "./breeds.ts";
@@ -237,11 +235,6 @@ export interface RunState {
   modeBest: number;
   /** 이 판에서 만난 보스·정예 이름. 도감용 — 판정 불개입. */
   bossesMet: string[];
-  /**
-   * 실험 3(콤보 이월) — 직전 보스전에서 넣은 약점 타격 수. 다음 전투 시작 마나로
-   * 바뀌고 0으로 비운다. `BALANCE.strikeBankMana`가 0이면 쌓이기만 하고 안 쓴다.
-   */
-  strikeBank: number;
 }
 
 /**
@@ -412,30 +405,6 @@ export function bossIndexAt(state: RunState, step: number = state.step): number 
 }
 
 /** 이 런에서 지금까지 만난 보스 수. 난이도 램프가 이걸 본다. */
-/**
- * 이 걸음에 설 보스. **보스 신원의 유일한 출처다** — `bossIndexAt`이 순번을 주고,
- * 실험 B(`BALANCE.mapBossByLane`)가 켜져 있으면 보스 앞 걸음에서 고른 갈래의
- * 오프셋을 더한다. 스폰·지도 라벨·호버 설명·배치 하네스가 전부 여기를 본다 —
- * 셋이 따로 계산하다가 한 여정에 같은 보스가 두 번 나온 적이 있다(`bossIndexAt` 주석).
- */
-export function bossBreedAt(state: RunState, step: number = state.step): Breed {
-  const base = bossIndexAt(state, step);
-  if (BALANCE.mapBossByLane) {
-    const off = bossOffsetAt(state.map, step);
-    if (off >= 0) return bossForIndex(base + off);
-  }
-  return bossForIndex(base);
-}
-
-/**
- * 보스 앞 걸음의 한 칸을 밟으면 만나게 될 보스. 지도 라벨과 길 고르기 정책이 쓴다.
- * 실험 B가 꺼져 있으면 어느 칸이든 같은 보스(순번)다.
- */
-export function bossBreedViaLane(state: RunState, preBossStep: number, node: MapNode): Breed {
-  const base = bossIndexAt(state, preBossStep + 1);
-  return bossForIndex(BALANCE.mapBossByLane && node.boss >= 0 ? base + node.boss : base);
-}
-
 export function bossesSeen(state: RunState): number {
   const perStage = 2;
   /**
@@ -1133,7 +1102,6 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
           ? loadChallengeBest(challenge)
           : loadBest(),
     bossesMet: [],
-    strikeBank: 0,
     seed: runSeed,
     pending: [],
     dodgeCharges: 0,
@@ -1343,7 +1311,7 @@ export function bossRampFor(state: RunState, step: number = state.step): number 
 function buildBossWave(state: RunState, wave: number, scale: number): void {
   state.enemy = emptyBoard();
 
-  const breed = bossBreedAt(state);
+  const breed = bossForIndex(bossIndexAt(state));
   metBoss(state, breed.name);
   // 보드 한가운데(행 2, 열 2). 반경 1.5라 행 1~3 × 열 1~3을 덮는다.
   const bossCell = 2 * BOARD_COLS + 2;
@@ -1466,7 +1434,7 @@ export function relicActive(relic: Relic, cats: Cat[]): boolean {
   }
 }
 
-/** 상하좌우에 붙은 같은 직업 우리 편 수. 실험 2(인접 보너스)와 배치 하네스가 쓴다. */
+/** 상하좌우에 붙은 같은 직업 우리 편 수. 인접 보너스·배치 화면 표시·배치 하네스가 쓴다. */
 export function sameClassNeighbors(board: Board, cat: Cat): number {
   const cell = board.indexOf(cat);
   if (cell < 0) return 0;
@@ -1528,8 +1496,8 @@ export function applySynergies(state: RunState): void {
       if (r.boon && relicActive(r, cats)) apply(r.boon.key, r.boon.value);
     }
 
-    // 실험 2 — 인접 보너스. 같은 직업이 상하좌우로 붙어 있으면 공격이 오른다.
-    // 우리 편만(적은 자동 배치라 결정이 아니다). 0이면 곱이 1이라 하네스가 그대로다.
+    // 인접 보너스 — 같은 직업이 상하좌우로 붙어 있으면 공격이 오른다(2026-08-23 채택).
+    // 우리 편만(적은 자동 배치라 결정이 아니다). 상수가 0이면 곱이 1이다.
     if (BALANCE.adjacencyAtk > 0) {
       const n = sameClassNeighbors(state.ally, cat);
       atk *= 1 + BALANCE.adjacencyAtk * Math.min(BALANCE.adjacencyMax, n);
@@ -1732,12 +1700,7 @@ export function startBattle(state: RunState): void {
       if (!c) continue;
       c.cooldown = c.atkInterval;
       // 마나와 상태이상은 전투마다 초기화한다. 지난 판의 도트가 남으면 안 된다.
-      // 실험 3 — 콤보 이월: 직전 보스전의 약점 타격이 우리 편의 시작 마나가 된다.
-      // 플래그가 0이면 언제나 0이라 하네스가 그대로다.
-      c.mana =
-        c.side === "ally" && BALANCE.strikeBankMana > 0
-          ? Math.min(100, state.strikeBank * BALANCE.strikeBankMana)
-          : 0;
+      c.mana = 0;
       c.stun = 0;
       c.dot = null;
       c.shield = 0;
@@ -1757,8 +1720,6 @@ export function startBattle(state: RunState): void {
   }
   // 개입 상태는 전투마다 초기화한다. 남아 있으면 다음 전투 첫 틱에 한꺼번에 터진다.
   state.pending.length = 0;
-  // 이월분은 한 번 쓰고 비운다 — 저축되면 생선과 같은 성질이 된다(위 bonusDodge와 같은 이유).
-  state.strikeBank = 0;
   state.actCooldown = 0;
   // 소환수는 전투 밖에서 존재하지 않는다. 남겨 두면 다음 판을 지난 판의
   // 분신과 함께 시작하고, 그 분신은 이미 사라진 주인을 uid로 가리킨다.

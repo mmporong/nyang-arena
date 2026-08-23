@@ -431,61 +431,38 @@ if (mirrorFailures.length === 0) {
 
 
 /**
- * 지도 실험 B 계약 — 갈래별 보스(`BALANCE.mapBossByLane`).
- *
- * 꺼져 있으면 아무것도 달라지면 안 되고(배정 전부 -1, 신원은 순번 그대로), 켜면
- * 같은 시드의 지도 **구조**(종류·줄·선·성격)는 그대로인 채 보스 앞 걸음의 갈래만
- * 보스가 갈려야 한다. 구조가 바뀌면 A/B 짝비교가 아니라 다른 판 둘을 견준 것이다.
+ * 인접 보너스 계약 — `sameClassNeighbors`는 상하좌우만 세고, 같은 직업·살아 있는 우리 편만 센다.
+ * 대각선을 세거나 판 밖으로 새면 배치 축 수치(깊이 1.8)가 다른 규칙을 잰 것이 된다.
  */
 {
-  const { BALANCE } = await import("../src/game/balance.ts");
-  const map = await import("../src/game/map.ts");
   const run = await import("../src/game/run.ts");
-  const { BOSS_BREEDS, bossForIndex } = await import("../src/game/bosses.ts");
+  const { BREEDS } = await import("../src/game/breeds.ts");
+  const { BOARD_COLS } = await import("../src/game/types.ts");
   const failures = [];
-  if (BOSS_BREEDS.length !== 3) failures.push(`보스가 ${BOSS_BREEDS.length}종 — 오프셋 0~2 가정이 깨진다`);
-  const before = BALANCE.mapBossByLane;
-  BALANCE.mapBossByLane = false;
-  const offMap = map.makeStage(1, 42);
-  if (offMap.steps.flat().some((n) => n.boss !== -1)) failures.push("실험이 꺼져 있는데 보스 배정이 있다");
-  const s0 = run.newRun(42);
-  s0.map.taken[1] = 0;
-  if (run.bossBreedAt(s0, 2).id !== bossForIndex(run.bossIndexAt(s0, 2)).id) failures.push("실험이 꺼져 있는데 보스 신원이 순번과 다르다");
-  const shape = (m) => m.steps.map((r) => r.map((n) => `${n.kind}/${n.lane}/${n.next.join("-")}/${n.wave}`).join("|")).join("#");
-  BALANCE.mapBossByLane = true;
-  try {
-    const onMap = map.makeStage(1, 42);
-    if (shape(onMap) !== shape(offMap)) failures.push("실험을 켜자 지도 구조가 바뀌었다 — 난수를 앞에서 먹고 있다");
-    const problems = map.checkStage(onMap);
-    if (problems.length) failures.push(`checkStage: ${problems.join(" / ")}`);
-    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
-      const m = map.makeStage(1, seed);
-      for (let st = 0; st + 1 < map.STAGE_STEPS; st++) {
-        if (!map.isBossStep(st + 1)) continue;
-        const row = m.steps[st];
-        if (row.length >= 2 && new Set(row.map((n) => n.boss)).size < 2) failures.push(`시드 ${seed} ${st}걸음: 갈래가 같은 보스로 모인다`);
-      }
-    }
-    const s = run.newRun(42);
-    const pre = s.map.steps[1];
-    const ids = new Set();
-    for (let i = 0; i < pre.length; i++) {
-      s.map.taken[1] = i;
-      const viaAt = run.bossBreedAt(s, 2).id;
-      const viaLane = run.bossBreedViaLane(s, 1, pre[i]).id;
-      if (viaAt !== viaLane) failures.push(`1걸음 ${i}칸: 라벨(${viaLane})과 스폰(${viaAt})이 다르다`);
-      ids.add(viaAt);
-    }
-    if (pre.length >= 2 && ids.size < 2) failures.push("고른 칸이 달라도 같은 보스가 선다");
-    s.map.taken[1] = -1;
-    if (map.bossOffsetAt(s.map, 2) !== -1) failures.push("앞 걸음을 안 골랐는데 오프셋이 정해졌다");
-  } finally {
-    BALANCE.mapBossByLane = before;
-  }
-
-  console.log("\n지도 실험 B 계약 (갈래별 보스 — 켜면 갈리고, 끄면 그대로)");
+  const s = run.newRun(5);
+  s.ally.fill(null);
+  const warrior = BREEDS.find((b) => b.cls === "warrior");
+  const warrior2 = BREEDS.find((b) => b.cls === "warrior" && b !== warrior);
+  const mage = BREEDS.find((b) => b.cls === "mage");
+  const c = (row, col) => row * BOARD_COLS + col;
+  s.ally[c(2, 2)] = run.makeCat(warrior, "ally", c(2, 2));
+  s.ally[c(2, 3)] = run.makeCat(warrior2, "ally", c(2, 3)); // 오른쪽 — 같은 직업
+  s.ally[c(1, 2)] = run.makeCat(mage, "ally", c(1, 2)); // 위 — 다른 직업
+  s.ally[c(1, 1)] = run.makeCat(warrior, "ally", c(1, 1)); // 대각선 — 안 센다
+  s.ally[c(3, 2)] = run.makeCat(warrior2, "ally", c(3, 2)); // 아래 — 같은 직업
+  s.ally[c(3, 2)].alive = false; // 죽은 건 안 센다
+  const n = run.sameClassNeighbors(s.ally, s.ally[c(2, 2)]);
+  if (n !== 1) failures.push(`가운데 전사의 이웃이 1이어야 하는데 ${n} (오른쪽만 세야 한다)`);
+  const edge = run.sameClassNeighbors(s.ally, s.ally[c(2, 3)]);
+  if (edge !== 1) failures.push(`오른쪽 전사의 이웃이 1이어야 하는데 ${edge}`);
+  const corner = run.newRun(6);
+  corner.ally.fill(null);
+  corner.ally[c(0, 0)] = run.makeCat(warrior, "ally", c(0, 0));
+  corner.ally[c(4, 4)] = run.makeCat(warrior2, "ally", c(4, 4));
+  if (run.sameClassNeighbors(corner.ally, corner.ally[c(0, 0)]) !== 0) failures.push("구석 칸이 판 밖이나 반대편 줄을 이웃으로 셌다");
+  console.log("\n인접 보너스 계약 (상하좌우 · 같은 직업 · 살아 있는 것만)");
   if (failures.length === 0) {
-    console.log("  OK   꺼짐: 배정 없음·신원 순번 그대로 / 켜짐: 지도 구조 동일·보스 앞 갈래가 갈림·라벨=스폰");
+    console.log("  OK   가운데 전사 이웃 1(오른쪽) · 대각선·다른 직업·죽은 것 제외 · 구석은 0");
   } else {
     for (const f of failures) console.log(`  실패 ${f}`);
     process.exit(1);
