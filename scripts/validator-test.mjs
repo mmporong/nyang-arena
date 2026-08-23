@@ -399,7 +399,7 @@ if (mirrorFailures.length === 0) {
     run.finishWave(e, false);
     if (run.loadBest() !== 6 || e.recordBroken || e.modeBest !== 6) failures.push("기본 판이 더 낮은 웨이브로 기록을 덮거나 갱신으로 표시했다");
     const codex = run.loadCodex();
-    if (codex.breeds.length < 3 || run.loadRuns().length !== 3) failures.push("도감·최근 판 목록이 쌓이지 않았다");
+    if (codex.breeds.length < 3) failures.push("도감이 쌓이지 않았다");
 
     // 5) 다음 판 갈래: 종류와 시드가 약속대로
     const r1 = run.nextRunFrom(c, "retry");

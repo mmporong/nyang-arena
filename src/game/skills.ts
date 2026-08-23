@@ -272,6 +272,14 @@ export function runSkill(caster: Cat, target: Cat, foes: Cat[], allies: Cat[]): 
       r.summons.push({ spec: LURE_UNIT });
       break;
     }
+    default: {
+      // 패시브(`skill: null`)는 스킬이 없어 빈 결과가 맞다. 그 밖의 값은 빠진 분기다 —
+      // 새 SkillId를 `SKILLS`에만 넣고 여기를 빠뜨리면 조용히 평타로 떨어졌다. 컴파일에서 잡는다.
+      if (caster.breed.skill !== null) {
+        const never: never = caster.breed.skill;
+        throw new Error(`알 수 없는 스킬: ${String(never)}`);
+      }
+    }
   }
 
   return r;

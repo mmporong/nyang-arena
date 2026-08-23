@@ -27,9 +27,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # 검증기와 레이아웃 프로브는 배포 전에 반드시 통과해야 한다.
+      # 검증기·레이아웃 프로브·회피 계약·불변식은 배포 전에 반드시 통과해야 한다.
+      # (불변식은 300런 61만 스텝, 약 15초 — 가장 강한 검사인데 체인 밖에 있었다)
       - run: npm test
       - run: npm run probe
+      - run: npm run dodge:test
+      - run: npm run invariants
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

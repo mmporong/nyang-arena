@@ -11,7 +11,10 @@
 # "무엇이 왜 빨간지"가 한 번에 보이고, metrics도 매번 다시 생성된다.
 set -uo pipefail
 
-AXES=(sim decisions placement intervention gold map relics)
+# 관문 축 — 각 스크립트가 기준 미달이면 exit 1을 낸다. gold(생선 곡선)는 판정이 없는 관측이라
+# 따로 돌리고 세지 않는다 — 판정 없는 것을 축으로 세면 "7개 전부 기준 안"이 거짓이 된다.
+AXES=(sim decisions placement intervention map relics)
+OBSERVE=(gold)
 failed=()
 
 for axis in "${AXES[@]}"; do
@@ -20,6 +23,12 @@ for axis in "${AXES[@]}"; do
   if ! npm run --silent "$axis"; then
     failed+=("$axis")
   fi
+done
+
+for obs in "${OBSERVE[@]}"; do
+  echo
+  echo "──────── $obs (관측) ────────"
+  npm run --silent "$obs" || echo "  (관측 스크립트 실패 — 판정에는 안 들어간다)"
 done
 
 # 수치 파일은 축을 다 잰 뒤에 만든다. 앞에서 끊기면 낡은 채로 남는다.

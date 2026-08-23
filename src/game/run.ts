@@ -262,9 +262,6 @@ const DAILY_KEY = "nyang-arena.daily";
 const CHALLENGE_KEY = "nyang-arena.challenge";
 /** JSON `Codex` — 데리고 있던 고양이·모은 유물·만난 보스의 누적 */
 const CODEX_KEY = "nyang-arena.codex";
-/** JSON 최근 판 기록 배열(최대 `RUN_LOG_MAX`) */
-const RUNS_KEY = "nyang-arena.runs";
-const RUN_LOG_MAX = 30;
 const SYNERGIES_PER_RUN = 3;
 
 /**
@@ -406,14 +403,15 @@ export function bossIndexAt(state: RunState, step: number = state.step): number 
 
 /** 이 런에서 지금까지 만난 보스 수. 난이도 램프가 이걸 본다. */
 export function bossesSeen(state: RunState): number {
-  const perStage = 2;
   /**
-   * **넘은 것만 센다.** 보스는 2·5걸음인데 `>=`로 세면 그 칸에 **도착한 순간**
-   * 넘은 것으로 계산돼, 싸우기도 전에 "악몽을 밀어냈어요" 막이 올라갔다.
-   * 걸음은 칸을 고를 때 오르므로, 지나간 것은 `> 보스 걸음`이다.
+   * **넘은 것만 센다.** 보스 걸음에 **도착한 순간** 넘은 것으로 세면 싸우기도 전에
+   * "악몽을 밀어냈어요" 막이 올라갔다. 걸음은 칸을 고를 때 오르므로, 지나간 보스는
+   * `현재 걸음보다 앞의 보스 걸음`이다. 주기는 `map.ts`의 `BOSS_STEPS`가 유일한 출처다 —
+   * 예전에는 여기만 `2`와 `5`를 손으로 들고 있어 주기를 바꾸면 조용히 어긋났다.
    */
-  const done = state.step > 5 ? 2 : state.step > 2 ? 1 : 0;
-  return (state.map.stage - 1) * perStage + done;
+  let done = 0;
+  for (let i = 0; i < state.step; i++) if (isBossStep(i)) done += 1;
+  return (state.map.stage - 1) * BOSSES_PER_STAGE + done;
 }
 
 /**
@@ -922,21 +920,7 @@ export function loadCodex(): Codex {
   };
 }
 
-export interface RunRecord {
-  t: number;
-  wave: number;
-  seed: number;
-  kind: RunKind;
-  challenge: number;
-  dailyKey: string | null;
-}
-
-export function loadRuns(): RunRecord[] {
-  const v = loadJson<unknown>(RUNS_KEY, []);
-  return Array.isArray(v) ? (v as RunRecord[]) : [];
-}
-
-/** 판이 끝날 때 도감과 최근 판 목록을 갱신한다. 판정에는 관여하지 않는다. */
+/** 판이 끝날 때 도감을 갱신한다. 판정에는 관여하지 않는다. 최근 판 목록은 소비처가 없어 뺐다(2026-08-23). */
 function recordRun(state: RunState): void {
   const codex = loadCodex();
   const breeds = new Set(codex.breeds);
@@ -949,17 +933,6 @@ function recordRun(state: RunState): void {
     CODEX_KEY,
     JSON.stringify({ breeds: [...breeds], relics: [...relics], bosses: [...bosses] } satisfies Codex),
   );
-
-  const runs = loadRuns();
-  runs.push({
-    t: Date.now(),
-    wave: state.wave,
-    seed: state.seed,
-    kind: state.kind,
-    challenge: state.challenge,
-    dailyKey: state.dailyKey,
-  });
-  storageSet(RUNS_KEY, JSON.stringify(runs.slice(-RUN_LOG_MAX)));
 }
 
 /**
@@ -1113,11 +1086,11 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
   // 판의 종류는 첫 문구가 말한다. 도전은 무엇이 달라졌는지, 오늘의 시드는 왜
   // 같은 판인지를 한 줄로 — 설명 화면을 따로 두지 않는다.
   if (kind === "daily" && dailyKey) {
-    state.notice = `오늘의 시드 ${dailyKey} — 오늘은 누구나 같은 판이다`;
+    setNotice(state, `오늘의 시드 ${dailyKey} — 오늘은 누구나 같은 판이다`);
   } else if (kind === "challenge") {
-    state.notice = `도전 ${challenge} — 적이 ${Math.round(BALANCE.challengeStep * challenge * 100)}% 세다`;
+    setNotice(state, `도전 ${challenge} — 적이 ${Math.round(BALANCE.challengeStep * challenge * 100)}% 세다`);
   } else if (kind === "retry") {
-    state.notice = "같은 시드 — 판은 그대로, 선택만 바꿀 수 있다";
+    setNotice(state, "같은 시드 — 판은 그대로, 선택만 바꿀 수 있다");
   }
 
   // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
@@ -1436,7 +1409,8 @@ export function relicActive(relic: Relic, cats: Cat[]): boolean {
 
 /** 상하좌우에 붙은 같은 직업 우리 편 수. 인접 보너스·배치 화면 표시·배치 하네스가 쓴다. */
 export function sameClassNeighbors(board: Board, cat: Cat): number {
-  const cell = board.indexOf(cat);
+  // `cat.cell`은 moveCat이 유지한다. 어긋나 있으면(방어) 선형 탐색으로 되찾는다.
+  const cell = board[cat.cell] === cat ? cat.cell : board.indexOf(cat);
   if (cell < 0) return 0;
   const row = Math.floor(cell / BOARD_COLS);
   const col = cell % BOARD_COLS;
