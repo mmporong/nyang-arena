@@ -11,6 +11,7 @@
  */
 import { bossIndexAt, buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
 import { isBossStep, openLanes } from "../src/game/map.ts";
+import { BALANCE } from "../src/game/balance.ts";
 import { makeRng, mixSeed, rng } from "../src/game/rng.ts";
 import { BOARD_COLS, livingCats } from "../src/game/types.ts";
 import { bossForIndex } from "../src/game/bosses.ts";
@@ -215,6 +216,27 @@ export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
  * 복제하면 반드시 갈라진다 — 그래서 `run.ts`에만 둔다.
  */
 export { leaveShop } from "../src/game/run.ts";
+
+/**
+ * 성소 실험 전용 정책. `npm run map -- --sanctuary`가 `MAP_POLICIES`에 합쳐 비교한다.
+ * 정예 유물을 성소로 옮긴 세계 — 성소로 가는 것이 안 가는 것을 이기면 지도가 유물 경로를 가른다.
+ */
+export const SANCTUARY_MAP_POLICIES = {
+  // 성소가 보이면 무조건 간다. 생선보다 유물을 늘 택하는 정책.
+  "성소 몰빵": (open, row) => open.find((i) => row[i]?.kind === "sanctuary") ?? open[0],
+  /**
+   * **유물이 필요할 때만 성소로.** 유물이 적으면(3 미만) 성소로 가 유물을, 넉넉하면 전투로 생선을.
+   * 유물이냐 생선이냐를 상태로 가르는 정책. 이것이 눈감은 "성소 몰빵"과 그냥 싸우는 것을 이기면
+   * 지도가 진짜 결정이다.
+   */
+  "성소 노림": (open, row, s) => {
+    if (s.relics.length < 3) {
+      const sanc = open.find((i) => row[i]?.kind === "sanctuary");
+      if (sanc !== undefined) return sanc;
+    }
+    return open.find((i) => row[i]?.kind === "battle") ?? open[0];
+  },
+};
 
 /** 길 고르기 정책들. `npm run map`이 이걸 비교한다. */
 export const MAP_POLICIES = {

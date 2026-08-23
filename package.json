@@ -33,7 +33,8 @@
     "null": "node --experimental-strip-types scripts/null-model.mjs",
     "invariants": "node --experimental-strip-types scripts/invariants.mjs",
     "tiers": "node --experimental-strip-types scripts/synergy-tiers.mjs",
-    "clear": "node --experimental-strip-types scripts/clear-space.mjs"
+    "clear": "node --experimental-strip-types scripts/clear-space.mjs",
+    "combo": "node --experimental-strip-types scripts/map-combo.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

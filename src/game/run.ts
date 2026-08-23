@@ -27,6 +27,7 @@ import {
   type Board,
   type Breed,
   type Cat,
+  type ClassKind,
   type Side,
 } from "./types.ts";
 import {
@@ -433,6 +434,40 @@ export function setNotice(state: RunState, text: string, kind: NoticeKind = "nor
  * 그래도 **웨이브는 하나 지나간다** — 그게 상점의 대가다. 적은 웨이브마다
  * 복리로 세지므로, 힘을 사는 동안 상대도 세진다.
  */
+/** 지금 로스터에서 가장 많은 직업. 성소 유물이 이 직업을 노린다. */
+function dominantClass(state: RunState): ClassKind | null {
+  const count = new Map<ClassKind, number>();
+  for (const c of livingCats(state.ally)) count.set(c.breed.cls, (count.get(c.breed.cls) ?? 0) + 1);
+  let want: ClassKind | null = null;
+  let most = 0;
+  for (const [cls, n] of count) if (n > most) { most = n; want = cls; }
+  return want;
+}
+
+/**
+ * 성소를 연다. 전투 없이 몰빵 직업 유물을 준다 — 정예에서 뗀 유물을 여기로 옮겼다(지도 실험).
+ * 상점처럼 웨이브를 건너뛰지만 생선·재추첨은 안 준다. 그래서 성소로 가는 것은 '유물이냐 생선이냐'의
+ * 트레이드이고, 정예(전투로 유물)의 복제가 아니라 유일한 무전투 유물 경로다.
+ */
+function resolveSanctuary(state: RunState): void {
+  const cats = livingCats(state.ally);
+  const owned = new Set(state.relics.map((r) => r.id));
+  const pool = RELICS.filter((r) => !owned.has(r.id));
+  // 정예 유물과 같은 규칙: 조건을 이미 채운 유물부터 준다(대가만 남지 않게).
+  const fit = pool.filter((r) => relicActive(r, cats));
+  const want = dominantClass(state);
+  const pick =
+    fit[0] ??
+    (want ? pool.find((r) => r.condition.kind === "class_count" && r.condition.cls === want) : undefined) ??
+    shuffle(pool)[0];
+  if (pick) {
+    state.relics.push(pick);
+    setNotice(state, `성소에서 ${pick.name}을(를) 받았어요`);
+  } else {
+    setNotice(state, "성소가 비어 있었어요");
+  }
+}
+
 export function chooseNode(state: RunState, idx: number): boolean {
   const step = mapStep(state);
   if (!openLanes(state.map, step).includes(idx)) return false;
@@ -442,6 +477,15 @@ export function chooseNode(state: RunState, idx: number): boolean {
   state.map.taken[step] = idx;
   state.nodeKind = node.kind;
   state.nodeWave = node.wave;
+
+  if (node.kind === "sanctuary") {
+    resolveSanctuary(state);
+    state.step += 1;
+    syncStage(state);
+    rollOffers(state);
+    state.phase = "reward";
+    return true;
+  }
 
   if (node.kind === "shop") {
     // 싸우지 않고 힘만 사는 자리. 생선과 무료 재추첨을 주고 웨이브를 넘긴다.
@@ -1745,7 +1789,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
    * 조건을 이미 채운 것부터 준다. 남는 게 없으면 아무거나 — 유물은 대가가
    * 늘 붙으므로 공짜라고 순수 이득이 아니다.
    */
-  if (kind === "elite") {
+  if (kind === "elite" && !BALANCE.mapSanctuary) {
     const owned = new Set(state.relics.map((r) => r.id));
     const pool = RELICS.filter((r) => !owned.has(r.id));
     const cats = livingCats(state.ally);

@@ -468,3 +468,67 @@ if (mirrorFailures.length === 0) {
     process.exit(1);
   }
 }
+
+/**
+ * 지도 성소 실험 계약 — `BALANCE.mapSanctuary`.
+ *
+ * 꺼지면 성소가 없고 정예가 유물을 준다. 켜면 성소가 나오고 **정예는 유물을 안 준다**(유물이 성소로
+ * 옮겨 감). 성소는 전투 없이 유물을 준다. 지도 계약(도달성·보스)은 그대로.
+ */
+{
+  const { BALANCE } = await import("../src/game/balance.ts");
+  const map = await import("../src/game/map.ts");
+  const run = await import("../src/game/run.ts");
+  const failures = [];
+  const before = BALANCE.mapSanctuary;
+
+  BALANCE.mapSanctuary = false;
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const m = map.makeStage(1, seed);
+    if (m.steps.flat().some((n) => n.kind === "sanctuary")) failures.push(`실험이 꺼졌는데 시드 ${seed}에 성소가 있다`);
+  }
+
+  BALANCE.mapSanctuary = true;
+  try {
+    let anySanctuary = false;
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+      const m = map.makeStage(1, seed);
+      if (m.steps.flat().some((n) => n.kind === "sanctuary")) anySanctuary = true;
+      const problems = map.checkStage(m);
+      if (problems.length) failures.push(`시드 ${seed} checkStage: ${problems.join(" / ")}`);
+    }
+    if (!anySanctuary) failures.push("실험을 켰는데 시드 1~12 어디에도 성소가 없다");
+
+    // 성소: 전투 없이 유물이 늘어난다.
+    const s = run.newRun(3);
+    const relBefore = s.relics.length;
+    let hit = false;
+    for (let step = 1; step < map.STAGE_STEPS && !hit; step++) {
+      const row = s.map.steps[step] ?? [];
+      const open = map.openLanes(s.map, step);
+      const idx = open.find((i) => row[i]?.kind === "sanctuary");
+      if (idx !== undefined) {
+        run.chooseNode(s, idx);
+        hit = true;
+        if (s.relics.length !== relBefore + 1) failures.push("성소에서 유물이 안 늘었다");
+        if (s.phase !== "reward") failures.push("성소가 전투로 갔다 — 무전투여야 한다");
+      } else if (open.length) {
+        const pick = open.find((i) => row[i]?.kind === "battle") ?? open[0];
+        run.chooseNode(s, pick);
+        if (s.phase === "reward") run.leaveShop(s);
+        if (s.phase === "prepare") run.startBattle(s);
+        break;
+      }
+    }
+  } finally {
+    BALANCE.mapSanctuary = before;
+  }
+
+  console.log("\n지도 성소 실험 계약 (꺼지면 없음·정예 유물 / 켜지면 성소 등장·전투 없이 유물)");
+  if (failures.length === 0) {
+    console.log("  OK   꺼짐: 성소 없음 / 켜짐: 성소 등장·checkStage 통과·전투 없이 유물 +1");
+  } else {
+    for (const f of failures) console.log(`  실패 ${f}`);
+    process.exit(1);
+  }
+}
