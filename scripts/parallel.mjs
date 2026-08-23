@@ -45,6 +45,11 @@ export async function runSharded(scriptUrl, names, play, { runs, seed0 }) {
   if (!isMainThread) {
     // 워커: 맡은 (이름, 시드 블록)만 돌려서 보내고 끝낸다.
     const tasks = workerData?.tasks ?? [];
+    // 메인이 넘긴 seed0가 워커의 로컬 파싱과 다르면 argv 전달이 깨진 것이다 — 조용히 틀린
+    // 시드를 재느니 즉시 멈춘다.
+    if (workerData?.seed0 !== undefined && workerData.seed0 !== seed0) {
+      throw new Error(`워커 seed0 불일치: workerData ${workerData.seed0} vs 파싱 ${seed0} (argv 전달 실패)`);
+    }
     const out = {};
     for (const t of tasks) {
       const arr = [];
@@ -80,7 +85,9 @@ export async function runSharded(scriptUrl, names, play, { runs, seed0 }) {
     plans.map(
       (tasks) =>
         new Promise((resolve, reject) => {
-          const w = new Worker(new URL(scriptUrl), { workerData: { tasks } });
+          // 워커는 process.argv를 상속하지 않는다 — argv 옵션으로 넘겨야 워커의 모듈 상단 파싱
+          // (RUNS·SEED0·--set BALANCE 오버라이드)이 메인과 같아진다. seed0도 workerData로 못 박는다.
+          const w = new Worker(new URL(scriptUrl), { argv: process.argv.slice(2), workerData: { tasks, seed0 } });
           let got = false;
           w.on("message", (msg) => {
             got = true;
