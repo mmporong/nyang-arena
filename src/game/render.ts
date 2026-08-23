@@ -3273,9 +3273,10 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
       : `${s.map.stage}번째 밤${stageTitle} · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,
     mapBox(L).y - L.scale * 6,
-    L.scale * 13,
+    // 폰 세로에서 scale이 0.43이라 13×0.43 = 5.6px였다 — 하한 11px. 긴 보스 설명은 폭 안에서 줄인다.
+    Math.max(11, L.scale * 13),
     T.paperDim,
-    { align: "center", weight: 400 },
+    { align: "center", weight: 400, maxWidth: L.w - L.scale * 24 },
   );
 }
 
