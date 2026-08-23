@@ -18,8 +18,17 @@ import { walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 import { dodgeUsable, hazardsActive, hazardZones, stepBattle } from "../src/game/battle.ts";
 import { livingCats } from "../src/game/types.ts";
 import { buyOffer, newRun, startBattle, relicActive, currentKind } from "../src/game/run.ts";
+import { BALANCE } from "../src/game/balance.ts";
 
-const RUNS = Number(process.argv[2] ?? 300);
+/**
+ * `--strike-bank`: 취약 창 실험 3. 직전 보스전의 약점 타격이 다음 전투 시작 마나가
+ * 된다(`BALANCE.strikeBankMana` = 4 → 25타면 첫 공격에 스킬). 플래그는 자리와 무관.
+ */
+const ARGS = process.argv.slice(2);
+const STRIKE_BANK = ARGS.includes("--strike-bank");
+const NUMS = ARGS.filter((a) => !a.startsWith("--"));
+if (STRIKE_BANK) BALANCE.strikeBankMana = 4;
+const RUNS = Number(NUMS[0] ?? 300);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
 const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;

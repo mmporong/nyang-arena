@@ -428,3 +428,66 @@ if (mirrorFailures.length === 0) {
     process.exit(1);
   }
 }
+
+
+/**
+ * 지도 실험 B 계약 — 갈래별 보스(`BALANCE.mapBossByLane`).
+ *
+ * 꺼져 있으면 아무것도 달라지면 안 되고(배정 전부 -1, 신원은 순번 그대로), 켜면
+ * 같은 시드의 지도 **구조**(종류·줄·선·성격)는 그대로인 채 보스 앞 걸음의 갈래만
+ * 보스가 갈려야 한다. 구조가 바뀌면 A/B 짝비교가 아니라 다른 판 둘을 견준 것이다.
+ */
+{
+  const { BALANCE } = await import("../src/game/balance.ts");
+  const map = await import("../src/game/map.ts");
+  const run = await import("../src/game/run.ts");
+  const { BOSS_BREEDS, bossForIndex } = await import("../src/game/bosses.ts");
+  const failures = [];
+  if (BOSS_BREEDS.length !== 3) failures.push(`보스가 ${BOSS_BREEDS.length}종 — 오프셋 0~2 가정이 깨진다`);
+  const before = BALANCE.mapBossByLane;
+  BALANCE.mapBossByLane = false;
+  const offMap = map.makeStage(1, 42);
+  if (offMap.steps.flat().some((n) => n.boss !== -1)) failures.push("실험이 꺼져 있는데 보스 배정이 있다");
+  const s0 = run.newRun(42);
+  s0.map.taken[1] = 0;
+  if (run.bossBreedAt(s0, 2).id !== bossForIndex(run.bossIndexAt(s0, 2)).id) failures.push("실험이 꺼져 있는데 보스 신원이 순번과 다르다");
+  const shape = (m) => m.steps.map((r) => r.map((n) => `${n.kind}/${n.lane}/${n.next.join("-")}/${n.wave}`).join("|")).join("#");
+  BALANCE.mapBossByLane = true;
+  try {
+    const onMap = map.makeStage(1, 42);
+    if (shape(onMap) !== shape(offMap)) failures.push("실험을 켜자 지도 구조가 바뀌었다 — 난수를 앞에서 먹고 있다");
+    const problems = map.checkStage(onMap);
+    if (problems.length) failures.push(`checkStage: ${problems.join(" / ")}`);
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const m = map.makeStage(1, seed);
+      for (let st = 0; st + 1 < map.STAGE_STEPS; st++) {
+        if (!map.isBossStep(st + 1)) continue;
+        const row = m.steps[st];
+        if (row.length >= 2 && new Set(row.map((n) => n.boss)).size < 2) failures.push(`시드 ${seed} ${st}걸음: 갈래가 같은 보스로 모인다`);
+      }
+    }
+    const s = run.newRun(42);
+    const pre = s.map.steps[1];
+    const ids = new Set();
+    for (let i = 0; i < pre.length; i++) {
+      s.map.taken[1] = i;
+      const viaAt = run.bossBreedAt(s, 2).id;
+      const viaLane = run.bossBreedViaLane(s, 1, pre[i]).id;
+      if (viaAt !== viaLane) failures.push(`1걸음 ${i}칸: 라벨(${viaLane})과 스폰(${viaAt})이 다르다`);
+      ids.add(viaAt);
+    }
+    if (pre.length >= 2 && ids.size < 2) failures.push("고른 칸이 달라도 같은 보스가 선다");
+    s.map.taken[1] = -1;
+    if (map.bossOffsetAt(s.map, 2) !== -1) failures.push("앞 걸음을 안 골랐는데 오프셋이 정해졌다");
+  } finally {
+    BALANCE.mapBossByLane = before;
+  }
+
+  console.log("\n지도 실험 B 계약 (갈래별 보스 — 켜면 갈리고, 끄면 그대로)");
+  if (failures.length === 0) {
+    console.log("  OK   꺼짐: 배정 없음·신원 순번 그대로 / 켜짐: 지도 구조 동일·보스 앞 갈래가 갈림·라벨=스폰");
+  } else {
+    for (const f of failures) console.log(`  실패 ${f}`);
+    process.exit(1);
+  }
+}

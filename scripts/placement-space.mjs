@@ -11,19 +11,28 @@
  * 실행: npm run placement
  */
 import { stepBattle } from "../src/game/battle.ts";
-import { buyOffer, moveCat, newRun, startBattle, bossIndexAt } from "../src/game/run.ts";
-import { bossForIndex } from "../src/game/bosses.ts";
+import { buyOffer, moveCat, newRun, startBattle, bossBreedAt } from "../src/game/run.ts";
 import { affordable, makeBossBot, walkMap, leaveShop, MAP_POLICIES } from "./bot-policy.mjs";
 import { BOARD_COLS , livingCats } from "../src/game/types.ts";
+import { BALANCE } from "../src/game/balance.ts";
 
-const RUNS = Number(process.argv[2] ?? 1200);
+/**
+ * `--adjacency`: 배치 실험 2. 같은 직업이 붙으면 공격이 오른다(`BALANCE.adjacencyAtk`).
+ * 플래그는 자리와 무관하고 숫자 인자(런 수·시드 오프셋)는 순서대로 읽는다. 켜면
+ * 규칙을 이용하는 배치("같은 직업 붙이기")를 정책에 더해 같은 기준으로 잰다.
+ */
+const ARGS = process.argv.slice(2);
+const ADJACENCY = ARGS.includes("--adjacency");
+const NUMS = ARGS.filter((a) => !a.startsWith("--"));
+if (ADJACENCY) BALANCE.adjacencyAtk = 0.08;
+const RUNS = Number(NUMS[0] ?? 1200);
 /**
  * 시드 오프셋. 잡음 바닥을 재려고 넣었다 — `relic-space.mjs`와 같은 이유다.
  * 유물 목록처럼 무관해 보이는 것을 건드려도 오퍼 생성이 난수를 다르게 먹어
  * 같은 시드가 다른 판이 된다. 겹치지 않는 블록으로 같은 코드를 두 번 돌려
  * 코드와 무관한 흔들림이 얼마인지부터 보고, 그보다 작은 차이는 안 믿는다.
  */
-const SEED0 = Number(process.argv[3] ?? 0);
+const SEED0 = Number(NUMS[1] ?? 0);
 // 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
 const mapPick = MAP_POLICIES["무작위"];
 const MAX_WAVE = 60;
@@ -110,7 +119,7 @@ const ARRANGERS = {
    *   서리귀    감싸기 2.33 · 정석 2.48 · 분산 2.72 · 뭉침 2.83
    */
   "보스 읽고 고름": (state) => {
-    const boss = bossForIndex(bossIndexAt(state));
+    const boss = bossBreedAt(state);
     if (boss?.id === 9) return ARRANGERS["세로로 분산"](state); // 무쇠발톱 → 분산
     if (boss?.id === 11) return ARRANGERS["감싸기 (원거리 보호)"](state); // 서리귀 → 감싸기
     // 살금이(10)는 정석이 최선이고 그게 기본 배치와 같은 꼴이다.
@@ -128,6 +137,49 @@ const ARRANGERS = {
     ]);
   },
 };
+
+if (ADJACENCY) {
+  /**
+   * 실험 2 전용 — **같은 직업을 한 열에 세로로 붙인다.** 근접 직업은 앞 열(4·3)부터,
+   * 원거리는 뒷 열(0·1)부터 한 직업씩 차지한다. `CENTER_OUT` 순서(2·1·3·0·4)는 새 칸이
+   * 늘 앞서 놓은 칸과 맞닿으므로 한 열 안의 같은 직업은 전부 인접 보너스를 받는다.
+   * 대가는 뭉침이다 — 저격·장판이 오면 같은 대형이 벌을 받는다. 그 긴장이 재는 대상이다.
+   */
+  ARRANGERS["같은 직업 붙이기"] = (state) => {
+    const u = livingUnits(state);
+    const byClass = new Map();
+    for (const c of u) {
+      if (!byClass.has(c.breed.cls)) byClass.set(c.breed.cls, []);
+      byClass.get(c.breed.cls).push(c);
+    }
+    const meleeCols = [BOARD_COLS - 1, BOARD_COLS - 2, 2];
+    const rangedCols = [0, 1, 2];
+    let mi = 0;
+    let ri = 0;
+    const used = new Set();
+    const cats = [];
+    const cells = [];
+    for (const group of byClass.values()) {
+      const melee = group[0].breed.kind === "melee";
+      const cols = melee ? meleeCols : rangedCols;
+      const col = cols[Math.min(cols.length - 1, melee ? mi++ : ri++)];
+      for (const cat of group) {
+        let cell = cellsIn(col).find((x) => !used.has(x));
+        if (cell === undefined) {
+          for (const c of cols) {
+            cell = cellsIn(c).find((x) => !used.has(x));
+            if (cell !== undefined) break;
+          }
+        }
+        if (cell === undefined) continue;
+        used.add(cell);
+        cats.push(cat);
+        cells.push(cell);
+      }
+    }
+    put(state, cats, cells);
+  };
+}
 
 function play(arrange, seed) {
   const s = newRun(seed);
@@ -164,7 +216,7 @@ function play(arrange, seed) {
 
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 
-console.log(`런 ${RUNS}회 · 구매 정책 고정(가장 비싼 것) · 배치만 변경 · 시드 1~${RUNS}\n`);
+console.log(`런 ${RUNS}회 · 구매 정책 고정(가장 비싼 것) · 배치만 변경 · 시드 ${SEED0 + 1}~${SEED0 + RUNS}` + (ADJACENCY ? " · 실험 2(인접 보너스 +8%/마리, 최대 2)" : "") + "\n");
 console.log("배치                    최소   p10   p25  중앙값   p75   p90   최대   평균");
 const means = {};
 for (const [name, arrange] of Object.entries(ARRANGERS)) {

@@ -918,6 +918,8 @@ function doStrike(state: RunState): boolean {
   if (!boss) return false;
 
   boss.strikeCombo = Math.min(BALANCE.strikeComboMax, boss.strikeCombo + 1);
+  // 실험 3 — 넣은 타격을 센다. 다음 전투가 이걸 시작 마나로 바꾼다(`startBattle`).
+  state.strikeBank += 1;
   const mul = 1 + boss.strikeCombo * BALANCE.strikeComboStep;
   damage(boss, Math.max(1, Math.round(boss.maxHp * BALANCE.strikeFrac * mul)), boss.strikeCombo >= 6);
   pushFx({

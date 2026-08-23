@@ -15,15 +15,30 @@
  */
 import { stepBattle } from "../src/game/battle.ts";
 import { newRun, startBattle } from "../src/game/run.ts";
-import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES, BOSS_LANE_POLICIES } from "./bot-policy.mjs";
+import { BALANCE } from "../src/game/balance.ts";
+import { isBossStep } from "../src/game/map.ts";
+import { bossBreedAt, mapStep } from "../src/game/run.ts";
+import { livingCats } from "../src/game/types.ts";
 
-const RUNS = Number(process.argv[2] ?? 1500);
+/**
+ * `--boss-by-lane`: 실험 B. 보스 앞 걸음의 갈래마다 다른 보스가 선다(`BALANCE.mapBossByLane`).
+ * 플래그는 자리와 무관하고, 숫자 인자(런 수·시드 오프셋)는 순서대로 읽는다.
+ * 실험 정책 넷(보스 고정 셋·보스 읽고 고름)을 기본 정책에 합쳐 같은 기준으로 잰다.
+ */
+const ARGS = process.argv.slice(2);
+const BOSS_BY_LANE = ARGS.includes("--boss-by-lane");
+const NUMS = ARGS.filter((a) => !a.startsWith("--"));
+if (BOSS_BY_LANE) BALANCE.mapBossByLane = true;
+const POLICIES = BOSS_BY_LANE ? { ...MAP_POLICIES, ...BOSS_LANE_POLICIES } : MAP_POLICIES;
+
+const RUNS = Number(NUMS[0] ?? 1500);
 /**
  * 시드 오프셋. 잡음 바닥을 재려고 넣었다 — `relic-space`·`placement-space`와
  * 같은 이유다. 판정이 기준에 걸쳐 있을 때 그것이 신호인지 잡음인지는
  * 겹치지 않는 시드 블록으로 같은 코드를 다시 돌려야만 갈린다.
  */
-const SEED0 = Number(process.argv[3] ?? 0);
+const SEED0 = Number(NUMS[1] ?? 0);
 const MAX_WAVE = 60;
 
 function play(pick, seed) {
@@ -31,9 +46,11 @@ function play(pick, seed) {
   const respond = makeBossBot();
   const seen = { battle: 0, elite: 0, shop: 0, boss: 0 };
   const shop = { rerolls: 0, lastWave: 0 };
+  // 실험 B 분해용: 첫 보스 앞에서의 로스터 성격과 만난 보스. 판정에는 안 쓴다.
+  let firstBoss = null;
 
   for (let guard = 0; guard < MAX_WAVE * 4000; guard++) {
-    if (s.phase === "gameover") return { wave: s.wave, seen };
+    if (s.phase === "gameover") return { wave: s.wave, seen, firstBoss };
     if (s.phase === "reward") {
       // 구매 정책은 bot-policy의 shopStep 한 곳에만 있다. 이 파일도 제 사본을
       // 갖고 있었는데, 그런 사본이 balance-sim과 metrics-gen에서 조용히 갈려
@@ -51,33 +68,46 @@ function play(pick, seed) {
       continue;
     }
     if (s.phase === "prepare") {
-      if (s.wave > MAX_WAVE) return { wave: MAX_WAVE, seen };
+      if (s.wave > MAX_WAVE) return { wave: MAX_WAVE, seen, firstBoss };
+      if (firstBoss === null && isBossStep(mapStep(s))) {
+        const cats = livingCats(s.ally);
+        const melee = cats.filter((c) => c.breed.kind === "melee").length;
+        const ranged = cats.length - melee;
+        firstBoss = { team: melee > ranged ? "근접" : ranged > melee ? "원거리" : "균형", boss: bossBreedAt(s).name };
+      }
       startBattle(s);
-      if (s.phase !== "battle") return { wave: s.wave, seen };
+      if (s.phase !== "battle") return { wave: s.wave, seen, firstBoss };
       continue;
     }
     respond(s);
     stepBattle(s, 100);
   }
-  return { wave: s.wave, seen };
+  return { wave: s.wave, seen, firstBoss };
 }
 
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 
-console.log(`런 ${RUNS}회 · 구매·배치·개입 고정 · 길 고르기만 변경 · 시드 1~${RUNS}\n`);
+console.log(`런 ${RUNS}회 · 구매·배치·개입 고정 · 길 고르기만 변경 · 시드 ${SEED0 + 1}~${SEED0 + RUNS}` + (BOSS_BY_LANE ? " · 실험 B(갈래별 보스)" : "") + "\n");
 console.log("정책          최소  p25  중앙값  p75  최대   평균   전투/정예/상점");
 
 const means = {};
 /** 시드별 결과. 평균이 아니라 **판마다 최선이 갈리는가**를 보려고 모은다. */
 const perSeed = {};
-for (const [name, pick] of Object.entries(MAP_POLICIES)) {
+/** 실험 B 분해: 정책 → (로스터×보스) → 도달 웨이브 목록 */
+const breakdown = {};
+for (const [name, pick] of Object.entries(POLICIES)) {
   const out = [];
   const tally = { battle: 0, elite: 0, shop: 0, boss: 0 };
   perSeed[name] = [];
+  breakdown[name] = {};
   for (let i = 0; i < RUNS; i++) {
     const r = play(pick, SEED0 + i + 1);
     out.push(r.wave);
     perSeed[name][i] = r.wave;
+    if (r.firstBoss) {
+      const key = `${r.firstBoss.team}×${r.firstBoss.boss}`;
+      (breakdown[name][key] ??= []).push(r.wave);
+    }
     for (const k of Object.keys(tally)) tally[k] += r.seen[k];
   }
   out.sort((a, b) => a - b);
@@ -109,7 +139,21 @@ console.log(
  * 고정 최선과 신탁의 차이가 크면 "길이 안 갈린다"가 아니라 "**언제 어느 길인지**를
  * 게임이 안 알려준다"는 뜻이고, 그건 다른 문제이므로 다른 처방이 필요하다.
  */
-const names = Object.keys(MAP_POLICIES).filter((n) => n !== "무작위");
+if (BOSS_BY_LANE) {
+  // 첫 보스에서의 로스터 성격 × 보스 → 평균 도달 웨이브(표본). '보스 읽고 고름'의 표를
+  // 여기서 확정한다. 해설이지 판정이 아니다.
+  console.log("\n실험 B 분해 — 첫 보스 앞 로스터 × 만난 보스 → 평균 도달 웨이브 (표본)");
+  for (const name of ["무작위", "보스 고정 무쇠발톱", "보스 고정 살금이", "보스 고정 서리귀"]) {
+    const cells = breakdown[name] ?? {};
+    const line = Object.entries(cells)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${k} ${(v.reduce((x, y) => x + y, 0) / v.length).toFixed(1)}(${v.length})`)
+      .join("  ");
+    console.log(`  ${name.padEnd(12)} ${line}`);
+  }
+}
+
+const names = Object.keys(POLICIES).filter((n) => n !== "무작위");
 const wins = Object.fromEntries(names.map((n) => [n, 0]));
 let oracle = 0;
 for (let i = 0; i < RUNS; i++) {

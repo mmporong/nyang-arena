@@ -1,4 +1,5 @@
 import { makeRng, mixSeed } from "./rng.ts";
+import { BALANCE } from "./balance.ts";
 
 /** 난수기 하나. 지도는 전투와 다른 줄기를 쓴다. */
 type Rand = () => number;
@@ -40,6 +41,13 @@ export interface MapNode {
   readonly lane: number;
   /** 다음 걸음의 몇 번째 칸으로 갈 수 있는가(배열 인덱스). */
   readonly next: number[];
+  /**
+   * 이 칸을 밟고 들어가는 보스의 순번 오프셋(0~2). **보스 앞 걸음에서만** 뜻이
+   * 있고 나머지는 -1이다. 실험 B(`BALANCE.mapBossByLane`)가 꺼져 있으면 전부 -1.
+   * 읽기 전용이 아닌 이유: 지도의 난수를 맨 끝에서 먹어야 A/B의 지도 구조가 같아서,
+   * 칸을 다 만든 뒤에 채운다.
+   */
+  boss: number;
 }
 
 export interface StageMap {
@@ -306,12 +314,47 @@ export function makeStage(stage: number, runSeed = 0): StageMap {
           : "mixed",
         lane,
         next: [...outs].sort((a, b) => a - b),
+        boss: -1,
       };
     });
     steps.push(row);
   }
 
+  /**
+   * 실험 B — 보스 앞 걸음의 갈래마다 다른 보스를 세운다.
+   *
+   * 오프셋 0·1·2를 이 지도의 난수로 섞어 갈래에 돌려 준다. 갈래가 넷이면 하나는
+   * 겹친다(보스는 셋이다 — `BOSS_BREEDS`). **난수는 맨 끝에서 먹는다.** 위에서
+   * 먹으면 뒤 걸음의 전투 성격이 밀려 A/B가 다른 지도를 걷게 되고, 그러면 짝비교가
+   * 아니라 다른 판 둘을 견주는 것이 된다.
+   */
+  if (BALANCE.mapBossByLane) {
+    for (let step = 0; step + 1 < STAGE_STEPS; step++) {
+      if (!isBossStep(step + 1)) continue;
+      const order = [0, 1, 2];
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [order[i], order[j]] = [order[j]!, order[i]!];
+      }
+      steps[step]!.forEach((n, i) => {
+        n.boss = order[i % order.length]!;
+      });
+    }
+  }
+
   return { stage, steps, taken: new Array<number>(STAGE_STEPS).fill(-1) };
+}
+
+/**
+ * 이 보스 걸음에 들어온 갈래의 보스 오프셋. 앞 걸음을 아직 안 골랐으면 -1.
+ * 보스 걸음이 아니어도 -1 — 호출자는 이 값이 0 이상일 때만 더한다.
+ */
+export function bossOffsetAt(map: StageMap, step: number): number {
+  const st = step % STAGE_STEPS;
+  if (!isBossStep(st) || st === 0) return -1;
+  const prevIdx = map.taken[st - 1] ?? -1;
+  const prev = prevIdx >= 0 ? map.steps[st - 1]?.[prevIdx] : undefined;
+  return prev ? prev.boss : -1;
 }
 
 /**
@@ -389,6 +432,13 @@ export function checkStage(map: StageMap): string[] {
     if (!row.some((n) => n.kind === "battle")) problems.push(`${i}걸음에 전투가 없다`);
     if (row.filter((n) => n.kind === "shop").length > 1) problems.push(`${i}걸음에 상점이 둘`);
     if (i === 0 && row.some((n) => n.kind !== "battle")) problems.push("첫 걸음이 전투가 아니다");
+    // 실험 B: 보스 앞 걸음은 갈래마다 보스가 갈려야 하고, 그 밖의 칸에는 배정이 새면 안 된다.
+    if (BALANCE.mapBossByLane && isBossStep(i + 1)) {
+      if (row.some((n) => n.boss < 0 || n.boss > 2)) problems.push(`${i}걸음(보스 앞)에 보스 배정이 없다`);
+      if (row.length >= 2 && new Set(row.map((n) => n.boss)).size < 2) problems.push(`${i}걸음(보스 앞) 갈래가 같은 보스로 모인다`);
+    } else if (row.some((n) => n.boss !== -1)) {
+      problems.push(`${i}걸음에 보스 배정이 새어 있다`);
+    }
     // 갈림길은 성격이 갈려야 한다. 전투 대 전투는 두 번 그린 같은 칸이다.
     if (i > 0 && row.length >= 2 && row.every((n) => n.kind === "battle")) {
       problems.push(`${i}걸음이 전부 전투다 — 고를 것이 없다`);

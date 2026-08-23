@@ -16,9 +16,9 @@ import {
   sweepZones,
   type Fx,
 } from "./battle.ts";
-import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
+import { bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { bossHint, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
+import { bossHint, bossOffsetAt, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
@@ -32,7 +32,8 @@ import {
   currentKind,
   waveKindInfo,
   mapStep,
-  bossIndexAt,
+  bossBreedAt,
+  bossBreedViaLane,
   bossesSeen,
   relicActive,
   CODEX_TOTALS,
@@ -3187,7 +3188,10 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     // 만날 보스가 몇 번째인가"를 세어 라벨을 붙였는데, 그러면 **지나간 보스 칸이
     // 다음 보스 이름으로 바뀌어** 한 지도에 같은 이름이 둘 뜬다.
     if (node.kind === "boss") {
-      const name = bossForIndex(bossIndexAt(s, st)).name;
+      // 실험 B: 앞 걸음을 아직 안 골랐으면 누가 설지 정해지지 않았다. 이름 대신 물음표 —
+      // 갈래마다 적힌 이름을 보고 고르라는 뜻이다.
+      const pending = BALANCE.mapBossByLane && bossOffsetAt(s.map, st) < 0;
+      const name = pending ? "?" : bossBreedAt(s, st).name;
       const weight = pickable ? 800 : 400;
       /**
        * 아이콘은 원 **안**, 이름은 원 **아래**.
@@ -3228,6 +3232,16 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
         (rect.w + grow * 2) * 0.72,
         hot ? T.paper : hue,
       );
+      // 실험 B: 보스 앞 칸에는 그 길 끝에 설 보스 이름을 작게 적는다. 길을 고르는 것이
+      // 곧 보스를 고르는 것이라는 정보를 화면에 둔다 — 정보 없는 결정은 결정이 아니다.
+      if (BALANCE.mapBossByLane && node.boss >= 0) {
+        const fs = Math.max(9, rect.w * 0.26);
+        uiText(ctx, bossBreedViaLane(s, st, node).name, rect.x + rect.w / 2, rect.y + rect.h + fs * 0.9, fs, hot ? T.paper : T.enemy, {
+          align: "center",
+          weight: pickable || taken ? 800 : 400,
+          outline: true,
+        });
+      }
     }
     ctx.restore();
 
@@ -3253,7 +3267,10 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   // 라벨과 **같은 인덱스**를 써야 한다. 이름은 살금이인데 설명은 무쇠발톱이
   // 나오던 자리다 — 여기만 앞의 보스 수를 안 세고 있었다.
   const bossLine =
-    hotNode?.kind === "boss" ? bossHint(bossForIndex(bossIndexAt(s, step)).id) : null;
+    hotNode?.kind !== "boss" ? null
+    : BALANCE.mapBossByLane && bossOffsetAt(s.map, step) < 0
+      ? "갈래마다 다른 악몽이 서요 — 앞 걸음에 적힌 이름을 보고 고르세요"
+      : bossHint(bossBreedAt(s, step).id);
   // 커서까지 바뀌어야 "누를 수 있다"가 끝까지 전달된다. 캔버스 게임은 이걸
   // 안 하면 그림처럼 보인다.
   ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
@@ -3736,6 +3753,10 @@ function drawNotice(
 export interface GameoverGeometry {
   panel: Rect;
   choices: { retry: Rect; daily: Rect; challenge: Rect };
+  /** 부검 줄 간격(px). 작은 화면에서는 하한이 붙고, 공간이 모자라면 scale 치수로 접는다. */
+  lineH: number;
+  /** 본문 글자 하한(px). 접힌 구성에서는 0 — scale만 따른다. */
+  fontFloor: number;
 }
 
 /**
@@ -3753,9 +3774,28 @@ export function gameoverGeometry(L: Layout, s: RunState): GameoverGeometry {
     (s.kind !== "free" ? 1 : 0) +
     1;
   const choiceH = Math.max(40, L.scale * 40);
-  const inset = L.scale * 12;
-  const panelW = Math.min(L.w * 0.86, L.scale * 560);
-  const panelH = L.scale * 174 + lines * L.scale * 20 + choiceH + L.scale * 30;
+  // 폭 하한 260px — 320px 폰에서 scale(0.36)×560 = 199px로는 세 버튼이 손가락 폭(56px)에
+  // 못 미친다. 화면의 86%를 넘지는 않는다.
+  const panelW = Math.min(L.w * 0.86, Math.max(260, L.scale * 560));
+  /**
+   * 줄 간격·글자·버튼 위 여백에 **픽셀 하한**을 둔다. 폰 세로(390px)에서 scale이 0.43이라
+   * 20×0.43 = 8.6px 줄 간격에 6px 글자가 겹쳤고, 버튼(40px 하한)은 안 줄어 라벨을 덮었다.
+   * 그런데 하한을 두면 납작한 가로 화면(667×275)에서는 판이 큰 버튼 위 공간에 안 들어간다.
+   * 그래서 **모자라면 scale 치수로 접는다** — 작게라도 전부 보이는 것이 겹치는 것보다 낫다.
+   */
+  const avail = L.button.y - Math.max(6, L.scale * 10) - 4;
+  let lineH = Math.max(16, L.scale * 20);
+  let fontFloor = 11;
+  let inset = Math.max(10, L.scale * 12);
+  let extra = Math.max(30, L.scale * 30) + Math.max(0, 12 - L.scale * 12) * 2;
+  let panelH = L.scale * 174 + lines * lineH + choiceH + extra;
+  if (panelH > avail) {
+    lineH = L.scale * 20;
+    fontFloor = 0;
+    inset = L.scale * 12;
+    extra = L.scale * 30;
+    panelH = L.scale * 174 + lines * lineH + choiceH + extra;
+  }
   // 버튼 위로만 쓴다. 아래로 내려가면 유일한 행동이 판에 깔린다.
   const top = Math.max(L.scale * 10, (L.button.y - panelH) / 2);
   const panel: Rect = { x: L.w / 2 - panelW / 2, y: top, w: panelW, h: panelH };
@@ -3763,7 +3803,7 @@ export function gameoverGeometry(L: Layout, s: RunState): GameoverGeometry {
   const cw = (panel.w - inset * 2 - gap * 2) / 3;
   const cy = panel.y + panel.h - inset - choiceH;
   const at = (i: number): Rect => ({ x: panel.x + inset + i * (cw + gap), y: cy, w: cw, h: choiceH });
-  return { panel, choices: { retry: at(0), daily: at(1), challenge: at(2) } };
+  return { panel, choices: { retry: at(0), daily: at(1), challenge: at(2) }, lineH, fontFloor };
 }
 
 let codexCacheFor: RunState | null = null;
@@ -3808,7 +3848,8 @@ function drawGameOver(
    * 너머로 비쳐 글자와 겹쳤다. 읽어야 할 것과 이미 끝난 것이 같은 자리에서
    * 싸우면 둘 다 안 읽힌다. 판을 깔아 안팎을 가른다.
    */
-  const { panel, choices } = gameoverGeometry(L, s);
+  const { panel, choices, lineH, fontFloor } = gameoverGeometry(L, s);
+  const font = (base: number): number => Math.max(fontFloor, L.scale * base);
   bevelPanel(ctx, panel, L.scale * 12, "rgba(20,14,11,0.94)", "rgba(0,0,0,0.6)", 2);
 
   const cy = panel.y + L.scale * 76;
@@ -3817,14 +3858,15 @@ function drawGameOver(
   // 라벨 자리를 숫자의 **실제 높이**에서 뽑는다. 상수로 두면 화면 배율이 바뀔 때
   // "도달"과 "웨이브"가 숫자 위로 올라탄다(1280x800에서 실제로 그랬다).
   const numH = numTextHeight(px);
-  const gap = L.scale * 12;
+  // 라벨과 숫자 사이 — 글자에 하한을 두었으므로 간격에도 하한을 둔다(폰에서 라벨이 숫자에 닿았다).
+  const gap = Math.max(fontFloor > 0 ? 8 : 0, L.scale * 12);
 
-  uiText(ctx, "도달", L.w / 2, cy - numH / 2 - gap, L.scale * 15, T.muted, {
+  uiText(ctx, "도달", L.w / 2, cy - numH / 2 - gap, font(15), T.muted, {
     align: "center",
     weight: 800,
   });
   numText(ctx, num, L.w / 2, cy, px, T.paper, "center", false);
-  uiText(ctx, "웨이브", L.w / 2, cy + numH / 2 + gap, L.scale * 16, T.muted, {
+  uiText(ctx, "웨이브", L.w / 2, cy + numH / 2 + gap, font(16), T.muted, {
     align: "center",
     weight: 800,
   });
@@ -3839,8 +3881,8 @@ function drawGameOver(
    */
   let ly = cy + numH / 2 + gap * 2.6;
   const line = (text: string, color: string, weight = 400): void => {
-    uiText(ctx, text, L.w / 2, ly, L.scale * 13, color, { align: "center", weight });
-    ly += L.scale * 20;
+    uiText(ctx, text, L.w / 2, ly, font(13), color, { align: "center", weight, maxWidth: panel.w - L.scale * 24 });
+    ly += lineH;
   };
 
   if (s.lossReason === "timeout") {
@@ -3914,8 +3956,8 @@ function drawGameOver(
     ctx,
     s.recordBroken ? `${recordCaption(s)} 갱신` : `${recordCaption(s)} ${s.modeBest}웨이브`,
     L.w / 2,
-    byy + bh + L.scale * 14,
-    L.scale * 14,
+    byy + bh + Math.max(fontFloor > 0 ? 12 : 0, L.scale * 14),
+    font(14),
     s.recordBroken ? T.gold : T.muted,
     { align: "center", weight: 800 },
   );
@@ -3933,8 +3975,8 @@ function drawGameOver(
     ctx,
     `도전은 단계마다 적 +${Math.round(BALANCE.challengeStep * 100)}% · 기록은 종류별로 따로 남는다`,
     L.w / 2,
-    choices.retry.y - L.scale * 11,
-    L.scale * 11,
+    choices.retry.y - Math.max(fontFloor > 0 ? 10 : 0, L.scale * 11),
+    Math.max(fontFloor > 0 ? 10 : 0, L.scale * 11),
     T.muted,
     { align: "center", maxWidth: panel.w - L.scale * 24 },
   );

@@ -9,7 +9,7 @@
  * 그래서 **모든 측정 봇이 같은 기준선 위에서** 보스를 넘고, 그 위에서 재려는
  * 축만 바꾼다.
  */
-import { buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
+import { bossBreedViaLane, buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
 import { isBossStep, openLanes } from "../src/game/map.ts";
 import { rng } from "../src/game/rng.ts";
 import { livingCats } from "../src/game/types.ts";
@@ -210,6 +210,43 @@ export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
  * 복제하면 반드시 갈라진다 — 그래서 `run.ts`에만 둔다.
  */
 export { leaveShop } from "../src/game/run.ts";
+
+/**
+ * 실험 B(갈래별 보스)에서만 뜻이 있는 길 고르기 정책들. `npm run map -- --boss-by-lane`이
+ * `MAP_POLICIES`에 합쳐 비교한다. 실험이 꺼져 있으면 전부 "전투만"과 같아져 격차를
+ * 더하지 않는다 — 그래서 기본 정책 목록에는 넣지 않는다.
+ */
+export const BOSS_LANE_POLICIES = {
+  // 보스 앞 걸음에서는 그 보스로 가는 칸을, 그 밖에는 전투를 고른다.
+  "보스 고정 무쇠발톱": laneToBoss(9),
+  "보스 고정 살금이": laneToBoss(10),
+  "보스 고정 서리귀": laneToBoss(11),
+  /**
+   * **로스터를 읽고 보스를 고른다.** 근접이 많으면 곧장 걸어오는 무쇠발톱을, 원거리가
+   * 많으면 제자리에서 뿌리는 서리귀를, 균형이면 살금이를 간다. 이 표는 첫 측정
+   * (`npm run map -- 1500 0 --boss-by-lane`의 로스터×보스 분해)으로 확정한다 —
+   * 틀리면 이 정책이 '무작위'보다 못 나오고, 그것이 곧 기각 근거다.
+   */
+  "보스 읽고 고름": (open, row, s) => {
+    const step = mapStep(s);
+    if (!isBossStep(step + 1)) return MAP_POLICIES["전투만"](open, row, s);
+    const cats = livingCats(s.ally);
+    const melee = cats.filter((c) => c.breed.kind === "melee").length;
+    const ranged = cats.length - melee;
+    const want = melee > ranged ? 9 : ranged > melee ? 11 : 10;
+    const hit = open.find((i) => bossBreedViaLane(s, step, row[i]).id === want);
+    return hit ?? MAP_POLICIES["전투만"](open, row, s);
+  },
+};
+
+function laneToBoss(id) {
+  return (open, row, s) => {
+    const step = mapStep(s);
+    if (!isBossStep(step + 1)) return MAP_POLICIES["전투만"](open, row, s);
+    const hit = open.find((i) => bossBreedViaLane(s, step, row[i]).id === id);
+    return hit ?? MAP_POLICIES["전투만"](open, row, s);
+  };
+}
 
 /** 길 고르기 정책들. `npm run map`이 이걸 비교한다. */
 export const MAP_POLICIES = {
