@@ -355,25 +355,13 @@ function drawCrown(
  */
 export function drawNodeIcon(
   ctx: CanvasRenderingContext2D,
-  kind: "battle" | "elite" | "shop" | "sanctuary" | "boss",
+  kind: "battle" | "elite" | "shop" | "boss",
   cx: number,
   cy: number,
   size: number,
   color: string,
 ): void {
-  if (kind === "sanctuary") {
-    // 성소 — 위로 향한 삼각형(제단/빛).
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1.5, size * 0.08);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - size * 0.34);
-    ctx.lineTo(cx + size * 0.32, cy + size * 0.26);
-    ctx.lineTo(cx - size * 0.32, cy + size * 0.26);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
-  } else if (kind === "shop") drawBone(ctx, cx, cy, size, color);
+  if (kind === "shop") drawBone(ctx, cx, cy, size, color);
   else if (kind === "boss") {
     drawPaw(ctx, cx, cy + size * 0.1, size * 0.82, color, true);
     drawCrown(ctx, cx, cy - size * 0.42, size * 0.72, color);
