@@ -221,6 +221,23 @@ export { leaveShop } from "../src/game/run.ts";
  * 열쇠/봉쇄 실험 전용 정책. `npm run map -- --keys`가 `MAP_POLICIES`에 합쳐 비교한다.
  * 실험이 꺼져 있으면 열쇠·금고가 안 나와 전부 "전투만"으로 접힌다.
  */
+export const OFFERING_MAP_POLICIES = {
+  // 제물이 보이면 무조건 바친다 — 여분이 있든 없든. 필요한 고양이도 바쳐 버린다.
+  "제물 몰빵": (open, row) => open.find((i) => row[i]?.kind === "offering") ?? open[0],
+  /**
+   * **여분이 있고 유물이 필요할 때만 바친다.** 로스터가 두껍고(4마리 이상) 유물이 적을 때(3 미만)만
+   * 제물로 간다 — 그때만 트레이드의 값이 양수다. 이 판단을 읽는 것이 값하면 지도에 깊이가 있다.
+   */
+  "제물 읽고 고름": (open, row, s) => {
+    const roster = s.ally.filter((c) => c && c.alive).length;
+    if (roster >= 4 && s.relics.length < 3) {
+      const o = open.find((i) => row[i]?.kind === "offering");
+      if (o !== undefined) return o;
+    }
+    return open.find((i) => row[i]?.kind === "battle") ?? open[0];
+  },
+};
+
 export const KEY_MAP_POLICIES = {
   // 금고가 보이면 무조건 간다 — 열쇠가 있든 없든. 헛걸음을 그대로 맞는다.
   "금고 몰빵": (open, row) => open.find((i) => row[i]?.kind === "vault") ?? open[0],

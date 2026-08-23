@@ -16,7 +16,7 @@
 import { stepBattle } from "../src/game/battle.ts";
 import { runSharded } from "./parallel.mjs";
 import { newRun, startBattle } from "../src/game/run.ts";
-import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES, KEY_MAP_POLICIES } from "./bot-policy.mjs";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES, KEY_MAP_POLICIES, OFFERING_MAP_POLICIES } from "./bot-policy.mjs";
 import { BALANCE } from "../src/game/balance.ts";
 
 /**
@@ -25,9 +25,15 @@ import { BALANCE } from "../src/game/balance.ts";
  */
 const ARGS = process.argv.slice(2);
 const KEYS = ARGS.includes("--keys");
+const OFFERING = ARGS.includes("--offering");
 const NUMS = ARGS.filter((a) => !a.startsWith("--"));
 if (KEYS) BALANCE.mapKeys = true;
-const POLICIES = KEYS ? { ...MAP_POLICIES, ...KEY_MAP_POLICIES } : MAP_POLICIES;
+if (OFFERING) BALANCE.mapOffering = true;
+const POLICIES = {
+  ...MAP_POLICIES,
+  ...(KEYS ? KEY_MAP_POLICIES : {}),
+  ...(OFFERING ? OFFERING_MAP_POLICIES : {}),
+};
 
 const RUNS = Number(NUMS[0] ?? 1500);
 /**
@@ -41,7 +47,7 @@ const MAX_WAVE = 60;
 function play(pick, seed) {
   const s = newRun(seed);
   const respond = makeBossBot();
-  const seen = { battle: 0, elite: 0, shop: 0, key: 0, vault: 0, boss: 0 };
+  const seen = { battle: 0, elite: 0, shop: 0, key: 0, vault: 0, offering: 0, boss: 0 };
   const shop = { rerolls: 0, lastWave: 0 };
 
   for (let guard = 0; guard < MAX_WAVE * 4000; guard++) {
@@ -79,9 +85,10 @@ const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 console.log(
   `런 ${RUNS}회 · 구매·배치·개입 고정 · 길 고르기만 변경 · 시드 ${SEED0 + 1}~${SEED0 + RUNS}` +
     (KEYS ? " · 열쇠 실험" : "") +
+    (OFFERING ? " · 제물 실험" : "") +
     "\n",
 );
-console.log(`정책          최소  p25  중앙값  p75  최대   평균   전투/정예/상점${KEYS ? "/열쇠/금고" : ""}`);
+console.log(`정책          최소  p25  중앙값  p75  최대   평균   전투/정예/상점${KEYS ? "/열쇠/금고" : ""}${OFFERING ? "/제물" : ""}`);
 
 const means = {};
 /** 시드별 결과. 평균이 아니라 **판마다 최선이 갈리는가**를 보려고 모은다. */
@@ -90,7 +97,7 @@ const perSeed = {};
 const sharded = await runSharded(import.meta.url, Object.keys(POLICIES), (name, seed) => play(POLICIES[name], seed), { runs: RUNS, seed0: SEED0 });
 for (const name of Object.keys(POLICIES)) {
   const out = [];
-  const tally = { battle: 0, elite: 0, shop: 0, key: 0, vault: 0, boss: 0 };
+  const tally = { battle: 0, elite: 0, shop: 0, key: 0, vault: 0, offering: 0, boss: 0 };
   perSeed[name] = [];
   for (let i = 0; i < RUNS; i++) {
     const r = sharded[name][i];
@@ -101,7 +108,7 @@ for (const name of Object.keys(POLICIES)) {
   out.sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;
   means[name] = avg;
-  const mix = `${(tally.battle / RUNS).toFixed(1)}/${(tally.elite / RUNS).toFixed(1)}/${(tally.shop / RUNS).toFixed(1)}` + (KEYS ? `/${(tally.key / RUNS).toFixed(1)}/${(tally.vault / RUNS).toFixed(1)}` : "");
+  const mix = `${(tally.battle / RUNS).toFixed(1)}/${(tally.elite / RUNS).toFixed(1)}/${(tally.shop / RUNS).toFixed(1)}` + (KEYS ? `/${(tally.key / RUNS).toFixed(1)}/${(tally.vault / RUNS).toFixed(1)}` : "") + (OFFERING ? `/${(tally.offering / RUNS).toFixed(1)}` : "");
   console.log(
     `${name.padEnd(12)} ${String(out[0]).padStart(4)} ${String(pct(out, 0.25)).padStart(4)} ` +
       `${String(pct(out, 0.5)).padStart(6)} ${String(pct(out, 0.75)).padStart(4)} ` +

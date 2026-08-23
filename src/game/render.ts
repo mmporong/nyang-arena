@@ -3236,6 +3236,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
       : node.kind === "shop" ? T.fish
       : node.kind === "key" ? T.gold
       : node.kind === "vault" ? T.vuln
+      : node.kind === "offering" ? T.enemy
       : T.ally;
     // 고를 수 있는 칸만 살아 있다. 나머지는 지도의 배경이다.
     const alpha = pickable ? 1 : taken ? 0.62 : done ? 0.26 : 0.46;

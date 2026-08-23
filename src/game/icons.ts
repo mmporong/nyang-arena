@@ -355,13 +355,25 @@ function drawCrown(
  */
 export function drawNodeIcon(
   ctx: CanvasRenderingContext2D,
-  kind: "battle" | "elite" | "shop" | "key" | "vault" | "boss",
+  kind: "battle" | "elite" | "shop" | "key" | "vault" | "offering" | "boss",
   cx: number,
   cy: number,
   size: number,
   color: string,
 ): void {
-  if (kind === "key") {
+  if (kind === "offering") {
+    // 제물 — 아래로 향한 삼각형(잔/제단).
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1.5, size * 0.08);
+    ctx.beginPath();
+    ctx.moveTo(cx - size * 0.32, cy - size * 0.26);
+    ctx.lineTo(cx + size * 0.32, cy - size * 0.26);
+    ctx.lineTo(cx, cy + size * 0.34);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  } else if (kind === "key") {
     // 별사탕 — 오각별. 생선(뼈다귀)과 확연히 다르게.
     ctx.save();
     ctx.fillStyle = color;

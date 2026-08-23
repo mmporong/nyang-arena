@@ -558,3 +558,76 @@ if (mirrorFailures.length === 0) {
     process.exit(1);
   }
 }
+
+/**
+ * 지도 제물(트레이드) 실험 계약 — `BALANCE.mapOffering`.
+ *
+ * 꺼지면 제물이 없고, 켜면 나오되 지도 계약 유지. 제물은 가장 약한 고양이를 바치고 유물을 준다
+ * (되돌릴 수 없다). 바칠 고양이가 최소면 헛걸음(위로금).
+ */
+{
+  const { BALANCE } = await import("../src/game/balance.ts");
+  const map = await import("../src/game/map.ts");
+  const run = await import("../src/game/run.ts");
+  const failures = [];
+  const before = BALANCE.mapOffering;
+
+  BALANCE.mapOffering = false;
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const m = map.makeStage(1, seed);
+    if (m.steps.flat().some((n) => n.kind === "offering")) failures.push(`실험이 꺼졌는데 시드 ${seed}에 제물이 있다`);
+  }
+
+  BALANCE.mapOffering = true;
+  try {
+    let anyOffering = false;
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+      const m = map.makeStage(1, seed);
+      if (m.steps.flat().some((n) => n.kind === "offering")) anyOffering = true;
+      const problems = map.checkStage(m);
+      if (problems.length) failures.push(`시드 ${seed} checkStage: ${problems.join(" / ")}`);
+      // 첫 걸음에는 제물이 없어야 한다(바칠 여분이 없다).
+      if ((m.steps[0] ?? []).some((n) => n.kind === "offering")) failures.push(`시드 ${seed}: 첫 걸음에 제물이 있다`);
+    }
+    if (!anyOffering) failures.push("실험을 켰는데 시드 1~12 어디에도 제물이 없다");
+
+    // 제물 계약: 여분 고양이가 있으면 고양이 하나 감소 + 유물 증가.
+    const s = run.newRun(3);
+    // 여분을 확보 — 로스터를 5마리로 채운다.
+    const { BREEDS } = await import("../src/game/breeds.ts");
+    for (let i = 0; i < 5; i++) {
+      const cell = s.ally.findIndex((c) => c === null);
+      if (cell >= 0) s.ally[cell] = run.makeCat(BREEDS[i % BREEDS.length], "ally", cell);
+    }
+    const catsBefore = s.ally.filter(Boolean).length;
+    const relBefore = s.relics.length;
+    let hit = false;
+    for (let step = 1; step < map.STAGE_STEPS && !hit; step++) {
+      const row = s.map.steps[step] ?? [];
+      const open = map.openLanes(s.map, step);
+      const idx = open.find((i) => row[i]?.kind === "offering");
+      if (idx !== undefined) {
+        run.chooseNode(s, idx);
+        hit = true;
+        if (s.ally.filter(Boolean).length !== catsBefore - 1) failures.push("제물에서 고양이가 한 마리 줄지 않았다");
+        if (s.relics.length !== relBefore + 1) failures.push("제물에서 유물이 안 늘었다");
+      } else if (open.length) {
+        const pick = open.find((i) => row[i]?.kind === "battle") ?? open[0];
+        run.chooseNode(s, pick);
+        if (s.phase === "reward") run.leaveShop(s);
+        if (s.phase === "prepare") run.startBattle(s);
+        break;
+      }
+    }
+  } finally {
+    BALANCE.mapOffering = before;
+  }
+
+  console.log("\n지도 제물(트레이드) 실험 계약 (꺼지면 없음 · 켜지면 등장·계약 유지 · 고양이 바치고 유물)");
+  if (failures.length === 0) {
+    console.log("  OK   꺼짐: 제물 없음 / 켜짐: 등장·checkStage 통과·첫 걸음 제외 / 고양이 −1, 유물 +1");
+  } else {
+    for (const f of failures) console.log(`  실패 ${f}`);
+    process.exit(1);
+  }
+}

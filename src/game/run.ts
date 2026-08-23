@@ -454,6 +454,44 @@ function dominantClass(state: RunState): ClassKind | null {
  * 그래서 금고로 가기 전에 열쇠 칸을 먼저 밟아야 하고, 그 순서가 경로 결정이 된다. 유물은 몰빵
  * 직업을 노린다(조건을 이미 채우고 있으므로 대가만 남지 않는다). 전투가 없다.
  */
+/**
+ * 제물을 바친다. **가장 약한 고양이를 잃고 유물을 얻는다**(Golden Idol형). 랜덤이 아니라 결정이라,
+ * 여분 고양이가 있고 유물이 필요할 때만 이득이다 — 그 판단이 경로 결정이 된다. 로스터가 최소면
+ * 바칠 것이 없어 헛걸음(위로금). 전투가 없다.
+ */
+function resolveOffering(state: RunState): void {
+  const cats = livingCats(state.ally);
+  if (cats.length <= BALANCE.starterCount - 1) {
+    state.gold += BALANCE.offeringEmptyGold;
+    setNotice(state, `바칠 고양이가 없어 제물을 지나쳤어요 (+${BALANCE.offeringEmptyGold})`);
+    return;
+  }
+  const owned = new Set(state.relics.map((r) => r.id));
+  const pool = RELICS.filter((r) => !owned.has(r.id));
+  const want = dominantClass(state);
+  const pick =
+    (want ? pool.find((r) => r.condition.kind === "class_count" && r.condition.cls === want) : undefined) ??
+    shuffle(pool)[0];
+  if (!pick) {
+    state.gold += BALANCE.offeringEmptyGold;
+    setNotice(state, "제물을 받을 유물이 없었어요");
+    return;
+  }
+  // 가장 약한 고양이(레벨 낮은 순)를 바친다. 몰빵 직업이 아닌 곁가지부터 나가도록 직업도 본다.
+  const victim = [...cats].sort(
+    (a, b) => a.level - b.level || (a.breed.cls === want ? 1 : 0) - (b.breed.cls === want ? 1 : 0) || (a.uid < b.uid ? -1 : 1),
+  )[0];
+  if (!victim) {
+    state.gold += BALANCE.offeringEmptyGold;
+    setNotice(state, "바칠 고양이가 없어 제물을 지나쳤어요");
+    return;
+  }
+  const cell = state.ally.indexOf(victim);
+  if (cell >= 0) state.ally[cell] = null;
+  state.relics.push(pick);
+  setNotice(state, `${victim.breed.name}을(를) 바치고 ${pick.name}을(를) 얻었어요`);
+}
+
 function resolveVault(state: RunState): void {
   if (state.keys <= 0) {
     state.gold += BALANCE.vaultEmptyGold;
@@ -486,6 +524,15 @@ export function chooseNode(state: RunState, idx: number): boolean {
   state.map.taken[step] = idx;
   state.nodeKind = node.kind;
   state.nodeWave = node.wave;
+
+  if (node.kind === "offering") {
+    resolveOffering(state);
+    state.step += 1;
+    syncStage(state);
+    rollOffers(state);
+    state.phase = "reward";
+    return true;
+  }
 
   if (node.kind === "key") {
     // 별사탕을 챙긴다. 상점처럼 걸음만 먹고 웨이브는 넘긴다.
