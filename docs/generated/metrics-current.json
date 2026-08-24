@@ -1,9 +1,9 @@
 {
   "schema": 2,
   "generatedFrom": {
-    "commit": "836d32a",
-    "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-    "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+    "commit": "95ee4f4",
+    "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+    "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
     "dirty": false,
     "reproducible": true,
     "node": "v24.12.0",
@@ -75,7 +75,7 @@
     "vulnerableChargesPerWindow": 2
   },
   "build": {
-    "bundleBytes": 202505
+    "bundleBytes": 205551
   },
   "verification": {
     "sixAxis": [
@@ -85,8 +85,8 @@
         "exitCode": 0,
         "command": "npm run --silent sim",
         "seeds": "1..300",
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "9923da2d285fca10375b29b1b28f3b0ae01128dc0183c1923809703df917c75a",
@@ -98,8 +98,8 @@
         "exitCode": 0,
         "command": "npm run --silent decisions",
         "seeds": "1..300",
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "e1f895bbdb7b57e1b8e06ea429e49b428149d68fce6649187e1075f78a3cc71c",
@@ -111,8 +111,8 @@
         "exitCode": 0,
         "command": "npm run --silent placement",
         "seeds": "1..1200",
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "c49c6584f6c41b91878860b207ec71e5c35d0ad7cb99b73a6a041095d72dbdee",
@@ -124,8 +124,8 @@
         "exitCode": 0,
         "command": "npm run --silent intervention",
         "seeds": "1..300",
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "14f86439199653bfe33b908b56fe1237ce2c24b42ba7bf62e73824c4d8884a83",
@@ -137,8 +137,8 @@
         "exitCode": 0,
         "command": "npm run --silent map",
         "seeds": "prep:1..300;policy-space:1..1500",
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "7f5e709b5fde25df82066b95cf6ffc394ee0130f54015e6013d6416cef0d0119",
@@ -150,8 +150,8 @@
         "exitCode": 0,
         "command": "npm run --silent relics",
         "seeds": "1..2000",
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "7d73a3fba5773aa20c10e6e0e22a53187907c216f3c19bd5cb3a6eca9013b7b1",
@@ -162,8 +162,8 @@
     "allSixPassed": true,
     "raidContracts": {
       "source": {
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/contract-space.mjs",
         "seeds": {
@@ -260,12 +260,12 @@
         "dominance": true,
         "balance": true
       },
-      "evidenceSha256": "7ab4c627c1205c99f4bc31e8cf0150a5fe8a51536139d882f805fd79d0be643a"
+      "evidenceSha256": "ab962430707775fd051bbc53ad81f789eedc6ccfafb037e915d1188b4e5efa82"
     },
     "mapPreparation": {
       "source": {
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/map-prep-space.mjs",
         "seeds": {
@@ -330,12 +330,12 @@
         "delivery": true,
         "outcome": true
       },
-      "evidenceSha256": "d0b52b8042185a29c50287a7f86e07a34a662ca929eb1c65729d934b9ee16090"
+      "evidenceSha256": "931d7ce296e15b66736573721f44d916bb1e4ddd6886065a48e4bc81aba1e9e8"
     },
     "mapSpace": {
       "source": {
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/map-space.mjs",
         "seeds": {
@@ -362,7 +362,7 @@
         "effect": true,
         "read": true
       },
-      "evidenceSha256": "1c1ff1f767814f589c2298b5445427050d7eba93213eac0d6e20bbea53ffc3c1"
+      "evidenceSha256": "059fc596d4674444e7ad6b0ece63c3de0c52383d0f8fd8fb92304559e4600d3c"
     }
   },
   "observations": {
@@ -371,8 +371,8 @@
       "gate": false,
       "decisionEligible": false,
       "source": {
-        "head": "836d32a6fc500919f7cc3a3823058af87c6a2ec2",
-        "tree": "d9b7a7b504d8688f884c0a15924fe0306960a1c2",
+        "head": "95ee4f4de29dbebf4b330267fc1ca799ea919ea4",
+        "tree": "31fb94ffec9e9e7381d1093521a6cb63f18b6402",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/matchup-space.mjs",
         "seeds": {
@@ -904,7 +904,7 @@
         ],
         "directionStableCells": 3
       },
-      "evidenceSha256": "aeb25476257a8ee8cdee67f387d984927fdcb1194462af3e9c65e6ed56c54889"
+      "evidenceSha256": "395adac54338acd7c1ec83ecc3443cfc4b0c505d02fb493c33d3fd9068b43807"
     }
   },
   "openIssues": [
