@@ -79,6 +79,20 @@ export interface Offer {
   sublabel: string;
 }
 
+/**
+ * 회복·보상·상태 정리 전의 마지막 전투 결과. 측정 하네스가 실제 전투 경로를
+ * 읽기 위한 telemetry이며 렌더·저장·게임 규칙은 이 값을 참조하지 않는다.
+ */
+export interface BattleOutcome {
+  won: boolean;
+  reason: "victory" | "wipe" | "timeout";
+  elapsedMs: number;
+  allyStartHp: number;
+  allyRemainingHp: number;
+  enemyStartHp: number;
+  enemyRemainingHp: number;
+}
+
 export interface RunState {
   phase: Phase;
   wave: number;
@@ -97,6 +111,11 @@ export interface RunState {
   /** notice의 성격. `setNotice`가 항상 같이 정한다. */
   noticeKind: NoticeKind;
   battleElapsed: number;
+  /**
+   * 가장 최근 전투의 회복 전 결과. 다음 전투가 시작되면 null로 돌아간다.
+   * 런 저장 형식에 계측값을 섞지 않도록 실제 속성은 non-enumerable이다.
+   */
+  lastBattleOutcome: BattleOutcome | null;
   /** 이번 런에서 최고 기록을 깼는지. 동점을 갱신으로 표시하지 않기 위해 따로 둔다. */
   recordBroken: boolean;
   /** 마지막 패배 사유. notice는 다른 문구로 덮이므로 따로 보관한다. */
@@ -1186,6 +1205,7 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
     notice: `생선 ${BALANCE.startGold}마리로 시작한다`,
     noticeKind: "normal",
     battleElapsed: 0,
+    lastBattleOutcome: null,
     recordBroken: false,
     lossReason: null,
     telegraphsSeen: 0,
@@ -1228,6 +1248,15 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
     relicDraftActive: false,
     summons: [],
   };
+
+  // 결과는 하네스가 같은 RunState에서 읽되 저장·스냅샷 계약에는 들어가지 않는다.
+  // 타입을 만족시키려고 객체 리터럴에 둔 뒤 즉시 non-enumerable로 고정한다.
+  Object.defineProperty(state, "lastBattleOutcome", {
+    value: null,
+    writable: true,
+    enumerable: false,
+    configurable: false,
+  });
 
   // 판의 종류는 첫 문구가 말한다. 도전은 무엇이 달라졌는지, 오늘의 시드는 왜
   // 같은 판인지를 한 줄로 — 설명 화면을 따로 두지 않는다.
@@ -1827,6 +1856,57 @@ export function rerollOffers(state: RunState): boolean {
   return true;
 }
 
+interface BattleHpBaseline {
+  ally: Map<string, number>;
+  enemy: Map<string, number>;
+}
+
+/** RunState 직렬화에 섞지 않는 전투 중 임시 기준선. 상태가 버려지면 함께 회수된다. */
+const battleHpBaselines = new WeakMap<RunState, BattleHpBaseline>();
+
+function hpBaseline(board: Board): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const cat of board) {
+    if (cat?.alive) out.set(cat.uid, Math.max(0, cat.hp));
+  }
+  return out;
+}
+
+function sumHp(baseline: Map<string, number>): number {
+  let total = 0;
+  for (const hp of baseline.values()) total += hp;
+  return total;
+}
+
+function remainingBaselineHp(board: Board, baseline: Map<string, number>): number {
+  const current = new Map<string, Cat>();
+  for (const cat of board) if (cat) current.set(cat.uid, cat);
+  let total = 0;
+  for (const [uid, startHp] of baseline) {
+    const cat = current.get(uid);
+    if (cat?.alive) total += Math.min(startHp, Math.max(0, cat.hp));
+  }
+  return total;
+}
+
+function recordBattleOutcome(state: RunState, won: boolean, reason: "wipe" | "timeout"): void {
+  const baseline = battleHpBaselines.get(state);
+  battleHpBaselines.delete(state);
+  if (!baseline) {
+    state.lastBattleOutcome = null;
+    return;
+  }
+  state.lastBattleOutcome = {
+    won,
+    reason: won ? "victory" : reason,
+    elapsedMs: state.battleElapsed,
+    allyStartHp: sumHp(baseline.ally),
+    allyRemainingHp: remainingBaselineHp(state.ally, baseline.ally),
+    enemyStartHp: sumHp(baseline.enemy),
+    enemyRemainingHp: remainingBaselineHp(state.enemy, baseline.enemy),
+  };
+}
+
 export function startBattle(state: RunState): void {
   // 전투는 준비 국면에서만 시작한다. 보상 화면의 유물 드래프트를 건너뛸 때
   // `leaveShop`은 일반 카드 세 장을 열고 reward에 남는데, 같은 버튼 호출이
@@ -1878,12 +1958,18 @@ export function startBattle(state: RunState): void {
     state.dodgeCharges += state.bonusDodge;
     state.bonusDodge = 0;
   }
+  state.lastBattleOutcome = null;
+  battleHpBaselines.set(state, {
+    ally: hpBaseline(state.ally),
+    enemy: hpBaseline(state.enemy),
+  });
   state.battleElapsed = 0;
   state.phase = "battle";
   setNotice(state, "");
 }
 
 export function finishWave(state: RunState, won: boolean, reason: "wipe" | "timeout" = "wipe"): void {
+  recordBattleOutcome(state, won, reason);
   // 소환수는 전투 안에서만 산다. `startBattle`에서만 비우면 보상·지도
   // 화면 내내 지난 판의 분신이 남는다(불변식 검사에서 678회 걸렸다).
   state.summons.length = 0;
