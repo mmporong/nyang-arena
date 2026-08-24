@@ -1,4 +1,4 @@
-import { clearBattleFx, hazardZones, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
+import { clearBattleFx, hazardZones, queueIntervention, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
 import { BALANCE } from "./game/balance.ts";
 import {
   dispatchGameInput,
@@ -524,7 +524,7 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 function pushIntent(kind: Intervention["kind"] = "act", dual = false): void {
   if (state.phase !== "battle") return;
   markIntervention();
-  state.pending.push(kind === "dodge" || kind === "gather" ? { kind, dual } : { kind });
+  queueIntervention(state, kind === "dodge" || kind === "gather" ? { kind, dual } : { kind });
 }
 
 window.addEventListener("keydown", (e) => {

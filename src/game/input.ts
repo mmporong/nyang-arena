@@ -1,4 +1,4 @@
-import { dualChoiceActive } from "./battle.ts";
+import { actIntentKind, actUsable, dodgeUsable, dualChoiceActive } from "./battle.ts";
 import { hitCell, rectHas, type Layout, type Rect } from "./layout.ts";
 import { openLanes } from "./map.ts";
 import {
@@ -177,6 +177,9 @@ function pointerDown(ctx: GameInputContext, event: Extract<GameInputEvent, { kin
   if (rectHas(layout.button, x, y)) {
     if (state.phase === "battle") {
       const dual = dualChoiceActive(state);
+      if ((dual && !dodgeUsable(state)) || (!dual && !actUsable(state))) {
+        return result(drag, NONE, common);
+      }
       return result(
         drag,
         { kind: "intent", intent: dual ? splitButtonChoice(layout.button, x) : "act", dual },
@@ -231,6 +234,14 @@ function keyDown(ctx: GameInputContext, event: Extract<GameInputEvent, { kind: "
   if (event.code === "Space" || event.code === "KeyG") {
     if (state.phase !== "battle") return result(drag, NONE, { ...common, preventDefault: true });
     const dual = dualChoiceActive(state);
+    // 일반 회피의 키 반복은 유지한다. 다만 예고가 없는 취약 창에서 길게 누른
+    // Space/G가 두 번째 결정타까지 자동 소비하지 않도록 반복 입력만 버린다.
+    if (event.repeat && !dual && actIntentKind(state) === "strike") {
+      return result(drag, NONE, { ...common, preventDefault: true });
+    }
+    if ((dual && !dodgeUsable(state)) || (!dual && !actUsable(state))) {
+      return result(drag, NONE, { ...common, preventDefault: true });
+    }
     const intent: Intervention["kind"] = dual ? (event.code === "KeyG" ? "gather" : "dodge") : "act";
     return result(drag, { kind: "intent", intent, dual }, { ...common, preventDefault: true });
   }

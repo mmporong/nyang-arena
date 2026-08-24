@@ -14,13 +14,17 @@ import { isRaidPrepStep, openLanes } from "../src/game/map.ts";
 import { makeRng, mixSeed, rng } from "../src/game/rng.ts";
 import { BOARD_COLS, livingCats } from "../src/game/types.ts";
 import { bossForIndex } from "../src/game/bosses.ts";
-import { dodgeUsable, hazardsActive } from "../src/game/battle.ts";
+import { defenseIntentKind, dodgeUsable, queueIntervention, strikeUsable } from "../src/game/battle.ts";
+import { BALANCE } from "../src/game/balance.ts";
 import { raidPrepRoute } from "../src/game/raid.ts";
 
 /**
  * 예고를 읽고 반응한다. 사람처럼 조금 늦고 가끔 놓친다 —
  * 완벽하게 반응하는 봇은 상한이지 기준선이 아니다.
  */
+/** 정상 취약 창에서 둘째 기회를 피해로 회수하는 마지막 유예. */
+export const VULNERABLE_CASH_OUT_MS = 650;
+
 /**
  * @param read 예고 색을 읽는가. false면 **늘 산개**(뭉침 예고에도 흩어진다) — intervention-space의
  *   "늘 탭만"과 같은 뜻이고, clear-space의 "무의식" 봇이 쓴다. 기본 true.
@@ -37,36 +41,45 @@ export function makeBossBot({ read = true } = {}) {
      * 없는 정책**을 재는 봇이 됐다(리뷰 적발). `act`로 밀면 해석은 언제나
      * 게임과 동일하고, 사람 흉내(반응 지연·놓침)는 예고 쪽 분기만 맡는다.
      */
-    if (s.enemy.some((c) => c?.alive && c.vulnerableMs > 0)) {
-      s.pending.push({ kind: "act" });
-      return;
-    }
+    const defense = defenseIntentKind(s);
     const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
-    if (!tg || s.dodgeCharges <= 0) {
-      lastTelegraph = null;
-      /**
-       * `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 —
-       * 상주 장판(creep)·순차 스윕(sweep) 대기열은 `s.enemy`의 telegraph가
-       * 아니라 battle.ts의 별도 배열이라 위 `tg` 검사엔 안 걸린다. 사람이
-       * act 버튼을 누르면 resolveIntent의 기본값이 알아서 회피로 푸는데,
-       * 이 봇은 act가 아니라 dodge/gather를 직접 박아 넣으므로 그 기본
-       * 경로를 안 탄다 — 여기서 한 번 더 봐 준다. `dodgeUsable`을 쓰는
-       * 이유는 스윕 두 번째 파동이 차지 0에서도 공짜로 통하기 때문이다
-       * (`s.dodgeCharges > 0`만 보면 그 무료 순간을 봇이 아예 시도조차
-       * 안 해서 "개입 1회로 연쇄 전체를 넘긴다"는 설계가 있으나 마나가
-       * 된다 — 실측: 이 사본을 안 고치고는 sim 중앙값이 10에서 안 올랐다).
-       */
-      if (hazardsActive(s) && dodgeUsable(s)) {
-        s.pending.push({ kind: "dodge" });
+    if (defense) {
+      // 실제 이동이 필요한 예고가 있으면 취약 창보다 먼저 처리한다. 안전해진
+      // 상주 장판은 defenseIntentKind가 null이라 결정타를 막지 않는다.
+      if (!dodgeUsable(s)) return;
+      // creep·sweep은 enemy.telegraph 밖에 있으므로 보이는 즉시 대응한다.
+      if (!tg) {
+        if (!s.pending.some((intent) => intent.kind === "dodge")) {
+          queueIntervention(s, { kind: "dodge" });
+        }
+        lastTelegraph = null;
+        return;
+      }
+      since = tg === lastTelegraph ? since + 1 : 0;
+      if (tg !== lastTelegraph) seen += 1;
+      lastTelegraph = tg;
+      // 네 번에 한 번 놓치고 두 틱 늦게 반응한다.
+      if (seen % 4 !== 3 && since >= 2) {
+        const kind = read && defense === "gather" ? "gather" : "dodge";
+        if (!s.pending.some((intent) => intent.kind === kind)) queueIntervention(s, { kind });
       }
       return;
     }
-    since = tg === lastTelegraph ? since + 1 : 0;
-    if (tg !== lastTelegraph) seen += 1;
-    lastTelegraph = tg;
-    // 네 번에 한 번 놓치고 두 틱 늦게 반응한다.
-    if (seen % 4 !== 3 && since >= 2) {
-      s.pending.push({ kind: read && tg.mode === "gather" ? "gather" : "dodge" });
+
+    lastTelegraph = null;
+    const boss = s.enemy.find((c) => c?.alive && c.vulnerableMs > 0);
+    if (!boss || !strikeUsable(s)) return;
+
+    /**
+     * 정상 창의 첫 기회는 공격으로 바꾸고, 둘째는 닫히기 직전까지 방어용으로
+     * 남긴다. 실제 방어가 없었을 때만 마지막 650ms에 피해로 회수한다. 최종
+     * 창은 새 예고가 없는 피니시 보장이므로 두 기회를 곧바로 쓴다.
+     */
+    const finalOpen = boss.finalPhase?.stage === "open";
+    const firstOpportunity = boss.vulnerableCharges === BALANCE.vulnerableChargesPerWindow;
+    const cashOut = boss.vulnerableCharges > 0 && boss.vulnerableMs <= VULNERABLE_CASH_OUT_MS;
+    if (finalOpen || firstOpportunity || cashOut) {
+      queueIntervention(s, { kind: "act" });
     }
   };
 }

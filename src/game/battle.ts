@@ -440,6 +440,8 @@ function damage(target: Cat, amount: number, crit: boolean): void {
     // 죽은 보스 밑에 반쪽 장판이 남는다.
     target.telegraph2 = null;
     target.blink = null;
+    target.vulnerableMs = 0;
+    target.vulnerableCharges = 0;
     // 최종 국면(finalPhase, US-404) 도중 보스가 죽으면(마지막 취약 창에서
     // 흔히 일어난다 — 그게 이 국면의 성공 조건이다) `tickBoss`가 다시는
     // 이 상태를 안 건드리므로 여기서 지운다. 안 지우면 죽은 보스가 화면을
@@ -898,34 +900,67 @@ function safeSpot(cat: Cat, zones: Telegraph[]): { fx: number; fy: number } | nu
   return null;
 }
 
-/**
- * 약점 공격. 취약 창이 열린 보스에게만 들어간다.
- *
- * 연타가 콤보로 쌓여 배수가 붙는다. 창이 닫히면 콤보도 0으로 돌아가므로,
- * "언제 창이 열리는지 알고 준비했다가 몰아치는 것"이 보상받는다 —
- * WoW 레이드의 버스트 창과 같은 구조다.
- */
-function doStrike(state: RunState): boolean {
-  // 부재(gone) 중인 보스는 대상이 아니다 — damage()가 어차피 0으로 막는데
-  // 여기서 콤보만 오르면 "때렸는데 안 깎이는" 거짓 화면이 된다. 최종 국면
-  // 채널 중인 보스도 같은 이유로 뺀다 — damage()가 이미 무적으로 막지만,
-  // 여기서도 걸러야 콤보가 헛되이 쌓이거나 타격 연출이 헛돈다. 화면은
-  // 버튼을 "…"로 잠그는데(render.ts) 입력 자체는 여전히 큐에 들어올 수
-  // 있으므로(하네스·거친 연타), 판정 쪽에서도 같은 문을 잠가야 화면과
-  // 실제 결과가 어긋나지 않는다.
-  const boss = state.enemy.find(
+export function vulnerableWindowBoss(state: RunState): Cat | undefined {
+  return state.enemy.find(
     (c) =>
       c?.alive &&
       c.radius > 0 &&
       c.vulnerableMs > 0 &&
       c.finalPhase?.stage !== "channel" &&
       !(c.blink && c.blink.phase === "gone"),
-  );
+  ) ?? undefined;
+}
+
+function strikeTarget(state: RunState): Cat | undefined {
+  const boss = vulnerableWindowBoss(state);
+  return boss && boss.vulnerableCharges > 0 ? boss : undefined;
+}
+
+/**
+ * 지금 결정타가 실제로 성립하는가.
+ *
+ * 전투 판정·버튼 얼굴·포인터/키 입력이 이 한 문을 공유한다. 살아 있고 판에
+ * 존재하는 보스의 취약 창이어야 하며, 최종 채널·순간이동 부재 중에는 닫힌다.
+ * 창 전용 기회가 남아 있을 때만 열린다. 전투 전체 회피 차지는 결정타 접근권을
+ * 늘리지 않는다.
+ */
+export function strikeUsable(state: RunState): boolean {
+  return strikeTarget(state) !== undefined;
+}
+
+/**
+ * 원버튼 `act`가 지금 실제로 낼 행동. 입력 반복 게이트와 전투 소비가 이 판정을
+ * 공유해야, 상주 장판이 있는 취약 창처럼 `hazardsActive`와 보스 예고가 다른
+ * 상태에서도 키 얼굴과 실제 행동이 갈라지지 않는다.
+ */
+export function actIntentKind(state: RunState): Intervention["kind"] {
+  const defense = defenseIntentKind(state);
+  if (defense) return defense;
+  return strikeUsable(state) ? "strike" : "dodge";
+}
+
+/** 원버튼 act가 지금 실제로 결과를 낼 수 있는가. 입력과 버튼이 공유한다. */
+export function actUsable(state: RunState): boolean {
+  const defense = defenseIntentKind(state);
+  if (defense === "gather") return defenseResourceAvailable(state);
+  if (defense === "dodge") return dodgeUsable(state);
+  return strikeUsable(state);
+}
+
+/**
+ * 결정타. 창 전용 기회 하나를 최대 체력 7% 피해로 바꾼다.
+ *
+ * 성공한 타격만 기회를 소비하고 전투 전체 회피 차지는 건드리지 않는다. 속도
+ * 연타 보상이 아니므로 별도 행동 쿨다운을 걸지 않는다.
+ */
+function doStrike(state: RunState): boolean {
+  if (!strikeUsable(state)) return false;
+  const boss = strikeTarget(state);
   if (!boss) return false;
 
-  boss.strikeCombo = Math.min(BALANCE.strikeComboMax, boss.strikeCombo + 1);
-  const mul = 1 + boss.strikeCombo * BALANCE.strikeComboStep;
-  damage(boss, Math.max(1, Math.round(boss.maxHp * BALANCE.strikeFrac * mul)), boss.strikeCombo >= 6);
+  boss.vulnerableCharges -= 1;
+  damage(boss, Math.max(1, Math.round(boss.maxHp * BALANCE.strikeFrac)), false);
+  const used = BALANCE.vulnerableChargesPerWindow - boss.vulnerableCharges;
   pushFx({
     kind: "slash",
     fx: boss.fx,
@@ -933,7 +968,7 @@ function doStrike(state: RunState): boolean {
     tx: 0,
     ty: 0,
     radius: boss.radius * 0.8,
-    angle: (boss.strikeCombo % 6) * 0.5,
+    angle: (used % 6) * 0.5,
     life: 200,
     color: "#F0BA4A",
   });
@@ -1095,6 +1130,76 @@ export function hazardsActive(state: RunState): boolean {
   return hazardZones(state).length > 0;
 }
 
+/** 지금 청록 예고에 실제로 들어가야 하는 아군이 있는가. 판정만 하고 움직이지 않는다. */
+function gatherActionNeeded(state: RunState): boolean {
+  const zones: Telegraph[] = [];
+  for (const e of state.enemy) {
+    if (e?.telegraph?.mode === "gather") zones.push(e.telegraph);
+    if (e?.telegraph2?.mode === "gather") zones.push(e.telegraph2);
+  }
+  const target = zones[0];
+  if (!target) return false;
+
+  for (const c of allyBodies(state)) {
+    if (c.dash || inTelegraph(target, c.fx, c.fy, BALANCE.telegraphBodyPad)) continue;
+    const dx = target.fx - c.fx;
+    const dy = target.fy - c.fy;
+    const d = Math.hypot(dx, dy) || 1;
+    const pull = Math.max(0, d - target.arg * 0.6);
+    const tx = c.fx + (dx / d) * pull;
+    const ty = c.fy + (dy / d) * pull;
+    if (dashMs(c, tx, ty) <= target.fuse) return true;
+  }
+  return false;
+}
+
+/** 지금 붉은 위험에서 실제로 빠져나올 수 있는 아군이 있는가. 판정만 하고 움직이지 않는다. */
+function dodgeActionNeeded(state: RunState): boolean {
+  const zones = hazardZones(state).filter((zone) => zone.mode === "avoid");
+  if (zones.length === 0) return false;
+  const creepSet = new Set<Telegraph>(creepZones);
+  const timed = zones.filter((zone) => !creepSet.has(zone));
+  const fuse = timed.length > 0 ? Math.min(...timed.map((zone) => zone.fuse)) : CREEP_TICK_MS;
+  for (const c of allyBodies(state)) {
+    if (c.dash) continue;
+    const spot = safeSpot(c, zones);
+    if (spot && dashMs(c, spot.fx, spot.fy) <= fuse) return true;
+  }
+  return false;
+}
+
+/**
+ * 위험의 존재가 아니라 **지금 필요한 방어 행동**을 돌려준다.
+ *
+ * 상주 장판은 모두가 빠져나온 뒤에도 잠시 남는다. 그때 단순히
+ * `hazardsActive`를 보면 안전한 취약 창의 결정타까지 막히므로, 실제로 이동할
+ * 아군이 있을 때만 방어가 공격보다 앞선다.
+ */
+export function defenseIntentKind(state: RunState): "dodge" | "gather" | null {
+  const primary = state.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
+  if (primary?.mode === "gather" && gatherActionNeeded(state)) return "gather";
+  if (primary?.mode === "avoid" && dodgeActionNeeded(state)) return "dodge";
+  // 보스 telegraph 밖에 사는 creep·sweep도 실제 점유 중이면 방어한다.
+  if (dodgeActionNeeded(state)) return "dodge";
+  return null;
+}
+
+function defenseResourceAvailable(state: RunState): boolean {
+  return (vulnerableWindowBoss(state)?.vulnerableCharges ?? 0) > 0 || state.dodgeCharges > 0;
+}
+
+/** 성공한 방어가 창 기회를 먼저, 없으면 전투 전체 회피를 소비한다. */
+function spendDefenseCharge(state: RunState): boolean {
+  const boss = vulnerableWindowBoss(state);
+  if (boss && boss.vulnerableCharges > 0) {
+    boss.vulnerableCharges -= 1;
+    return true;
+  }
+  if (state.dodgeCharges <= 0) return false;
+  state.dodgeCharges -= 1;
+  return true;
+}
+
 /**
  * 지금 회피/집결을 눌러 실제로 값을 볼 수 있는가 — **차지가 0이어도 참일 수
  * 있다.** 순차 스윕(sweep)의 두 번째 파동은 첫 파동에서 이미 차지를 냈으면
@@ -1110,7 +1215,7 @@ export function hazardsActive(state: RunState): boolean {
  * 있으나 마나가 된다.
  */
 export function dodgeUsable(state: RunState): boolean {
-  return state.dodgeCharges > 0 || (sweepZones.length > 0 && sweepBurstCharged);
+  return defenseResourceAvailable(state) || (sweepZones.length > 0 && sweepBurstCharged);
 }
 
 /**
@@ -1163,12 +1268,12 @@ export function dualChoiceActive(state: RunState): boolean {
  * 고른 대로 정확히 다른 동작이 나간다. 여기서 또 무엇을 할지 고치면
  * 화면이 이미 고른 것을 뒤집는 꼴이라 손대지 않는다.
  *
- * **우선순위: 예고가 활성이면 회피/집결이 약점 공격을 이긴다.**
+ * **우선순위: 예고가 활성이면 회피/집결이 결정타를 이긴다.**
  * `tickBoss`가 취약 창 **후반부**에는 문턱 예고를 허용하므로([2]), 창이
  * 열린 중에도 예고가 뜰 수 있다 — 그 순간은 몸을 지키는 쪽이 급하다.
  * 예고가 없을 때만 취약 창을 본다. 겹칠 때 이 우선순위 때문에 그 스텝은
- * 회피/집결로 소비되고 약점 공격은 못 나간다 — 취약 창 연타가 "열리면
- * 무조건 누른다"였던 것이 이제 진짜 선택이 된다(부검은 `vulnOverlapSeen`·
+ * 회피/집결로 소비되고 결정타는 못 나간다 — 취약 창이 열려도 남은 차지를
+ * 공격과 방어 중 어디에 쓸지 고르게 된다(부검은 `vulnOverlapSeen`·
  * `vulnOverlapDodged`).
  */
 function resolveIntent(state: RunState, intent: Intervention | undefined): Intervention | undefined {
@@ -1178,10 +1283,20 @@ function resolveIntent(state: RunState, intent: Intervention | undefined): Inter
   // 안 빠져나온 같은 입력이 잠긴 동안 매 스텝 또 세어진다(실측: 입력 1회에
   // +9). 실제로 소비된(큐에서 빠져나온) 시점에만 `stepBattle`이 직접 센다.
   if (intent?.kind !== "act") return intent;
-  const tg = state.enemy.find((c) => c?.telegraph)?.telegraph;
-  if (tg) return tg.mode === "gather" ? { kind: "gather" } : { kind: "dodge" };
-  if (state.enemy.some((c) => c?.alive && c.vulnerableMs > 0)) return { kind: "strike" };
-  return { kind: "dodge" }; // 예고도 취약 창도 없으면 doDodge가 알아서 아무 일도 안 한다
+  return { kind: actIntentKind(state) };
+}
+
+/**
+ * 입력 시점의 act 의미를 고정해 큐에 넣는다.
+ *
+ * 회피 쿨다운 동안 원본 `act`를 그대로 보관하면, 눌렀을 때는 방어였던 입력이
+ * 소비될 때 취약 창 결정타로 재해석될 수 있다. 극성의 `dual`을 입력 순간에
+ * 스냅샷하는 것과 같은 이유로 행동 종류도 여기서 한 번만 정한다. 브라우저와
+ * 측정 봇이 모두 이 함수를 써야 정책 사본이 생기지 않는다.
+ */
+export function queueIntervention(state: RunState, intent: Intervention): void {
+  const resolved = resolveIntent(state, intent);
+  if (resolved) state.pending.push(resolved);
 }
 
 /** 위험 구간 안의 아군을 빼낸다. 실제로 누군가 빠져나왔을 때만 참을 돌려준다. */
@@ -2613,6 +2728,9 @@ function finalPhaseEligible(boss: Cat, state: RunState): boolean {
  */
 function startFinalPhase(boss: Cat, foes: Cat[], state: RunState): void {
   state.finalPhaseUsed = true;
+  // 정상 취약 창 도중 10% 문턱을 넘겼다면 남은 창 기회도 함께 닫는다.
+  boss.vulnerableMs = 0;
+  boss.vulnerableCharges = 0;
   /**
    * 공격 정지 — 새 "멈춤" 상태를 만드는 대신 기존 스턴 필드를 그대로 쓴다.
    * tickEffects가 매 스텝 이 값을 깎아 주므로 여기서 따로 셀 필요가 없다.
@@ -2713,18 +2831,18 @@ function tickFinalPhase(boss: Cat, foes: Cat[], dt: number): void {
     boss.hp = Math.max(boss.hp, Math.round(boss.maxHp * FINAL_MIN_HP_FRAC));
 
     // 마지막 취약 창 — 새 타이머가 아니라 기존 vulnerableMs를 그대로 연다.
-    // 창이 열리고 닫히는 로직·버튼 문구("할퀴기!")·연타 판정이 전부 공짜로
-    // 재사용된다(resolveIntent·buttonText는 vulnerableMs>0만 본다).
+    // 창 타이머·결정타 사용 횟수·버튼 판정은 평소 취약 창과 같은 공용
+    // 경로를 재사용한다(resolveIntent·strikeUsable·buttonText).
     boss.vulnerableUsed = true;
     boss.vulnerableMs = FINAL_VULNERABLE_MS;
-    boss.strikeCombo = 0;
+    boss.vulnerableCharges = BALANCE.vulnerableChargesPerWindow;
     fp.stage = "open";
     pushFx({ kind: "ring", fx: boss.fx, fy: boss.fy, tx: 0, ty: 0, radius: boss.radius * 1.3, angle: 0, life: 520, color: "#F0BA4A" });
     return;
   }
 
   // stage === "open" — 창이 닫혔는지만 본다(카운트다운 자체는 위에서 말한
-  // 공용 로직 몫). 닫혔는데 아직 안 죽었으면 연타가 부족했던 것 —
+  // 공용 로직 몫). 닫혔는데 아직 안 죽었으면 전투를 다시 이어 간다 —
   // `finalPhase`를 지우면 다음 tickBoss 호출부터 평소 문턱 로직이 이어받아
   // 보스가 남은 체력으로 다시 싸운다(`thresholdIdx`는 이 국면 내내 그대로였다).
   if (boss.vulnerableMs <= 0) boss.finalPhase = null;
@@ -2733,7 +2851,7 @@ function tickFinalPhase(boss: Cat, foes: Cat[], dt: number): void {
 /**
  * 최종 국면 채널이 지금 진행 중인가 — render.ts의 버튼 잠금과 화면 어두워짐이
  * 같은 기준을 봐야 한다. `open`(마지막 취약 창) 단계는 잠그지 않는다 — 그
- * 때는 평소 취약 창과 똑같이 연타가 버튼의 일이다.
+ * 때는 평소 취약 창과 똑같이 결정타 선택이 버튼의 일이다.
  */
 export function finalPhaseChannelActive(state: RunState): boolean {
   return state.enemy.some((c) => c?.alive && c.finalPhase?.stage === "channel");
@@ -2755,7 +2873,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   // 타이머가 최대 1.1초 얼어붙는다 — 리뷰 실측에서 실제로 잡힌 동결이다.
   if (boss.vulnerableMs > 0) {
     boss.vulnerableMs = Math.max(0, boss.vulnerableMs - dt);
-    if (boss.vulnerableMs === 0) boss.strikeCombo = 0;
+    if (boss.vulnerableMs === 0) boss.vulnerableCharges = 0;
   }
 
   /**
@@ -2811,7 +2929,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
 
   /**
    * US-404 최종 국면 진입 시점. **취약 창 반절 가드보다 먼저 본다.**
-   * 처음엔 그 가드 뒤에 뒀는데, hp가 취약 창 전반부(연타 타임이라 문턱
+   * 처음엔 그 가드 뒤에 뒀는데, hp가 취약 창 전반부(결정타 유예라 문턱
    * 검사 자체가 막힌 구간) 안에서 10% 밑으로 떨어지면 그 창이 끝나거나
    * 후반부에 들 때까지 감지가 늦어졌다 — 실측(`w3-lab.mjs`)으로 발동
    * 시점 hp% p50이 4.4%까지 밀렸다(문턱은 10%인데). `boss.telegraph`
@@ -2824,7 +2942,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   }
 
   /**
-   * 취약 창의 **앞 절반은 순수 연타 타임**이다. 처음 조기 return을 걷어냈을
+   * 취약 창의 **앞 절반은 결정타 선택 유예 구간**이다. 처음 조기 return을 걷어냈을
    * 때는 창을 연 문턱이 소비되지 않은 채 이 검사로 흘러 **창이 열린 지
    * 100ms 만에 예고가 반드시 걸렸다** — 자유 창 시간이 100%에서 15%로
    * 무너졌고(리뷰 실측), 그건 "가끔 오는 진짜 선택"이 아니라 창의 처형이다.
@@ -2839,12 +2957,12 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   // 한 번 걸러 자리를 옮긴 뒤 그 자리에서 예고한다. 순서가 반대면 예고가
   // 뜬 곳과 터지는 곳이 달라져 화면이 거짓말을 한다.
   // 창을 여는 분기가 예고보다 먼저다. 창 전반부는 위의 유예가 예고를 막아
-  // 연타 타임을 보장하고, 후반부에 문턱을 밟으면 그때는 겹칠 수 있다 —
+  // 결정타를 고를 시간을 보장하고, 후반부에 문턱을 밟으면 그때는 겹칠 수 있다 —
   // 그 순간의 버튼은 회피가 먼저다(resolveIntent와 buttonText가 같은 규칙).
   if (!boss.vulnerableUsed && frac <= kit.vulnerableAt) {
     boss.vulnerableUsed = true;
     boss.vulnerableMs = kit.vulnerableMs;
-    boss.strikeCombo = 0;
+    boss.vulnerableCharges = BALANCE.vulnerableChargesPerWindow;
     pushFx({
       kind: "ring",
       fx: boss.fx,
@@ -2861,7 +2979,7 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
 
   /**
    * 창이 열려 있는 동안에는 자리를 옮기지 않는다. 옮기면 보스가 화면에서
-   * 사라진 채 취약 창만 남아 — 버튼은 "할퀴기!"인데 때릴 몸이 없다 —
+   * 사라진 채 취약 창만 남아 — 버튼은 "결정타"인데 때릴 몸이 없다 —
    * 리뷰 실측에서 보스전 75.6%가 이 상태를 겪었다.
    *
    * 이건 **연기가 아니라 그 문턱의 순간이동을 건너뛰는 것**이다. 아래
@@ -2945,8 +3063,8 @@ export function stepBattle(state: RunState, dtMs: number): void {
     if (state.actCooldown > 0) state.actCooldown = Math.max(0, state.actCooldown - step);
 
     /**
-     * 쿨다운은 **차지를 쓰는 것에만** 건다. 약점 공격은 연타가 곧 화력이라
-     * (창 3초에 최대 30타) 1초를 걸면 3타가 되어 창 자체가 없어진다.
+     * 쿨다운은 회피·집결에만 건다. 결정타도 차지를 쓰지만 창당 두 번으로
+     * 제한되고, 남은 차지를 피해로 바꾸는 선택 자체에 새 쿨다운은 없다.
      *
      * 잠긴 동안 들어온 의도는 **버리지 않고 큐에 남긴다.** 처음엔 그냥
      * 흘렸는데, 그러면 누른 것이 소리 없이 사라진다 — 계측에서 회피 성공률이
@@ -2996,15 +3114,18 @@ export function stepBattle(state: RunState, dtMs: number): void {
       if (sweepFree) {
         // 공짜 — 이미 이 스윕 문턱에서 차지를 썼다.
       } else {
-        state.dodgeCharges -= 1;
-        state.actCooldown = ACT_COOLDOWN_MS;
-        if (sweepZones.length > 0) sweepBurstCharged = true;
+        // dodgeUsable이 자원을 확인한 뒤 doDodge가 성공했으므로 반드시 하나를
+        // 소비한다. 취약 창이면 local, 아니면 global이다.
+        if (spendDefenseCharge(state)) {
+          state.actCooldown = ACT_COOLDOWN_MS;
+          if (sweepZones.length > 0) sweepBurstCharged = true;
+        }
       }
-    } else if (intent?.kind === "gather" && state.dodgeCharges > 0 && doGather(state)) {
-      state.dodgeCharges -= 1;
-      state.actCooldown = ACT_COOLDOWN_MS;
+    } else if (intent?.kind === "gather" && defenseResourceAvailable(state) && doGather(state)) {
+      if (spendDefenseCharge(state)) state.actCooldown = ACT_COOLDOWN_MS;
     } else if (intent?.kind === "strike") {
-      // 약점 공격은 차지를 쓰지 않는다. 창이 열려 있는 3초 자체가 제한이다.
+      // 성공한 결정타의 창 기회 소비는 doStrike가 타격과 함께 원자적으로
+      // 처리한다. 결정타는 actCooldown을 새로 걸지 않는다.
       doStrike(state);
     }
 

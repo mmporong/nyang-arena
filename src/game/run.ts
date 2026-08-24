@@ -119,9 +119,8 @@ export interface RunState {
    * 연타로 자원이 새지는 않지만(달리는 중인 고양이는 다시 세지 않는다) 버튼이
    * 무한히 눌리면 무엇을 눌렀는지가 손에 안 남는다. 한 번 누르면 잠깐 잠긴다.
    *
-   * **약점 공격에는 안 걸린다.** 취약 창은 연타가 곧 화력이라(창 3초에 최대
-   * 30타) 1초를 걸면 3타가 되어 창 자체가 무의미해진다. 잠기는 것은 차지를
-   * 쓰는 회피·뭉침뿐이다.
+   * **결정타에는 안 걸린다.** 결정타는 취약 창 전용 기회로 창당 최대 두 번만
+   * 가능해 이미 제한된다. 잠기는 것은 이동을 연속 재실행할 수 있는 회피·뭉침뿐이다.
    */
   actCooldown: number;
   /** 이번 런에서 모은 유물. 조건을 채운 것만 보너스가 붙고 대가는 항상 붙는다. */
@@ -764,7 +763,7 @@ export function makeCat(breed: Breed, side: Side, cell: number, level = 1): Cat 
     telegraph: null,
     thresholdIdx: 0,
     vulnerableMs: 0,
-    strikeCombo: 0,
+    vulnerableCharges: 0,
     vulnerableUsed: false,
     moveLock: 0,
     dash: null,
@@ -1860,7 +1859,7 @@ export function startBattle(state: RunState): void {
       // 겹쳐 한 스텝에 열 배로 움직인다.
       c.dash = null;
       c.vulnerableMs = 0;
-      c.strikeCombo = 0;
+      c.vulnerableCharges = 0;
       c.vulnerableUsed = false;
     }
   }
@@ -1888,6 +1887,13 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   // 소환수는 전투 안에서만 산다. `startBattle`에서만 비우면 보상·지도
   // 화면 내내 지난 판의 분신이 남는다(불변식 검사에서 678회 걸렸다).
   state.summons.length = 0;
+  // 전투 밖에는 취약 창 자원이 존재하지 않는다. 타임아웃·패배는 보스의
+  // 자연 종료 경로를 안 지나므로 여기서도 원자적으로 지운다.
+  for (const c of state.enemy) {
+    if (!c) continue;
+    c.vulnerableMs = 0;
+    c.vulnerableCharges = 0;
+  }
   if (!won) {
     state.lossReason = reason;
     state.phase = "gameover";

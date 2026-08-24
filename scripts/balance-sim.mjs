@@ -9,10 +9,9 @@
  *
  * 실행: npm run sim
  */
-import { walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
-import { dodgeUsable, hazardsActive, stepBattle } from "../src/game/battle.ts";
-import { buyOffer, newRun, relicActive, rerollOffers, startBattle, currentKind } from "../src/game/run.ts";
-import { livingCats } from "../src/game/types.ts";
+import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
+import { stepBattle } from "../src/game/battle.ts";
+import { newRun, startBattle, currentKind } from "../src/game/run.ts";
 
 const RUNS = Number(process.argv[2] ?? 300);
 /**
@@ -73,9 +72,7 @@ function playOne(seed) {
   let shapeAtStart = null;
   let waveAtStart = 0;
   let elapsedBeforeTick = 0;
-  let lastTelegraph = null;
-  let sinceTelegraph = 0;
-  let telegraphSeen = 0;
+  const respond = makeBossBot();
 
   for (let guard = 0; guard < MAX_WAVE * 400; guard++) {
     if (s.phase === "gameover") {
@@ -115,45 +112,9 @@ function playOne(seed) {
       continue;
     }
 
-    // 보스 기믹에 반응한다. 예고 색을 읽고 흩어지거나 모이고, 취약 창에는
-    // 연타한다. 이걸 안 하면 이 하네스가 '게임을 안 하는 사람'을 재게 되고,
-    // 그 수치로 밸런스를 잡으면 실제 플레이와 무관한 값이 나온다.
-    //
-    // 다만 사람처럼 조금 늦고 가끔 놓친다 — 완벽하게 반응하는 봇은 상한이지
-    // 기준선이 아니다.
-    /**
-     * 버튼 규칙과 같은 우선순위 — **예고가 먼저, 취약 창은 그다음.**
-     * 전에는 창이 열리면 무조건 strike를 밀었는데, resolveIntent가 "예고 >
-     * 취약"으로 바뀐 뒤에도 이 사본만 옛 순서로 남아 **플레이어가 낼 수 없는
-     * 정책**을 재고 있었다(리뷰 적발 — 봇을 어떻게 바꿔도 sim이 한 자리도 안
-     * 움직인다는 교차 실험으로 이 사본의 존재가 드러났다). 예고 반응은
-     * 사람 흉내(네 번에 한 번 놓침·두 틱 지연)를 유지하고, 예고가 없을 때만
-     * 연타한다 — act로 밀면 해석은 게임과 동일하다.
-     */
-    const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
-    if (tg && s.dodgeCharges > 0) {
-      sinceTelegraph = tg === lastTelegraph ? sinceTelegraph + 1 : 0;
-      if (tg !== lastTelegraph) telegraphSeen += 1;
-      lastTelegraph = tg;
-      // 네 번에 한 번은 놓치고, 두 틱 늦게 반응한다.
-      if (telegraphSeen % 4 !== 3 && sinceTelegraph >= 2) {
-        s.pending.push({ kind: "act" });
-      }
-    } else {
-      if (!tg) lastTelegraph = null;
-      const open = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
-      if (open) s.pending.push({ kind: "act" });
-      // `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 —
-      // 상주 장판(creep)·순차 스윕(sweep) 대기열은 s.enemy의 telegraph가
-      // 아니라 battle.ts의 별도 배열이다. act로 밀면 resolveIntent 기본값이
-      // 회피를 고르므로, 여기서 존재만 확인해 밀어 주면 된다 — 판단은 여전히
-      // 게임이 한다. `dodgeUsable`을 쓰는 이유는 스윕 두 번째 파동이 차지
-      // 0에서도 공짜로 통하기 때문이다 — `dodgeCharges > 0`만 보면 그 무료
-      // 순간을 아예 시도조차 안 한다.
-      else if (hazardsActive(s) && dodgeUsable(s)) {
-        s.pending.push({ kind: "act" });
-      }
-    }
+    // 보스 대응은 모든 측정축이 공유하는 bot-policy 한 곳만 쓴다. 방어 우선순위,
+    // 반응 지연, 취약 창 기회 보존을 이 파일에 복제하면 6축이 서로 다른 게임을 잰다.
+    respond(s);
 
     // 전투가 끝나는 틱에는 battleElapsed가 리셋될 수 있으므로 직전 값을 들고 있는다.
     elapsedBeforeTick = s.battleElapsed;
@@ -176,7 +137,10 @@ results.sort((a, b) => a - b);
 const q = (p) => results[Math.min(results.length - 1, Math.floor(results.length * p))];
 const mean = results.reduce((a, b) => a + b, 0) / results.length;
 
-console.log(`런 ${RUNS}회 (정책: 살 수 있으면 가장 비싼 것 구매, 재배치 없음 · 시드 1~${RUNS})`);
+console.log(
+  `런 ${RUNS}회 (정책: 살 수 있으면 가장 비싼 것 구매, 재배치 없음 · ` +
+    `시드 ${SEED0 + 1}~${SEED0 + RUNS})`,
+);
 console.log(`  최소 ${results[0]}  p25 ${q(0.25)}  중앙값 ${q(0.5)}  p75 ${q(0.75)}  최대 ${results[results.length - 1]}`);
 console.log(`  평균 ${mean.toFixed(1)}웨이브`);
 
@@ -214,14 +178,14 @@ for (const kind of ["mixed", "rush", "snipe", "boss"]) {
 }
 console.log(`60웨이브 상한 도달: ${results.filter((r) => r > MAX_WAVE).length}건`);
 
-// 목표: 중앙값 8~15웨이브. 너무 짧으면 좌절, 너무 길면 한 판이 지루하다.
+// 저장소 절대 규칙: 중앙값 10~15웨이브. 너무 짧으면 좌절, 너무 길면 한 판이 지루하다.
 const med = q(0.5);
-if (med < 6) console.log("\n판정: 너무 어렵다 (중앙값 6 미만)");
-else if (med > 20) console.log("\n판정: 너무 쉽다 (중앙값 20 초과)");
-else console.log("\n판정: 목표 구간(6~20) 안");
+if (med < 10) console.log("\n판정: 너무 어렵다 (중앙값 10 미만)");
+else if (med > 15) console.log("\n판정: 너무 쉽다 (중앙값 15 초과)");
+else console.log("\n판정: 목표 구간(10~15) 안");
 // 구간 밖이면 실패로 끝낸다. 다른 축과 같은 이유다 — 관측만 하고 0을 돌려주면 measure-all이
 // "관문 통과"를 찍는다. 2026-08-23 코드 분석이 이 축의 exit 코드가 없다는 것을 잡았다.
-if (med < 6 || med > 20) process.exitCode = 1;
+if (med < 10 || med > 15) process.exitCode = 1;
 
 
 /* ------------------------------------------------------------------ */

@@ -312,6 +312,8 @@ const metrics = {
     goldPerWave: BALANCE.goldPerWave,
     telegraphDmg: BALANCE.telegraphDmg,
     dodgeCharges: BALANCE.dodgeCharges,
+    strikeFrac: BALANCE.strikeFrac,
+    vulnerableChargesPerWindow: BALANCE.vulnerableChargesPerWindow,
   },
   build: { bundleBytes: bundleBytes() },
   verification: {
@@ -325,14 +327,6 @@ const metrics = {
   },
   /** 합격 관문과 별개로 과장하지 않고 남겨 둘 제품 한계. */
   openIssues: [
-    {
-      id: "strike-not-a-choice",
-      what: "취약 창 연타가 선택이 아니다",
-      measured: "회피만 83.3% → 읽고 판단 85.7% (합산 기준 +2.4%p)",
-      diagnosis:
-        "연타에 비용이 없고 창이 3초로 제한돼 있어 '열리면 무조건 누른다'가 유일한 답이다. 화면에서 가장 화려한 연출인데 결정으로서는 가장 작다",
-      consequence: "강화하거나(비용·상충 부여), 결정이 아닌 보상 연출로 인정하고 그렇게 설명해야 한다",
-    },
     {
       id: "matchup-metric-noisy",
       what: "궁합 표(팀 성격 x 웨이브 성격)가 결정에 쓸 만큼 안정적이지 않다",

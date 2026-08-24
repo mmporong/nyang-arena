@@ -223,13 +223,98 @@ assert.deepEqual(executeRunAction(state, { kind: "intent", intent: "gather", dua
 });
 assert.equal(executeRunAction(state, { kind: "offer", index: 2 }).offer, 2);
 
-// Space/G는 취약 창 연타를 위해 repeat를 허용하고, 나머지 반복키는 입력 전에 버린다.
+// 일반 전투의 Space/G repeat는 늦은 예고를 놓치지 않게 유지한다. 취약 창의
+// 결정타만은 한 번 길게 누른 입력이 두 차지를 모두 쓰지 않도록 별도로 막는다.
 const battleState = newRun(222222);
 battleState.phase = "battle";
+battleState.dodgeCharges = 2;
+const battleStarter = battleState.ally.find((cat) => cat !== null);
+assert.ok(battleStarter, "반복 회피 입력 픽스처의 고양이가 없다");
+battleState.enemy.fill(null);
+battleState.enemy[0] = {
+  ...battleStarter,
+  side: "enemy",
+  alive: true,
+  radius: 1,
+  vulnerableMs: 0,
+  vulnerableCharges: 0,
+  finalPhase: null,
+  blink: null,
+  telegraph: {
+    shape: "circle",
+    mode: "avoid",
+    fx: battleStarter.fx,
+    fy: battleStarter.fy,
+    dirX: 0,
+    dirY: 0,
+    arg: 1,
+    reach: 0,
+    fuse: 1000,
+    fuseMax: 1000,
+  },
+  telegraph2: null,
+};
 const repeatedSpace = dispatchGameInput(ctx(battleState, desktop), { kind: "key-down", code: "Space", repeat: true });
 const repeatedGather = dispatchGameInput(ctx(battleState, desktop), { kind: "key-down", code: "KeyG", repeat: true });
 assert.equal(repeatedSpace.action.kind, "intent", "반복 Space가 전투 의도에 연결되지 않았다");
 assert.equal(repeatedGather.action.kind, "intent", "반복 G가 전투 의도에 연결되지 않았다");
+
+const vulnerableState = newRun(232323);
+vulnerableState.phase = "battle";
+vulnerableState.dodgeCharges = 2;
+const starter = vulnerableState.ally.find((cat) => cat !== null);
+assert.ok(starter, "취약 창 입력 픽스처의 고양이가 없다");
+const vulnerableBoss = {
+  ...starter,
+  side: "enemy",
+  alive: true,
+  radius: 1,
+  vulnerableMs: 1000,
+  vulnerableCharges: 2,
+  finalPhase: null,
+  blink: null,
+  telegraph: null,
+  telegraph2: null,
+};
+vulnerableState.enemy.fill(null);
+vulnerableState.enemy[0] = vulnerableBoss;
+const firstStrikeKey = dispatchGameInput(ctx(vulnerableState, desktop), {
+  kind: "key-down",
+  code: "Space",
+  repeat: false,
+});
+const heldStrikeKey = dispatchGameInput(ctx(vulnerableState, desktop), {
+  kind: "key-down",
+  code: "Space",
+  repeat: true,
+});
+const heldStrikeGatherKey = dispatchGameInput(ctx(vulnerableState, desktop), {
+  kind: "key-down",
+  code: "KeyG",
+  repeat: true,
+});
+assert.equal(firstStrikeKey.action.kind, "intent", "최초 Space가 결정타 의도로 연결되지 않았다");
+assert.deepEqual(heldStrikeKey.action, { kind: "none" }, "취약 창 반복 Space가 두 번째 결정타로 통과했다");
+assert.deepEqual(heldStrikeGatherKey.action, { kind: "none" }, "취약 창 반복 G가 두 번째 결정타로 통과했다");
+
+vulnerableBoss.telegraph = {
+  shape: "circle",
+  mode: "avoid",
+  fx: vulnerableBoss.fx,
+  fy: vulnerableBoss.fy,
+  dirX: 0,
+  dirY: 0,
+  arg: 1,
+  reach: 0,
+  fuse: 1000,
+  fuseMax: 1000,
+};
+const heldDodgeKey = dispatchGameInput(ctx(vulnerableState, desktop), {
+  kind: "key-down",
+  code: "Space",
+  repeat: true,
+});
+assert.equal(heldDodgeKey.action.kind, "intent", "예고 중 반복 Space가 회피 의도로 연결되지 않았다");
 const repeatedReroll = dispatchGameInput(ctx(state, desktop), { kind: "key-down", code: "KeyR", repeat: true });
 assert.deepEqual(repeatedReroll.action, { kind: "none" }, "반복 R이 재추첨으로 통과했다");
 assert.equal(repeatedReroll.unlockAudio, false, "무시한 반복키가 오디오 잠금을 풀었다");

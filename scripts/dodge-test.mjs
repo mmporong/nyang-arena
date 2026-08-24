@@ -400,27 +400,6 @@ console.log("회피 동작 검사\n");
       `${n}번 눌러 ${before} → ${s.dodgeCharges}`);
   }
 
-  // 약점 공격은 쿨다운과 무관해야 한다 — 연타가 곧 화력이다
-  const r4 = bossFightWithTelegraph(clustered);
-  if (r4) {
-    const { s } = r4;
-    let guard = 0;
-    while (!s.enemy.some((c) => c?.alive && c.vulnerableMs > 0) && s.phase === "battle" && guard++ < 12000) {
-      const tg = s.enemy.find((c) => c?.telegraph)?.telegraph;
-      if (tg) s.pending.push({ kind: "act" });
-      stepBattle(s, 16);
-    }
-    const boss = s.enemy.find((c) => c?.alive && c.radius > 0);
-    if (boss && boss.vulnerableMs > 0) {
-      const before = s.dodgeCharges;
-      let taps = 0;
-      while (boss.vulnerableMs > 0 && s.phase === "battle" && taps < 300) {
-        s.pending.push({ kind: "act" }); stepBattle(s, 16); taps += 1;
-      }
-      check("취약 창에서는 쿨다운 없이 콤보가 쌓인다", boss.strikeCombo >= 5,
-        `콤보 ${boss.strikeCombo} · 차지 ${before} → ${s.dodgeCharges}`);
-    }
-  }
 }
 
 
@@ -495,6 +474,10 @@ console.log("회피 동작 검사\n");
   const PAD = BALANCE.telegraphBodyPad;
   let all = 0;
   let ok = 0;
+  let paidBudgetAll = 0;
+  let paidBudgetOk = 0;
+  let freeBudgetAll = 0;
+  let freeBudgetOk = 0;
   for (let seed = 1; seed <= 40; seed++) {
     /**
      * `sweepZones`(와 `creepZones`)는 battle.ts의 모듈 전역이라 `newRun`이
@@ -559,19 +542,40 @@ console.log("회피 동작 검사\n");
     }
     if (!wave) continue;
 
+    const sweepBossCat = s.enemy.find((c) => c?.alive && c.radius > 0);
+    if (!sweepBossCat) continue;
+    sweepBossCat.vulnerableMs = 5000;
+    sweepBossCat.vulnerableCharges = 2;
     s.dodgeCharges = 9; // 실효성 검사이므로 자원 부족과 섞지 않는다
     s.pending.push({ kind: "act" });
+    stepBattle(s, 16);
+    paidBudgetAll += 1;
+    if (sweepBossCat.vulnerableCharges === 1 && s.dodgeCharges === 9) paidBudgetOk += 1;
     // 이 파동(`wave`)이 터질 때까지만 돈다 — 터지면 `sweepZones`의 첫 원소가
     // 다음 파동으로 바뀌거나(참조가 달라짐) 큐가 빈다(길이 0), 둘 다
     // 아래 조건을 깬다.
     while (sweepZones.length > 0 && first() === wave[0] && s.phase === "battle") {
       stepBattle(s, 16);
     }
-    // 파동에 속한 행 전부에 대해 무피해를 확인한다 — 하나만 보면 같은
-    // 파동의 나머지 행에 걸린 것을 놓친다.
+    // 첫 파동에 속한 행 전부에 대해 무피해를 확인한다. 두 번째 파동 회피는
+    // 다시 반대 행으로 이동하므로, 그 입력 전에 첫 파동 결과를 채점해야 한다.
     const wrong = s.ally.filter((c) => c?.alive && wave.some((z) => inTelegraph(z, c.fx, c.fy, PAD)));
     all += 1;
     if (wrong.length === 0) ok += 1;
+    // 두 번째 파동은 첫 파동에서 이미 비용을 냈으므로 local/global 어느 쪽도
+    // 다시 소비하지 않는다. 첫 회피가 옮긴 안전 행이 두 번째 파동의 위험
+    // 행이 되므로 실제로 다시 움직여야 하는 표본만 센다.
+    if (sweepZones.length > 0) {
+      const needsSecond = s.ally.some((c) => c?.alive && sweepZones.some((z) => inTelegraph(z, c.fx, c.fy)));
+      if (needsSecond) {
+        const beforeLocal = sweepBossCat.vulnerableCharges;
+        const beforeGlobal = s.dodgeCharges;
+        s.pending.push({ kind: "act" });
+        stepBattle(s, 16);
+        freeBudgetAll += 1;
+        if (sweepBossCat.vulnerableCharges === beforeLocal && s.dodgeCharges === beforeGlobal) freeBudgetOk += 1;
+      }
+    }
   }
   if (all === 0) {
     console.log("  표본 없음: 순차 스윕 — 40시드 안에 sweep 예고가 안 나왔다");
@@ -579,6 +583,10 @@ console.log("회피 동작 검사\n");
     const rate = (ok / all) * 100;
     check("순차 스윕: 발동 시점 성공률 90% 이상", rate >= 90, `${ok}/${all}판 (${rate.toFixed(0)}%)`);
   }
+  check("순차 스윕 첫 파동은 local만 한 번 소비한다",
+    paidBudgetAll > 0 && paidBudgetOk === paidBudgetAll, `${paidBudgetOk}/${paidBudgetAll}`);
+  check("순차 스윕 두 번째 무료 파동은 local/global을 모두 보존한다",
+    freeBudgetAll > 0 && freeBudgetOk === freeBudgetAll, `${freeBudgetOk}/${freeBudgetAll}`);
 }
 
 // ── 11. hazardsActive — creep/sweep만 떠 있어도 참 (하네스 실명 재발 방지) ──
@@ -675,6 +683,100 @@ console.log("회피 동작 검사\n");
     cr.checked > 0 && cr.ok === cr.checked,
     `${cr.ok}/${cr.checked}`,
   );
+}
+
+// ── 12. 취약 창 local budget 우선 소비 ───────────────────────
+/** 실제 예고와 실제 이동 경로를 써서 성공한 방어만 자원을 쓰는지 잠근다. */
+function localBudgetFixture(mode, seed) {
+  clearBattleFx();
+  const bossId = mode === "gather" ? 10 : 9;
+  const r = bossFightWithTelegraph(clustered, seed, bossId, (tg) => tg.mode === mode);
+  if (!r) throw new Error(`${mode} 예고 픽스처를 만들지 못했다`);
+  const { s, boss } = r;
+  boss.vulnerableMs = 5000;
+  boss.vulnerableCharges = 2;
+  s.dodgeCharges = 2;
+  s.actCooldown = 0;
+  s.pending.length = 0;
+  const target = s.ally.find((cat) => cat?.alive);
+  if (!target || !boss.telegraph) throw new Error(`${mode} 대상 픽스처가 없다`);
+  target.dash = null;
+  if (mode === "avoid") {
+    target.fx = boss.telegraph.fx;
+    target.fy = boss.telegraph.fy;
+  } else {
+    const sign = boss.telegraph.fx < 2.5 ? 1 : -1;
+    target.fx = boss.telegraph.fx + sign * (boss.telegraph.arg + 0.8);
+    target.fy = boss.telegraph.fy;
+  }
+  return { s, boss };
+}
+
+{
+  const { s, boss } = localBudgetFixture("avoid", 101);
+  s.pending.push({ kind: "dodge" });
+  stepBattle(s, 16);
+  check("취약 창의 성공한 산개는 local 기회를 먼저 소비한다", boss.vulnerableCharges === 1,
+    `local ${boss.vulnerableCharges}`);
+  check("취약 창의 local 산개는 global 차지를 보존한다", s.dodgeCharges === 2,
+    `global ${s.dodgeCharges}`);
+}
+
+{
+  const { s, boss } = localBudgetFixture("gather", 102);
+  s.pending.push({ kind: "gather" });
+  stepBattle(s, 16);
+  check("취약 창의 성공한 집결은 local 기회를 먼저 소비한다", boss.vulnerableCharges === 1,
+    `local ${boss.vulnerableCharges}`);
+  check("취약 창의 local 집결은 global 차지를 보존한다", s.dodgeCharges === 2,
+    `global ${s.dodgeCharges}`);
+}
+
+{
+  const { s, boss } = localBudgetFixture("avoid", 103);
+  boss.vulnerableCharges = 0;
+  s.pending.push({ kind: "dodge" });
+  stepBattle(s, 16);
+  check("취약 창의 local이 0이면 성공한 방어는 global로 fallback한다", s.dodgeCharges === 1,
+    `global ${s.dodgeCharges}`);
+}
+
+{
+  const { s, boss } = localBudgetFixture("avoid", 104);
+  boss.telegraph.fx = -100;
+  boss.telegraph.fy = -100;
+  const before = { local: boss.vulnerableCharges, global: s.dodgeCharges };
+  s.pending.push({ kind: "dodge" });
+  stepBattle(s, 16);
+  check("실패한 방어는 local 기회를 소비하지 않는다", boss.vulnerableCharges === before.local,
+    `local ${before.local} → ${boss.vulnerableCharges}`);
+  check("실패한 방어는 global 차지를 소비하지 않는다", s.dodgeCharges === before.global,
+    `global ${before.global} → ${s.dodgeCharges}`);
+}
+
+{
+  const { s, boss } = localBudgetFixture("avoid", 105);
+  const gather = {
+    ...boss.telegraph,
+    mode: "gather",
+    shape: "circle",
+    fx: boss.telegraph.fx < 2.5 ? boss.telegraph.fx + 1.5 : boss.telegraph.fx - 1.5,
+    arg: 0.55,
+  };
+  boss.telegraph2 = gather;
+  const target = s.ally.find((cat) => cat?.alive);
+  if (!target) throw new Error("극성 집결 대상이 없다");
+  target.dash = null;
+  target.fx = gather.fx < 2.5 ? gather.fx + 1.2 : gather.fx - 1.2;
+  target.fy = gather.fy;
+  s.pending.push({ kind: "gather", dual: true });
+  stepBattle(s, 16);
+  check("취약 창의 극성 집결은 local 기회를 소비한다", boss.vulnerableCharges === 1,
+    `local ${boss.vulnerableCharges}`);
+  check("취약 창의 극성 선택도 global 차지를 보존한다", s.dodgeCharges === 2,
+    `global ${s.dodgeCharges}`);
+  check("극성 선택 카운터는 local 자원 사용과 무관하게 한 번 센다", s.polarityChoices === 1,
+    `선택 ${s.polarityChoices}`);
 }
 
 console.log(failed === 0 ? "\n전부 통과 — 회피는 위험 구간만 비우고, 비운 채로 유지된다" : `\n${failed}건 실패`);

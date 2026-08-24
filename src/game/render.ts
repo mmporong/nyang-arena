@@ -1,4 +1,6 @@
 import {
+  actIntentKind,
+  actUsable,
   BLINK_IN_MS,
   BLINK_OUT_MS,
   creepZones,
@@ -13,8 +15,10 @@ import {
   shots,
   SHOT_LIFE_MS,
   skillName,
+  strikeUsable,
   sweepZones,
   type Fx,
+  vulnerableWindowBoss,
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
@@ -868,18 +872,18 @@ function drawBoard(
  * 판을 보다가 버튼을 봐야 알 수 있으니 실제로 놓친다 — 브라우저에서 돌려 보고
  * 알았다. 레이드에서 버스트 창은 언제나 보스 쪽에 뜬다.
  *
- * 고리 하나로 끝낸다. 남은 시간은 고리가 닳는 것으로 보이고, 콤보는 고리의
- * 두께와 맥동 속도로 돌아온다 — 숫자를 하나 더 띄우는 대신 **같은 물건이 두
- * 가지를 말하게** 했다. 콤보 숫자는 버튼에 이미 있다.
+ * 고리 하나로 끝낸다. 남은 시간은 고리가 닳는 것으로 보이고, 사용한 결정타
+ * 횟수는 고리의 두께와 맥동 속도로 돌아온다. 다음 행동은 버튼 문구가 말한다.
  *
  * 붉은 예고(나가라)·푸른 예고(들어와라)와 섞이면 안 되므로 색은 금빛이다.
  */
 const VULN_HUE = "255,226,74";
 
-/** 콤보가 쌓일수록 빨리 뛴다. 연타의 보람이 화면에 남는다. */
+/** 결정타를 쓸 때마다 맥동이 빨라져 창에서 쓴 횟수를 화면에 남긴다. */
 function vulnerablePulse(cat: Cat, t: number): number {
   if (reducedMotion()) return 0.5;
-  const speed = 380 - Math.min(cat.strikeCombo, 12) * 18;
+  const used = BALANCE.vulnerableChargesPerWindow - Math.min(cat.vulnerableCharges, BALANCE.vulnerableChargesPerWindow);
+  const speed = 380 - used * 36;
   return 0.5 + 0.5 * Math.sin(t / speed);
 }
 
@@ -950,7 +954,8 @@ function drawVulnerableRing(
   ctx.beginPath();
   ctx.arc(cx, cy, r, from, from + Math.PI * 2 * left);
   ctx.strokeStyle = `rgba(${VULN_HUE},${0.75 + pulse * 0.25})`;
-  ctx.lineWidth = w * (1 + Math.min(cat.strikeCombo, 12) * 0.04);
+  const used = BALANCE.vulnerableChargesPerWindow - Math.min(cat.vulnerableCharges, BALANCE.vulnerableChargesPerWindow);
+  ctx.lineWidth = w * (1 + used * 0.08);
   ctx.stroke();
   ctx.restore();
 }
@@ -4585,14 +4590,27 @@ export function buttonText(s: RunState): string {
       // — 예고도 취약 창도 이 동안은 안 걸리므로 원래대로면 "회피"가
       // 뜨겠지만, 실제로는 아무 것도 할 수 없는 연출 구간이다.
       if (finalPhaseChannelActive(s)) return "…";
-      const tg = s.enemy.find((c) => c?.alive && c.telegraph)?.telegraph;
-      if (tg) {
-        if (!dodgeUsable(s)) return "전투 중";
+      const intent = actIntentKind(s);
+      const visibleWindow = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+      const open = vulnerableWindowBoss(s);
+      // 순간이동으로 몸이 사라진 동안 local 기회는 남아 있어도 지금 쓸 수 없다.
+      // 이를 "기회 소진"이라고 부르면 자원 상태가 거짓이므로 잠깐 잠금으로 보인다.
+      if (visibleWindow && !open) return "…";
+      if ((intent === "dodge" || intent === "gather") && actUsable(s)) {
         if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
-        return `${tg.mode === "gather" ? "집결!" : "산개!"}  ${s.dodgeCharges}`;
+        const pool = open && open.vulnerableCharges > 0
+          ? `기회 ${open.vulnerableCharges}`
+          : `회피 ${s.dodgeCharges}`;
+        return `${intent === "gather" ? "집결!" : "산개!"}  ${pool}`;
       }
-      const open = s.enemy.find((c) => c?.alive && c.vulnerableMs > 0);
-      if (open) return open.strikeCombo > 0 ? `할퀴기!  x${open.strikeCombo}` : "할퀴기!";
+      if (open) {
+        if (!strikeUsable(s)) {
+          return `기회 소진 · 회피 ${s.dodgeCharges}`;
+        }
+        return open.vulnerableCharges === BALANCE.vulnerableChargesPerWindow
+          ? `결정타 · 기회 ${open.vulnerableCharges}`
+          : `한 번 더 · 기회 ${open.vulnerableCharges}`;
+      }
       // `dodgeUsable`(battle.ts) — 차지가 0이어도 순차 스윕(sweep)의 두 번째
       // 파동은 첫 파동에서 이미 낸 값으로 공짜로 넘어간다("개입 1회로 연쇄
       // 전체를 넘긴다"). 여기를 `s.dodgeCharges <= 0`으로만 재면 그 무료
@@ -4662,7 +4680,9 @@ function dualButtonText(s: RunState, verb: "산개" | "집결", key: string, key
   if (!dodgeUsable(s)) return "전투 중";
   if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
   const hint = w >= 140 ? key : keyAbbrev;
-  return `${verb}! ${hint}  ${s.dodgeCharges}`;
+  const open = vulnerableWindowBoss(s);
+  const pool = open ? `기회 ${open.vulnerableCharges}` : `회피 ${s.dodgeCharges}`;
+  return `${verb}! ${hint}  ${pool}`;
 }
 
 function drawButton(
@@ -4670,8 +4690,6 @@ function drawButton(
   L: Layout,
   s: RunState,
 ): void {
-  const openBoss = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
-
   if (s.phase === "map" && s.raidOffers.length > 0) {
     // 계약 카드는 누르는 물건인데 아래에 비활성 대형 버튼을 한 번 더 그리면
     // 사용자는 먼저 그 버튼을 살리려 한다. 같은 기하 예산에는 입력 안내만 남긴다.
@@ -4716,15 +4734,10 @@ function drawButton(
   const armed =
     !finalPhaseChannelActive(s) && // 최종 국면 채널 — 개입 버튼은 잠긴다("…")
     ((s.phase !== "battle" && s.phase !== "map") ||
-      openBoss ||
-      // `hazardsActive`·`dodgeUsable`(battle.ts) 하나씩으로 판정한다 — 상주
-      // 장판(creep)·순차 스윕(sweep) 대기열은 특정 보스의 telegraph가 아니라
-      // battle.ts의 별도 배열이라, 그 둘만 이 판정에서 빠지면 떠 있는데도
-      // 버튼이 죽어 보인다(2차 반려가 하네스 사본에서 잡은 것과 같은 실명).
-      // `dodgeUsable`을 쓰는 이유는 스윕 두 번째 파동이 차지 0에서도 공짜로
-      // 통하기 때문이다 — `dodgeCharges > 0`만 보면 그 무료 순간에 버튼이
-      // 죽어 보여 아무도 안 누른다.
-      (dodgeUsable(s) && s.actCooldown <= 0 && hazardsActive(s)));
+      (s.phase === "battle" &&
+        (dualChoiceActive(s)
+          ? dodgeUsable(s) && s.actCooldown <= 0 && hazardsActive(s)
+          : actUsable(s) && (actIntentKind(s) === "strike" || s.actCooldown <= 0))));
   const pulse = armed && s.phase === "battle";
 
   /**
