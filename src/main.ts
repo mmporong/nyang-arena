@@ -4,8 +4,21 @@ import {
   dispatchGameInput,
   executeGameInputAction,
   type GameInputEffects,
+  type GameInputDispatch,
   type GameInputEvent,
 } from "./game/input.ts";
+import {
+  activateBoardCell,
+  boardCellPositionLabel,
+  cancelBoardPickup,
+  deriveAccessibilityModel,
+  deriveBattleAlert,
+  derivePoliteAnnouncement,
+} from "./game/accessibility.ts";
+import {
+  createAccessibilityDomBridge,
+  isNativeInteractiveTarget,
+} from "./game/accessibility-dom.ts";
 import { computeLayout, type Layout } from "./game/layout.ts";
 import {
   captureMapChoiceFeedback,
@@ -35,13 +48,15 @@ import {
   type NextChoice,
   type RunState,
 } from "./game/run.ts";
-import { parseRaidSeed, parseRaidShareCode, raidRiskLabel, raidShareCode } from "./game/raid.ts";
+import { parseRaidSeed, parseRaidShareCode, raidShareCode } from "./game/raid.ts";
+import { nodeInfo } from "./game/map.ts";
 import { RAID_CONTRACT_POOL_STATUS } from "./validate/raid-contract-schema.ts";
 import { cellToField, type Intervention } from "./game/types.ts";
 import { loadSprites, spriteStatus } from "./game/sprites.ts";
 import { loadIcons } from "./game/icons.ts";
 import {
   createBossSignalObserver,
+  isMuted,
   playBossSignal,
   setAudioVisibility,
   setBed,
@@ -60,35 +75,6 @@ canvas.tabIndex = 0;
 canvas.setAttribute("role", "application");
 canvas.setAttribute("aria-label", "냥 아레나 게임 화면");
 app.appendChild(canvas);
-
-// 계약은 Canvas에 그리지만 의미 구조까지 픽셀에 가두지 않는다. Tab으로 들어오면
-// 같은 세 선택지가 실제 버튼으로 나타나고, 스크린리더도 규칙·대응·보상을 읽는다.
-const raidA11yControls = document.createElement("section");
-raidA11yControls.className = "raid-a11y-controls";
-raidA11yControls.hidden = true;
-raidA11yControls.setAttribute("aria-label", "악몽 계약 선택");
-const raidA11yLead = document.createElement("p");
-raidA11yLead.setAttribute("aria-live", "polite");
-raidA11yLead.setAttribute("aria-atomic", "true");
-raidA11yControls.appendChild(raidA11yLead);
-const raidA11yButtons = Array.from({ length: 3 }, (_, index) => {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.setAttribute("aria-keyshortcuts", String(index + 1));
-  button.addEventListener("focus", () => setRaidContractFocusIndex(index));
-  button.addEventListener("blur", () => {
-    queueMicrotask(() => {
-      if (!raidA11yControls.contains(document.activeElement)) setRaidContractFocusIndex(-1);
-    });
-  });
-  button.addEventListener("click", () => {
-    selectRaidContract(index);
-    canvas.focus();
-  });
-  raidA11yControls.appendChild(button);
-  return button;
-});
-app.appendChild(raidA11yControls);
 
 if (RAID_CONTRACT_POOL_STATUS.usingFallback) {
   console.warn("악몽 계약 출고 풀 거절 — 안전 계약 세 장으로 폴백", RAID_CONTRACT_POOL_STATUS);
@@ -132,6 +118,7 @@ interface RuntimeObservation {
   orientationCount: number;
   visibilityCount: number;
   resumeCount: number;
+  actionCounts: Record<string, number>;
   lastInput: Readonly<Record<string, unknown>> | null;
   lastResize: Readonly<{
     width: number;
@@ -155,6 +142,7 @@ const runtimeObservation: RuntimeObservation = {
   orientationCount: 0,
   visibilityCount: 0,
   resumeCount: 0,
+  actionCounts: {},
   lastInput: null,
   lastResize: null,
 };
@@ -250,30 +238,95 @@ function selectRaidContract(idx: number): boolean {
   return true;
 }
 
-let raidA11ySignature = "";
-function syncRaidAccessibility(): void {
-  const offers = state.phase === "map" ? state.raidOffers : [];
-  const signature = offers.map((contract) => contract.id).join("|");
-  if (signature === raidA11ySignature) return;
-  raidA11ySignature = signature;
+let boardFocusIndex = Math.max(0, state.ally.findIndex(Boolean));
+let boardPickedFrom: number | null = null;
+let battleAlertIdentity: string | null = null;
+let accessibilityAnnouncementSequence = 0;
 
-  if (offers.length === 0) {
-    setRaidContractFocusIndex(-1);
-    if (raidA11yControls.contains(document.activeElement)) canvas.focus();
-    raidA11yControls.hidden = true;
-    canvas.setAttribute("aria-label", "냥 아레나 게임 화면");
-    return;
-  }
+function accessibilityPhaseKey(): string {
+  return deriveAccessibilityModel(state, isMuted(), {
+    boardFocusIndex,
+    pickedFrom: boardPickedFrom,
+    stacked: layout.stacked,
+  }).phaseKey;
+}
 
-  raidA11yControls.hidden = false;
-  raidA11yLead.textContent = "다음 보스의 악몽 계약 하나를 고르세요. 숫자 1, 2, 3도 사용할 수 있습니다.";
-  canvas.setAttribute("aria-label", "악몽 계약 선택 화면. Tab 키로 계약 세 개를 비교할 수 있습니다.");
-  raidA11yButtons.forEach((button, index) => {
-    const contract = offers[index];
-    button.hidden = !contract;
-    if (!contract) return;
-    button.textContent = `${index + 1}. ${contract.name} · 위험 ${raidRiskLabel(contract.risk)} · 규칙 ${contract.rule} · 대응 ${contract.counter} · 승리 보상 생선 +${contract.rewardFish}`;
+const accessibilityBridge = createAccessibilityDomBridge(app, {
+  activate(control) {
+    routeInput({ kind: "direct-action", action: control.action });
+    syncAccessibility();
+  },
+  focus(control) {
+    setRaidContractFocusIndex(control?.action.kind === "raid-contract" ? control.action.index : -1);
+  },
+  boardFocus(index) {
+    if (boardFocusIndex === index) return;
+    boardFocusIndex = index;
+    syncAccessibility();
+  },
+  boardActivate(index) {
+    const before = boardPickedFrom;
+    const activation = activateBoardCell(state, index, boardPickedFrom);
+    if (activation.action) {
+      const outcome = routeInput({ kind: "direct-action", action: activation.action });
+      boardPickedFrom = outcome.action.kind === "move-cat" ? activation.pickedFrom : before;
+    } else {
+      boardPickedFrom = activation.pickedFrom;
+      if (before === null && boardPickedFrom !== null) {
+        const cat = state.ally[boardPickedFrom];
+        if (cat) announceAccessibilityResult(`${cat.breed.name} 집음. 옮길 칸을 고르세요.`);
+      } else if (before !== null && boardPickedFrom === null) {
+        announceAccessibilityResult("배치 선택을 취소했습니다.");
+      }
+    }
+    syncAccessibility();
+  },
+  boardCancel() {
+    if (boardPickedFrom === null) return;
+    boardPickedFrom = cancelBoardPickup();
+    announceAccessibilityResult("배치 선택을 취소했습니다.");
+    syncAccessibility();
+  },
+});
+
+function announceAccessibilityResult(text: string, previousPhaseKey: string | null = null): void {
+  const current = derivePoliteAnnouncement(state);
+  const nextModel = deriveAccessibilityModel(state, isMuted(), {
+    boardFocusIndex,
+    pickedFrom: boardPickedFrom,
+    stacked: layout.stacked,
   });
+  const message = previousPhaseKey !== null && previousPhaseKey !== nextModel.phaseKey
+    ? `${text} 다음: ${nextModel.title}. ${nextModel.description}`
+    : text;
+  accessibilityAnnouncementSequence += 1;
+  accessibilityBridge.announcePolite({
+    signature: `action:${accessibilityAnnouncementSequence}:${current.signature}`,
+    text: message,
+  });
+  // 다음 rAF의 일반 상태 공지가 방금의 구체적인 결과를 덮지 않게 현재 상태를 소비한다.
+  accessibilityBridge.consumePolite(current);
+}
+
+function syncAccessibility(): void {
+  if (state.phase !== "reward" && state.phase !== "prepare") boardPickedFrom = null;
+  if (boardPickedFrom !== null && !state.ally[boardPickedFrom]) boardPickedFrom = null;
+  const model = deriveAccessibilityModel(state, isMuted(), {
+    boardFocusIndex,
+    pickedFrom: boardPickedFrom,
+    stacked: layout.stacked,
+  });
+  if (canvas.getAttribute("aria-label") !== model.canvasLabel) canvas.setAttribute("aria-label", model.canvasLabel);
+  accessibilityBridge.sync(model);
+  accessibilityBridge.announcePolite(derivePoliteAnnouncement(state));
+
+  const alert = deriveBattleAlert(state, battleAlertIdentity);
+  if (alert) {
+    accessibilityBridge.announceAlert(alert);
+    battleAlertIdentity = alert.activeIdentity;
+  } else if (state.phase !== "battle") {
+    battleAlertIdentity = null;
+  }
 }
 
 Object.defineProperty(window, "nyangTelemetry", {
@@ -489,24 +542,89 @@ function rerollWithFeedback(): boolean {
 }
 
 const inputEffects: GameInputEffects = {
-  mute: toggleMute,
-  primary: onPrimaryAction,
-  intent: pushIntent,
-  runChoice: startNextRun,
-  raidContract: selectRaidContract,
-  mapNode: chooseNodeWithFeedback,
-  reroll: rerollWithFeedback,
-  offer: (index) => {
-    const offer = state.offers[index];
-    if (offer && !buyWithFx(offer) && state.gold < offer.cost) {
-      setNotice(state, "생선이 조금 모자라요");
+  mute: () => {
+    const muted = toggleMute();
+    announceAccessibilityResult(muted ? "효과음을 껐습니다." : "효과음을 켰습니다.");
+  },
+  primary: () => {
+    const previousPhaseKey = accessibilityPhaseKey();
+    const previousPhase = state.phase;
+    onPrimaryAction();
+    if (previousPhaseKey !== accessibilityPhaseKey()) {
+      const result = previousPhaseKey === "reward:relics"
+        ? "유물을 건너뛰었습니다."
+        : previousPhase === "gameover"
+          ? "새 런을 시작했습니다."
+          : state.phase === "battle"
+            ? "전투를 시작했습니다."
+            : "다음 길로 이동했습니다.";
+      announceAccessibilityResult(result, previousPhaseKey);
     }
   },
-  moveCat: (from, to) => moveCat(state, from, to),
+  intent: pushIntent,
+  runChoice: (choice) => {
+    const previousPhaseKey = accessibilityPhaseKey();
+    startNextRun(choice);
+    const label = choice === "retry"
+      ? "같은 시드로 다시 도전합니다."
+      : choice === "daily"
+        ? "오늘의 시드를 시작합니다."
+        : choice === "challenge"
+          ? "다음 도전 단계를 시작합니다."
+          : "새 런을 시작합니다.";
+    announceAccessibilityResult(label, previousPhaseKey);
+  },
+  raidContract: (index) => {
+    const previousPhaseKey = accessibilityPhaseKey();
+    const contract = state.raidOffers[index];
+    if (selectRaidContract(index) && contract) {
+      announceAccessibilityResult(
+        `계약 선택: ${contract.name}. 승리 보상 생선 +${contract.rewardFish}.`,
+        previousPhaseKey,
+      );
+    }
+  },
+  mapNode: (index) => {
+    const previousPhaseKey = accessibilityPhaseKey();
+    const node = state.map.steps[state.step]?.[index];
+    const info = node ? nodeInfo(node.kind) : null;
+    if (chooseNodeWithFeedback(index)) {
+      announceAccessibilityResult(
+        `경로 확정: ${info?.name ?? "다음 길"}. ${state.notice}`.trim(),
+        previousPhaseKey,
+      );
+    } else {
+      announceAccessibilityResult(state.notice || "그 길로는 갈 수 없습니다.");
+    }
+  },
+  reroll: () => {
+    const success = rerollWithFeedback();
+    announceAccessibilityResult(success ? "새 제안을 가져왔습니다." : state.notice || "다시 뽑을 수 없습니다.");
+  },
+  offer: (index) => {
+    const previousPhaseKey = accessibilityPhaseKey();
+    const offer = state.offers[index];
+    if (!offer) return;
+    const success = buyWithFx(offer);
+    if (!success && state.gold < offer.cost) setNotice(state, "생선이 조금 모자라요");
+    announceAccessibilityResult(
+      success
+        ? `${offer.kind === "upgrade" ? "강화" : "구매"} 완료: ${offer.label}.`
+        : state.notice || `${offer.label}을 선택할 수 없습니다.`,
+      previousPhaseKey,
+    );
+  },
+  moveCat: (from, to) => {
+    const cat = state.ally[from];
+    moveCat(state, from, to);
+    if (cat && from !== to) {
+      announceAccessibilityResult(`${cat.breed.name} 배치 완료. ${boardCellPositionLabel(to, layout.stacked)}.`);
+    }
+  },
 };
 
 /** DOM 이벤트는 좌표만 정규화하고, 실제 입력 정책은 Node 테스트와 같은 경계를 지난다. */
-function routeInput(event: GameInputEvent): boolean {
+function routeInput(event: GameInputEvent): GameInputDispatch {
   // resize는 입력 정책을 정리하는 내부 신호다. 사용자가 실제로 누른 마지막
   // 키·포인터를 덮지 않아 CDP가 DOM 입력 경계를 그대로 확인할 수 있게 한다.
   if (
@@ -529,13 +647,16 @@ function routeInput(event: GameInputEvent): boolean {
   Object.assign(drag, outcome.drag);
   if (outcome.hoverCell !== undefined) hoverCell = outcome.hoverCell;
   if (outcome.unlockAudio) unlockAudio();
+  if (outcome.action.kind !== "none") {
+    runtimeObservation.actionCounts[outcome.action.kind] = (runtimeObservation.actionCounts[outcome.action.kind] ?? 0) + 1;
+  }
   executeGameInputAction(outcome.action, inputEffects);
-  return outcome.preventDefault;
+  return outcome;
 }
 
 canvas.addEventListener("pointerdown", (e) => {
   const { x, y } = pointerPos(e);
-  if (routeInput({ kind: "pointer-down", pointerId: e.pointerId, x, y })) e.preventDefault();
+  if (routeInput({ kind: "pointer-down", pointerId: e.pointerId, x, y }).preventDefault) e.preventDefault();
   try {
     canvas.setPointerCapture(e.pointerId);
   } catch {
@@ -604,7 +725,11 @@ function pushIntent(kind: Intervention["kind"] = "act", dual = false): void {
 
 window.addEventListener("keydown", (e) => {
   // 자동 반복·phase lock·음소거 우선순위는 포인터와 같은 production 경계가 정한다.
-  if (routeInput({ kind: "key-down", code: e.code, repeat: e.repeat })) e.preventDefault();
+  // 네이티브 버튼이 자체 click으로 바꾸는 Enter/Space만 제외한다. 숫자·R·G·M까지
+  // 막으면 패널에 포커스가 있는 동안 화면에 적힌 단축키가 전부 죽는다.
+  if (e.defaultPrevented) return;
+  if (isNativeInteractiveTarget(e.target) && (e.key === "Enter" || e.code === "Space")) return;
+  if (routeInput({ kind: "key-down", code: e.code, repeat: e.repeat }).preventDefault) e.preventDefault();
 });
 
 
@@ -665,10 +790,12 @@ if (debugEnabled) {
       button: { ...layout.button },
       runtime: {
         ...runtimeObservation,
+        actionCounts: { ...runtimeObservation.actionCounts },
         lastInput: runtimeObservation.lastInput ? { ...runtimeObservation.lastInput } : null,
         lastResize: runtimeObservation.lastResize ? { ...runtimeObservation.lastResize } : null,
         sprites: spriteStatus(),
         spriteFallbackDraws: spriteFallbackDrawCount(),
+        accessibility: accessibilityBridge.observation(),
       },
     }),
   });
@@ -739,7 +866,7 @@ function frame(now: number): void {
     bosses: state.enemy,
   });
   setBed(musicFor(state));
-  syncRaidAccessibility();
+  syncAccessibility();
   render(ctx!, layout, state, drag, hoverCell, performance.now() - phaseChangedAt < PHASE_LOCK_MS);
   /**
    * 탭이 숨겨지면 루프를 세운다. 브라우저는 숨은 탭의 rAF를 1fps 안팎으로 줄이는데, 그 틈에

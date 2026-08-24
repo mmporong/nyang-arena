@@ -75,7 +75,7 @@ function overlapArea(a, b) {
 }
 
 let failed = 0;
-console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  행동틈  전투셀  음소거  구성    판정");
+console.log("기기               보드셀겹침  카드    카드틈  머리줄여백  최소셀  버튼  행동틈  전투셀  음소거  구성    판정");
 for (const [name, w, h] of DEVICES) {
   const L = computeLayout(w, h);
   /**
@@ -99,6 +99,15 @@ for (const [name, w, h] of DEVICES) {
   const cardsOnScreen = L.offerCards.x >= 0 && L.offerCards.x + L.offerCards.w <= w;
   // 카드가 세로로 섰는지 눕혔는지 — 눈으로 확인할 때 어느 분기인지 알아야 한다.
   const shape = L.offerCards.h >= L.offerCards.w / 3 ? "세로" : "가로";
+  const storeCards = offerRects(L);
+  const storeGaps = storeCards.slice(1).map((card, index) => L.columns
+    ? card.y - (storeCards[index].y + storeCards[index].h)
+    : card.x - (storeCards[index].x + storeCards[index].w));
+  const storeGap = Math.min(...storeGaps);
+  const storeRhythm = L.offerGap >= 8
+    && storeGap >= 8 - 0.01
+    && storeCards.every((card) => card.w >= 44 && card.h >= 44)
+    && storeCards.every((card) => card.x >= -0.01 && card.y >= -0.01 && card.x + card.w <= w + 0.01 && card.y + card.h <= h + 0.01);
 
   /**
    * 전투 배치에서 판이 정보 자리를 침범하면 안 된다.
@@ -156,11 +165,13 @@ for (const [name, w, h] of DEVICES) {
     actionClear >= B.actionGap - 0.5 &&
     muteClear &&
     battleClear &&
+    storeRhythm &&
     splitClear;
   if (!ok) failed++;
   console.log(
     `${name.padEnd(18)} ${(worst * 100).toFixed(1).padStart(7)}%  ` +
       `${shape} ${String(Math.round(L.offerCards.w / 3)).padStart(3)}x${String(Math.round(L.offerCards.h)).padEnd(4)}` +
+      `${String(Math.round(storeGap)).padStart(7)}  ` +
       `${String(Math.round(headroom)).padStart(8)}  ${String(Math.round(L.cell)).padStart(5)}  ` +
       `${String(Math.round(L.button.h)).padStart(4)}  ${String(Math.round(actionClear)).padStart(6)}  ` +
       `${String(Math.round(B.cell)).padStart(5)}  ` +

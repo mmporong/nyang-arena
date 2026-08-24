@@ -60,14 +60,15 @@
         outline: 3px solid #f0ba4a;
         outline-offset: -5px;
       }
-      .raid-a11y-controls {
+      .game-a11y-controls {
         position: fixed;
-        z-index: 10;
+        z-index: 20;
         top: max(12px, env(safe-area-inset-top));
         left: max(12px, env(safe-area-inset-left));
-        display: flex;
+        display: grid;
         max-width: min(720px, calc(100vw - 24px));
-        flex-wrap: wrap;
+        max-height: min(720px, calc(100vh - 24px));
+        overflow: auto;
         gap: 12px;
         padding: 16px;
         box-sizing: border-box;
@@ -75,25 +76,52 @@
         background: #241a14;
         border: 2px solid #9c8b76;
         border-radius: 10px;
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.48);
       }
-      .raid-a11y-controls[hidden] {
+      .game-a11y-controls[hidden],
+      .game-a11y-controls [hidden] {
         display: none;
       }
-      .raid-a11y-controls:not(:focus-within) {
+      .game-a11y-controls:not(:focus-within) {
         width: 1px;
         height: 1px;
+        max-width: 1px;
+        max-height: 1px;
         overflow: hidden;
         padding: 0;
         border: 0;
         clip-path: inset(50%);
         white-space: nowrap;
       }
-      .raid-a11y-controls p {
-        flex-basis: 100%;
-        margin: 0 0 4px;
+      .game-a11y-controls h2 {
+        margin: 0;
+        color: #f0ba4a;
+        font-size: 18px;
+        line-height: 1.25;
+      }
+      .game-a11y-controls p {
+        margin: 0;
         line-height: 1.45;
       }
-      .raid-a11y-controls button {
+      .game-a11y-actions,
+      .game-a11y-global {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+        gap: 12px;
+      }
+      .game-a11y-board {
+        display: grid;
+        gap: 8px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(239, 224, 198, 0.22);
+      }
+      .game-a11y-row {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(44px, 1fr));
+        gap: 8px;
+      }
+      .game-a11y-controls button {
+        min-width: 44px;
         min-height: 44px;
         padding: 10px 14px;
         color: #241a14;
@@ -104,15 +132,38 @@
         line-height: 1.35;
         cursor: pointer;
       }
-      .raid-a11y-controls button:hover {
+      .game-a11y-board button {
+        padding: 6px;
+      }
+      .game-a11y-controls button:hover {
         background: #fff0d6;
       }
-      .raid-a11y-controls button:active {
+      .game-a11y-controls button:active {
         transform: translateY(1px);
       }
-      .raid-a11y-controls button:focus-visible {
+      .game-a11y-controls button:focus-visible {
         outline: 3px solid #f0ba4a;
         outline-offset: 3px;
+      }
+      .game-a11y-controls button[aria-pressed="true"],
+      .game-a11y-controls button[aria-selected="true"] {
+        background: #f0ba4a;
+        border-color: #fff0d6;
+      }
+      .game-a11y-controls button:disabled {
+        color: #9c8b76;
+        background: #30251e;
+        border-color: #5f5145;
+        cursor: not-allowed;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
       }
       #boot {
         position: fixed;
@@ -128,6 +179,30 @@
       #boot.gone {
         opacity: 0;
         pointer-events: none;
+      }
+      @media (max-width: 599px), (max-height: 540px) {
+        .game-a11y-controls {
+          top: max(8px, env(safe-area-inset-top));
+          left: max(8px, env(safe-area-inset-left));
+          max-width: calc(100vw - 16px);
+          max-height: calc(100vh - 16px);
+          gap: 8px;
+          padding: 12px;
+        }
+        .game-a11y-actions,
+        .game-a11y-global {
+          gap: 8px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot,
+        .game-a11y-controls,
+        .game-a11y-controls button {
+          transition: none !important;
+        }
+        .game-a11y-controls button:active {
+          transform: none;
+        }
       }
     </style>
   </head>

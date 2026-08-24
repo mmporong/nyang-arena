@@ -16,6 +16,7 @@ import {
   SHOT_LIFE_MS,
   skillName,
   strikeUsable,
+  sweepDodgeFree,
   sweepZones,
   type Fx,
   vulnerableWindowBoss,
@@ -5276,6 +5277,7 @@ export function buttonText(s: RunState): string {
        * 차지가 0인데도 눌러야 하는 순간(스윕 두 번째 파동)엔 숫자를 빼서
        * "0인데 왜 눌러야 하나"는 혼란을 없앤다.
        */
+      if (sweepDodgeFree(s)) return "연쇄 회피";
       return s.dodgeCharges > 0 ? `회피  ${s.dodgeCharges}` : "회피";
     }
     case "reward":
@@ -5330,7 +5332,11 @@ function dualButtonText(s: RunState, verb: "산개" | "집결", key: string, key
   if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
   const hint = w >= 140 ? key : keyAbbrev;
   const open = vulnerableWindowBoss(s);
-  const pool = open ? `기회 ${open.vulnerableCharges}` : `회피 ${s.dodgeCharges}`;
+  const pool = sweepDodgeFree(s)
+    ? "연쇄 회피"
+    : open
+      ? `기회 ${open.vulnerableCharges}`
+      : `회피 ${s.dodgeCharges}`;
   return `${verb}! ${hint}  ${pool}`;
 }
 

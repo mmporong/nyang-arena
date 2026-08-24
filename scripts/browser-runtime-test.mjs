@@ -261,10 +261,42 @@ async function evaluate(cdp, sessionId, expression) {
   return result.result?.value;
 }
 
-async function pressDigit1(cdp, sessionId) {
-  const common = { key: "1", code: "Digit1", windowsVirtualKeyCode: 49, nativeVirtualKeyCode: 49 };
-  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...common }, sessionId);
+async function connectCdpWhenReady(url, browserProcess, timeoutMs = 4_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    if (browserProcess.exitCode !== null) {
+      throw new Error(`CDP 연결 전 브라우저가 조기 종료했습니다 (${browserProcess.exitCode})`);
+    }
+    try {
+      // DevToolsActivePort는 WebSocket accept보다 아주 조금 먼저 생길 수 있다.
+      // 전체 테스트를 재시도하지 않고 이 readiness 경계만 짧게 다시 확인한다.
+      return await CdpConnection.connect(url, 750);
+    } catch (error) {
+      lastError = error;
+      await delay(100);
+    }
+  }
+  throw new Error(`CDP readiness ${timeoutMs}ms 시간 초과: ${lastError?.message ?? "알 수 없는 오류"}`);
+}
+
+async function pressKey(cdp, sessionId, { key, code, keyCode, text = "" }) {
+  const common = {
+    key,
+    code,
+    windowsVirtualKeyCode: keyCode,
+    nativeVirtualKeyCode: keyCode,
+  };
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: text ? "keyDown" : "rawKeyDown",
+    ...common,
+    ...(text ? { text, unmodifiedText: text } : {}),
+  }, sessionId);
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...common }, sessionId);
+}
+
+async function pressDigit1(cdp, sessionId) {
+  await pressKey(cdp, sessionId, { key: "1", code: "Digit1", keyCode: 49 });
 }
 
 async function clickPoint(cdp, sessionId, x, y) {
@@ -314,7 +346,7 @@ async function main() {
     if (typeof process.getuid === "function" && process.getuid() === 0) args.unshift("--no-sandbox");
     browserProcess = spawn(browserPath, args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const browserSocket = await waitForDevTools(browserProcess, profileDir);
-    cdp = await CdpConnection.connect(browserSocket);
+    cdp = await connectCdpWhenReady(browserSocket, browserProcess);
     const browserVersion = await cdp.send("Browser.getVersion");
 
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
@@ -382,6 +414,7 @@ async function main() {
       cdp.send("Page.enable", {}, sessionId),
       cdp.send("Network.enable", {}, sessionId),
       cdp.send("Log.enable", {}, sessionId),
+      cdp.send("Accessibility.enable", {}, sessionId),
     ]);
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: 1280,
@@ -424,7 +457,7 @@ async function main() {
           uniqueColors: colors.size,
           phase: window.nyang.phase,
           raidOffers: window.nyang.raidOffers.length,
-          a11yButtons: document.querySelectorAll(".raid-a11y-controls:not([hidden]) button:not([hidden])").length,
+          a11yButtons: document.querySelectorAll(".game-a11y-controls button:not([hidden])").length,
           runtime: window.nyang.runtime,
         };
         })()`),
@@ -440,7 +473,7 @@ async function main() {
     assert(bootState.backing.width === 1280 && bootState.backing.height === 800, "캔버스 backing 크기가 DPR과 다릅니다");
     assert(bootState.uniqueColors >= 4, `캔버스가 단색에 가깝습니다 (${bootState.uniqueColors}색)`);
     assert(bootState.phase === "map" && bootState.raidOffers === 3, "초기 계약 세 장이 열리지 않았습니다");
-    assert(bootState.a11yButtons === 3, `접근성 계약 버튼이 세 개가 아닙니다 (${bootState.a11yButtons})`);
+    assert(bootState.a11yButtons === 4, `접근성 계약 3개와 음소거 버튼이 준비되지 않았습니다 (${bootState.a11yButtons})`);
     assert(bootState.runtime.sprites.state === "ready", `sprite 상태가 ready가 아닙니다 (${bootState.runtime.sprites.state})`);
     assert(bootState.runtime.sprites.frameDescriptors === 186 && bootState.runtime.sprites.fallbackFrames === 0, "186 frame descriptor가 준비되지 않았습니다");
     const happyAtlasRequests = pageRequests.filter((url) => /\/sprites\/atlas-(?:base|extra)\.png(?:$|\?)/u.test(url));
@@ -452,38 +485,260 @@ async function main() {
       `browser-runtime boot PASS · ${browserVersion.product} · protocol ${browserVersion.protocolVersion} · ${basename(browserPath)} · colors ${bootState.uniqueColors}`,
     );
 
-    // 첫 프레임의 페이즈 잠금은 실제 사용자 입력에도 적용된다.
+    const initialAccessibility = await evaluate(cdp, sessionId, `(() => {
+      const panel = document.querySelector(".game-a11y-controls");
+      const buttons = [...panel.querySelectorAll("button:not([hidden])")];
+      const first = buttons.find((button) => button.dataset.focusKey?.startsWith("raid-contract:"));
+      first.focus();
+      return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+        const actionButtons = [...panel.querySelectorAll(".game-a11y-actions > button:not([hidden])")];
+        const rects = actionButtons.map((button) => {
+          const rect = button.getBoundingClientRect();
+          return { key: button.dataset.focusKey, width: rect.width, height: rect.height, x: rect.x, y: rect.y };
+        });
+        resolve({
+          buttonNames: buttons.map((button) => button.textContent.trim()),
+          buttonSizes: buttons.map((button) => {
+            const rect = button.getBoundingClientRect();
+            return { width: rect.width, height: rect.height };
+          }),
+          focusKey: document.activeElement?.dataset.focusKey ?? null,
+          rects,
+          actionGap: Number.parseFloat(getComputedStyle(panel.querySelector(".game-a11y-actions")).gap),
+          politeUpdates: window.nyang.runtime.accessibility.politeUpdates,
+        });
+      })));
+    })()`);
+    assert(initialAccessibility.focusKey?.startsWith("raid-contract:"), "첫 계약 DOM 버튼에 focus하지 못했습니다");
+    assert(initialAccessibility.buttonNames.length === 4 && initialAccessibility.buttonNames.every(Boolean), "초기 접근성 버튼 이름이 비었습니다");
+    assert(initialAccessibility.buttonSizes.every((rect) => rect.width >= 44 && rect.height >= 44), "초기 DOM 버튼이 44px 하한을 지키지 않았습니다");
+    assert(initialAccessibility.actionGap >= 12, `desktop 접근성 버튼 간격이 12px 미만입니다 (${initialAccessibility.actionGap})`);
+    const sameRowPair = initialAccessibility.rects
+      .slice(1)
+      .map((rect, index) => ({ left: initialAccessibility.rects[index], right: rect }))
+      .find(({ left, right }) => Math.abs(left.y - right.y) < 1);
+    if (sameRowPair) {
+      assert(
+        sameRowPair.right.x - (sameRowPair.left.x + sameRowPair.left.width) >= 12,
+        "desktop 접근성 sibling의 실제 가로 간격이 12px 미만입니다",
+      );
+    }
+
+    const { nodes: axNodes } = await cdp.send("Accessibility.getFullAXTree", {}, sessionId);
+    const axRoles = axNodes.map((node) => node.role?.value);
+    const axButtonNames = axNodes
+      .filter((node) => node.role?.value === "button" && !node.ignored)
+      .map((node) => node.name?.value ?? "");
+    assert(axRoles.includes("status") && axRoles.includes("alert"), "AX tree에 status/alert live region이 없습니다");
+    assert(
+      initialAccessibility.buttonNames.every((name) => axButtonNames.includes(name)),
+      "AX tree에서 초기 계약 3개와 음소거의 접근 가능한 이름을 찾지 못했습니다",
+    );
+
+    await pressKey(cdp, sessionId, { key: "Tab", code: "Tab", keyCode: 9 });
+    const tabFocusKey = await evaluate(cdp, sessionId, `document.activeElement?.dataset.focusKey ?? null`);
+    assert(tabFocusKey && tabFocusKey !== initialAccessibility.focusKey, "Tab이 다음 접근성 컨트롤로 이동하지 않았습니다");
+    await evaluate(cdp, sessionId, `document.querySelector('[data-focus-key^="raid-contract:"]').focus()`);
+
     await delay(400);
-    await pressDigit1(cdp, sessionId);
+    const idlePolite = await evaluate(cdp, sessionId, `window.nyang.runtime.accessibility.politeUpdates`);
+    assert(idlePolite === initialAccessibility.politeUpdates, "idle 400ms 동안 polite live region이 중복 갱신됐습니다");
+
+    const contractActionsBefore = bootState.runtime.actionCounts["raid-contract"] ?? 0;
+    await pressKey(cdp, sessionId, { key: " ", code: "Space", keyCode: 32 });
     const contractState = await waitFor(
-      "계약 키보드 선택",
+      "계약 native Space 선택",
       () => evaluate(cdp, sessionId, `({
         phase: window.nyang.phase,
         raidOffers: window.nyang.raidOffers.length,
         contract: window.nyang.raidContract,
         href: location.href,
-        lastInput: window.nyang.runtime.lastInput,
+        runtime: window.nyang.runtime,
       })`),
       (value) => value?.phase === "map" && value.raidOffers === 0 && value.contract && new URL(value.href).searchParams.has("raid"),
     );
-    assert(contractState.lastInput?.code === "Digit1", "실제 Digit1 입력이 런타임 경계에 기록되지 않았습니다");
+    assert(
+      (contractState.runtime.actionCounts["raid-contract"] ?? 0) - contractActionsBefore === 1,
+      "계약 native Space가 raid-contract action을 정확히 한 번 실행하지 않았습니다",
+    );
+    assert(
+      contractState.runtime.accessibility.politeText.includes("다음:")
+        && contractState.runtime.accessibility.politeText.includes("길 선택"),
+      "계약 결과 공지에 다음 지도 과업이 함께 전달되지 않았습니다",
+    );
     await delay(400);
-    await pressDigit1(cdp, sessionId);
+    const mapControl = await evaluate(cdp, sessionId, `(() => {
+      const button = document.querySelector('[data-focus-key^="map-node:"]');
+      button?.focus();
+      return { key: button?.dataset.focusKey ?? null, before: window.nyang.runtime.actionCounts["map-node"] ?? 0 };
+    })()`);
+    assert(mapControl.key, "지도 DOM 컨트롤이 나타나지 않았습니다");
+    await pressKey(cdp, sessionId, { key: "Enter", code: "Enter", keyCode: 13, text: "\r" });
     const rewardState = await waitFor(
-      "지도 선택 후 보상",
-      () => evaluate(cdp, sessionId, `({ phase: window.nyang.phase, step: window.nyang.step, button: window.nyang.button })`),
+      "지도 native Enter 선택 후 보상",
+      () => evaluate(cdp, sessionId, `({ phase: window.nyang.phase, step: window.nyang.step, button: window.nyang.button, runtime: window.nyang.runtime })`),
       (value) => value?.phase === "reward" && value.step === 0 && value.button?.w > 0,
     );
-    console.log("browser-runtime keyboard route PASS · map→reward");
+    assert(
+      (rewardState.runtime.actionCounts["map-node"] ?? 0) - mapControl.before === 1,
+      "지도 native Enter가 map-node action을 정확히 한 번 실행하지 않았습니다",
+    );
+    assert(
+      rewardState.runtime.accessibility.politeText.includes("다음:")
+        && rewardState.runtime.accessibility.politeText.includes("상점과 배치"),
+      "지도 결과 공지에 다음 상점·배치 과업이 함께 전달되지 않았습니다",
+    );
+    const rewardAccessibility = await evaluate(cdp, sessionId, `(() => {
+      const runtime = window.nyang.runtime.accessibility;
+      const grid = document.querySelector('.game-a11y-board[role="grid"]');
+      const rows = [...grid.querySelectorAll(':scope > [role="row"]')];
+      const cells = [...grid.querySelectorAll('[role="gridcell"]')];
+      const buttonSizes = [...document.querySelectorAll('.game-a11y-controls button:not([hidden])')].map((button) => {
+        const rect = button.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      });
+      return {
+        phaseKey: runtime.phaseKey,
+        controlKeys: runtime.controlKeys,
+        rows: rows.length,
+        rowCellCounts: rows.map((row) => row.querySelectorAll(':scope > [role="gridcell"]').length),
+        cells: cells.length,
+        roving: cells.filter((cell) => cell.tabIndex === 0).length,
+        buttonSizes,
+      };
+    })()`);
+    assert(rewardAccessibility.phaseKey.startsWith("reward:"), "reward 접근성 phase model이 동기화되지 않았습니다");
+    assert(rewardAccessibility.controlKeys.includes("reward:reroll") && rewardAccessibility.controlKeys.includes("reward:primary"), "reward 재추첨/주 행동 컨트롤이 없습니다");
+    assert(rewardAccessibility.controlKeys.some((key) => key.startsWith("reward:offer:")), "reward 구매 컨트롤이 없습니다");
+    assert(rewardAccessibility.controlKeys.includes("global:mute"), "reward 음소거 컨트롤이 없습니다");
+    assert(
+      rewardAccessibility.rows === 5 && rewardAccessibility.rowCellCounts.every((count) => count === 5),
+      "reward ARIA grid가 5개 row × 5개 gridcell 구조가 아닙니다",
+    );
+    assert(rewardAccessibility.cells === 25 && rewardAccessibility.roving === 1, "reward 5x5 grid의 roving tabindex가 올바르지 않습니다");
+    assert(rewardAccessibility.buttonSizes.every((rect) => rect.width >= 44 && rect.height >= 44), "reward DOM 버튼/grid cell이 44px 하한을 지키지 않았습니다");
+
+    const { nodes: rewardAxNodes } = await cdp.send("Accessibility.getFullAXTree", {}, sessionId);
+    const rewardAxById = new Map(rewardAxNodes.map((node) => [node.nodeId, node]));
+    const rewardGrid = rewardAxNodes.find((node) => node.role?.value === "grid" && !node.ignored);
+    const rewardRows = (rewardGrid?.childIds ?? []).map((id) => rewardAxById.get(id)).filter(Boolean);
+    assert(rewardRows.length === 5 && rewardRows.every((row) => row.role?.value === "row"), "AX tree의 grid 직계 자식이 row 5개가 아닙니다");
+    assert(
+      rewardRows.every((row) => (row.childIds ?? []).map((id) => rewardAxById.get(id)).filter((node) => node?.role?.value === "gridcell").length === 5),
+      "AX tree의 각 row가 gridcell 5개를 소유하지 않습니다",
+    );
+
+    await delay(450);
+    const shortcutState = await evaluate(cdp, sessionId, `(() => {
+      const button = document.querySelector('[data-focus-key="reward:primary"]');
+      button.focus();
+      const offer = [...document.querySelectorAll('[data-focus-key^="reward:offer:"]')][0];
+      return {
+        focusKey: document.activeElement?.dataset.focusKey ?? null,
+        offerIndex: Number(offer?.dataset.focusKey?.split(':').at(-1)),
+        counts: window.nyang.runtime.actionCounts,
+      };
+    })()`);
+    assert(shortcutState.focusKey === "reward:primary", "단축키 회귀용 native 버튼에 focus하지 못했습니다");
+    await pressKey(cdp, sessionId, { key: "g", code: "KeyG", keyCode: 71, text: "g" });
+    const routedG = await evaluate(cdp, sessionId, `window.nyang.runtime.lastInput`);
+    assert(routedG?.kind === "key-down" && routedG.code === "KeyG", "native 버튼 focus 중 G가 공용 입력 경계에 도달하지 않았습니다");
+    await pressKey(cdp, sessionId, { key: "m", code: "KeyM", keyCode: 77, text: "m" });
+    await waitFor(
+      "native 버튼 focus 중 M",
+      () => evaluate(cdp, sessionId, `window.nyang.runtime.actionCounts["mute"] ?? 0`),
+      (count) => count === (shortcutState.counts.mute ?? 0) + 1,
+    );
+    await pressKey(cdp, sessionId, { key: "r", code: "KeyR", keyCode: 82, text: "r" });
+    await waitFor(
+      "native 버튼 focus 중 R",
+      () => evaluate(cdp, sessionId, `window.nyang.runtime.actionCounts["reroll"] ?? 0`),
+      (count) => count === (shortcutState.counts.reroll ?? 0) + 1,
+    );
+    const digit = shortcutState.offerIndex + 1;
+    assert(Number.isInteger(digit) && digit >= 1 && digit <= 3, "숫자 구매 회귀용 offer 단축키를 찾지 못했습니다");
+    await pressKey(cdp, sessionId, { key: String(digit), code: `Digit${digit}`, keyCode: 48 + digit, text: String(digit) });
+    await waitFor(
+      "native 버튼 focus 중 숫자 구매",
+      () => evaluate(cdp, sessionId, `window.nyang.runtime.actionCounts["offer"] ?? 0`),
+      (count) => count === (shortcutState.counts.offer ?? 0) + 1,
+    );
+
+    const boardStart = await evaluate(cdp, sessionId, `(() => {
+      const cell = document.querySelector('.game-a11y-board [role="gridcell"][data-board-index="0"]');
+      cell.focus();
+      return {
+        key: cell.dataset.focusKey,
+        index: Number(cell.dataset.boardIndex),
+        visualRightIndex: Number(cell.nextElementSibling?.dataset.boardIndex),
+      };
+    })()`);
+    await pressKey(cdp, sessionId, { key: "ArrowRight", code: "ArrowRight", keyCode: 39 });
+    const boardAfter = await evaluate(cdp, sessionId, `({
+      key: document.activeElement?.dataset.focusKey ?? null,
+      index: Number(document.activeElement?.dataset.boardIndex),
+      lastInput: window.nyang.runtime.lastInput,
+    })`);
+    assert(
+      boardAfter.key?.startsWith("board-cell:") && boardAfter.index === boardStart.visualRightIndex,
+      "grid ArrowRight가 다음 시각 셀로 이동하지 않았습니다",
+    );
+    assert(boardAfter.lastInput?.code !== "ArrowRight", "grid 화살표가 전역 게임 입력으로 중복 전달됐습니다");
+    console.log("browser-runtime accessibility route PASS · Space 계약→Enter 지도→reward grid");
+
+    await cdp.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    }, sessionId);
+    const reducedButton = await evaluate(cdp, sessionId, `(() => {
+      const button = document.querySelector('[data-focus-key="reward:reroll"]');
+      button.focus();
+      const rect = button.getBoundingClientRect();
+      return {
+        matches: matchMedia("(prefers-reduced-motion: reduce)").matches,
+        transitionDuration: getComputedStyle(button).transitionDuration,
+        x: rect.x + rect.width / 2,
+        y: rect.y + rect.height / 2,
+      };
+    })()`);
+    assert(reducedButton.matches && reducedButton.transitionDuration === "0s", "reduced-motion에서 DOM transition이 제거되지 않았습니다");
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: reducedButton.x, y: reducedButton.y }, sessionId);
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: "mousePressed", x: reducedButton.x, y: reducedButton.y, button: "left", buttons: 1, clickCount: 1,
+    }, sessionId);
+    const reducedActiveTransform = await evaluate(cdp, sessionId, `getComputedStyle(document.querySelector('[data-focus-key="reward:reroll"]')).transform`);
+    assert(reducedActiveTransform === "none", `reduced-motion active transform이 남았습니다 (${reducedActiveTransform})`);
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1275, y: 795, buttons: 1 }, sessionId);
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: "mouseReleased", x: 1275, y: 795, button: "left", buttons: 0, clickCount: 1,
+    }, sessionId);
+    await cdp.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+    }, sessionId);
 
     const clickX = rewardState.button.x + rewardState.button.w / 2;
     const clickY = rewardState.button.y + rewardState.button.h / 2;
+    await evaluate(cdp, sessionId, `document.querySelector("canvas").focus()`);
     await delay(400);
     await clickPoint(cdp, sessionId, clickX, clickY);
-    await waitFor(
+    const battleState = await waitFor(
       "보상 버튼에서 전투 진입",
-      () => evaluate(cdp, sessionId, `({ phase: window.nyang.phase, lastInput: window.nyang.runtime.lastInput })`),
-      (value) => value?.phase === "battle" && value.lastInput?.kind === "pointer-up",
+      () => evaluate(cdp, sessionId, `({
+        phase: window.nyang.phase,
+        lastInput: window.nyang.runtime.lastInput,
+        accessibility: window.nyang.runtime.accessibility,
+        battleControls: [...document.querySelectorAll('[data-focus-key^="battle:"]')].map((button) => ({ key: button.dataset.focusKey, disabled: button.disabled })),
+      })`),
+      (value) => value?.phase === "battle"
+        && value.lastInput?.kind === "pointer-up"
+        && value.accessibility?.phaseKey.startsWith("battle:")
+        && value.battleControls?.length > 0,
+    );
+    assert(battleState.battleControls.every((control) => control.key.startsWith("battle:")), "battle 접근성 개입 컨트롤이 없습니다");
+    assert(battleState.accessibility.controlKeys.includes("global:mute"), "battle 음소거 컨트롤이 없습니다");
+    assert(
+      battleState.accessibility.politeText.includes("다음:")
+        && battleState.accessibility.politeText.includes("전투"),
+      "primary 단계 전환 결과에 다음 전투 지침이 함께 전달되지 않았습니다",
     );
     console.log("browser-runtime pointer route PASS · reward→battle");
 
@@ -499,20 +754,29 @@ async function main() {
       "세로 viewport 적용",
       () => evaluate(cdp, sessionId, `(() => {
         const canvas = document.querySelector("canvas");
-        const rect = canvas.getBoundingClientRect();
-        return {
-          inner: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
-          css: { width: rect.width, height: rect.height },
-          backing: { width: canvas.width, height: canvas.height },
-          orientation: { type: screen.orientation.type, angle: screen.orientation.angle },
-          button: window.nyang.button,
-          runtime: window.nyang.runtime,
+        const snapshot = () => {
+          const rect = canvas.getBoundingClientRect();
+          return {
+            inner: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
+            css: { width: rect.width, height: rect.height },
+            backing: { width: canvas.width, height: canvas.height },
+            orientation: { type: screen.orientation.type, angle: screen.orientation.angle },
+            button: window.nyang.button,
+            runtime: window.nyang.runtime,
+          };
         };
+        const first = snapshot();
+        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+          const value = snapshot();
+          resolve({ ...value, stable: JSON.stringify({ inner: first.inner, css: first.css, backing: first.backing }) === JSON.stringify({ inner: value.inner, css: value.css, backing: value.backing }) });
+        })));
       })()`),
       (value) => value?.inner.width === 800
         && value.inner.height === 1280
+        && value.stable
         && value.runtime.resizeCount > beforeResize.resizeCount
-        && value.runtime.orientationCount > beforeResize.orientationCount,
+        && value.runtime.lastResize?.width === 800
+        && value.runtime.lastResize?.height === 1280,
     );
     assert(resized.css.width === 800 && resized.css.height === 1280, "세로 캔버스 CSS 크기가 viewport와 다릅니다");
     assert(resized.backing.width === 1600 && resized.backing.height === 2560, "세로 캔버스 backing/DPR가 다릅니다");
@@ -525,7 +789,27 @@ async function main() {
       "세로 화면의 주 버튼이 viewport 밖으로 나갔습니다",
     );
     assert(resized.runtime.lastResize.width === 800 && resized.runtime.lastResize.height === 1280, "마지막 resize 관찰값이 다릅니다");
-    console.log("browser-runtime resize PASS · 1280x800→800x1280 @2x");
+    // CDP의 native orientation 이벤트 전달 여부와 별개로 실제 리스너·120ms
+    // debounce·resize 연결을 결정론적으로 검증한다. 연속 두 이벤트는 한 번만 센다.
+    await delay(180);
+    const beforeOrientation = await evaluate(cdp, sessionId, `window.nyang.runtime`);
+    await evaluate(cdp, sessionId, `(() => {
+      window.dispatchEvent(new Event("orientationchange"));
+      window.dispatchEvent(new Event("orientationchange"));
+    })()`);
+    const orientationHandled = await waitFor(
+      "orientationchange debounce 처리",
+      () => evaluate(cdp, sessionId, `window.nyang.runtime`),
+      (value) => value?.orientationCount === beforeOrientation.orientationCount + 1
+        && value.resizeCount === beforeOrientation.resizeCount + 1
+        && value.lastResize?.width === 800
+        && value.lastResize?.height === 1280,
+    );
+    assert(
+      orientationHandled.orientationCount === beforeOrientation.orientationCount + 1,
+      "연속 orientationchange가 하나로 합쳐지지 않았습니다",
+    );
+    console.log("browser-runtime resize PASS · 1280x800→800x1280 @2x · orientation debounce");
 
     const baselineStart = await evaluate(cdp, sessionId, `window.nyang.runtime.frameCount`);
     await delay(350);

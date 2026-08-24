@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { queueIntervention, stepBattle } from "../src/game/battle.ts";
 import { breedById } from "../src/game/breeds.ts";
 import { computeLayout, cellRect, hitCell, rectHas } from "../src/game/layout.ts";
-import { dispatchGameInput, executeGameInputAction } from "../src/game/input.ts";
+import {
+  dispatchGameInput,
+  executeGameInputAction,
+  gameInputActionAvailable,
+  identifyGameInputAction,
+} from "../src/game/input.ts";
 import { openLanes } from "../src/game/map.ts";
 import {
   createOfferPurchaseFailure,
@@ -519,6 +524,124 @@ const mutedKey = dispatchGameInput(ctx(state, desktop, idleDrag(), true), { kind
 assert.deepEqual(actionOf(mutedPointer), { kind: "mute" });
 assert.deepEqual(actionOf(mutedPointer), actionOf(mutedKey), "잠금 중 mute의 pointer/keyboard 명령이 달라졌다");
 
+// 의미 DOM도 좌표 입력과 같은 dispatcher를 지나며 stale phase와 phase lock을 우회하지 않는다.
+const directState = newRun(707070);
+const directRaid = identifyGameInputAction(directState, { kind: "raid-contract", index: 1 });
+assert.equal(gameInputActionAvailable(directState, directRaid), true, "현재 계약 DOM action이 유효하지 않다");
+assert.equal(
+  gameInputActionAvailable(directState, { kind: "raid-contract", index: 1 }),
+  false,
+  "identity 없는 계약 DOM action이 허용됐다",
+);
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directState, desktop), { kind: "direct-action", action: directRaid })),
+  directRaid,
+  "계약 DOM action이 공용 dispatcher에서 바뀌었다",
+);
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directState, desktop, idleDrag(), true), { kind: "direct-action", action: directRaid })),
+  { kind: "none" },
+  "잠긴 단계에서 계약 DOM action이 통과했다",
+);
+const staleRaidState = Array.from({ length: 16 }, (_, offset) => newRun(707071 + offset))
+  .find((candidate) => candidate.raidOffers[1]?.id !== directState.raidOffers[1]?.id);
+assert.ok(staleRaidState, "stale 계약 identity를 재현할 다른 런을 만들지 못했다");
+assert.equal(gameInputActionAvailable(staleRaidState, directRaid), false, "바뀐 계약에 이전 DOM action이 남았다");
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(staleRaidState, desktop), { kind: "direct-action", action: directRaid })),
+  { kind: "none" },
+  "stale 계약 DOM action이 다른 계약을 선택할 수 있다",
+);
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directState, desktop, idleDrag(), true), {
+    kind: "direct-action",
+    action: { kind: "mute" },
+  })),
+  { kind: "mute" },
+  "DOM 음소거가 phase lock 예외를 잃었다",
+);
+
+chooseRaidContract(directState, 0);
+const directLane = openLanes(directState.map, mapStep(directState))[0];
+assert.notEqual(directLane, undefined, "DOM 지도 action 픽스처의 열린 길이 없다");
+const directMap = identifyGameInputAction(directState, { kind: "map-node", index: directLane });
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directState, desktop), { kind: "direct-action", action: directMap })),
+  directMap,
+  "열린 지도 DOM action이 공용 dispatcher를 통과하지 못했다",
+);
+const staleMapState = Array.from({ length: 16 }, (_, offset) => {
+  const candidate = newRun(808081 + offset);
+  chooseRaidContract(candidate, 0);
+  return candidate;
+}).find((candidate) => !gameInputActionAvailable(candidate, directMap));
+assert.ok(staleMapState, "stale 지도 identity를 재현할 다른 런을 만들지 못했다");
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(staleMapState, desktop), { kind: "direct-action", action: directMap })),
+  { kind: "none" },
+  "stale 지도 DOM action이 새 런의 같은 index로 바뀌었다",
+);
+assert.equal(chooseNode(directState, directLane), true, "DOM 지도 action 픽스처가 reward로 전이하지 못했다");
+assert.equal(directState.phase, "reward");
+assert.equal(gameInputActionAvailable(directState, directMap), false, "지난 지도 DOM action이 reward까지 살아남았다");
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directState, desktop), { kind: "direct-action", action: directMap })),
+  { kind: "none" },
+  "stale 지도 DOM action이 phase를 우회했다",
+);
+const directOfferIndex = directState.offers.findIndex(Boolean);
+assert.ok(directOfferIndex >= 0, "DOM 구매 action 픽스처의 카드가 없다");
+const directOffer = identifyGameInputAction(directState, { kind: "offer", index: directOfferIndex });
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directState, desktop), { kind: "direct-action", action: directOffer })),
+  directOffer,
+  "구매 DOM action이 공용 dispatcher를 통과하지 못했다",
+);
+const replacedOffer = directState.offers[directOfferIndex];
+assert.ok(replacedOffer, "stale 구매 action 픽스처가 비었습니다");
+directState.offers[directOfferIndex] = { ...replacedOffer, cost: replacedOffer.cost + 1 };
+assert.equal(gameInputActionAvailable(directState, directOffer), false, "재추첨된 카드에 이전 DOM action이 남았다");
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directState, desktop), { kind: "direct-action", action: directOffer })),
+  { kind: "none" },
+  "stale 구매 DOM action이 다른 카드 구매로 바뀌었다",
+);
+assert.equal(
+  gameInputActionAvailable(directState, { kind: "offer", index: 99 }),
+  false,
+  "범위 밖 구매 DOM action이 유효하다고 판정됐다",
+);
+const directFrom = directState.ally.findIndex(Boolean);
+const directTo = directState.ally.findIndex((cat) => !cat);
+assert.ok(directFrom >= 0 && directTo >= 0, "DOM 배치 action 픽스처의 출발·도착 셀이 없다");
+assert.equal(
+  gameInputActionAvailable(directState, { kind: "move-cat", from: directFrom, to: directTo }),
+  true,
+  "유효한 DOM 배치 action이 거절됐다",
+);
+assert.equal(
+  gameInputActionAvailable(directState, { kind: "move-cat", from: directTo, to: directFrom }),
+  false,
+  "빈 셀에서 시작한 DOM 배치 action이 통과했다",
+);
+
+const directPrimaryState = newRun(717171);
+directPrimaryState.phase = "reward";
+directPrimaryState.relicDraftActive = true;
+const relicPrimary = identifyGameInputAction(directPrimaryState, { kind: "primary" });
+assert.equal(gameInputActionAvailable(directPrimaryState, relicPrimary), true, "현재 유물 건너뛰기 DOM action이 거절됐다");
+directPrimaryState.relicDraftActive = false;
+assert.equal(gameInputActionAvailable(directPrimaryState, relicPrimary), false, "지난 유물 건너뛰기가 상점 primary로 바뀌었다");
+assert.deepEqual(
+  actionOf(dispatchGameInput(ctx(directPrimaryState, desktop), { kind: "direct-action", action: relicPrimary })),
+  { kind: "none" },
+  "stale 유물 건너뛰기 DOM action이 상점을 건너뛰었다",
+);
+const rerollAction = identifyGameInputAction(directPrimaryState, { kind: "reroll" });
+assert.equal(gameInputActionAvailable(directPrimaryState, rerollAction), true, "현재 재추첨 DOM action이 거절됐다");
+directPrimaryState.gold += 1;
+assert.equal(gameInputActionAvailable(directPrimaryState, rerollAction), false, "자원·카드가 바뀐 뒤 이전 재추첨 action이 남았다");
+
 // production 실행기는 dispatcher의 모든 action을 정확한 effect 포트에 한 번씩 보낸다.
 assert.equal(executeRunAction(state, { kind: "mute" }).called, "mute");
 assert.equal(executeRunAction(state, { kind: "primary" }).called, "primary");
@@ -625,5 +748,5 @@ assert.deepEqual(repeatedReroll.action, { kind: "none" }, "반복 R이 재추첨
 assert.equal(repeatedReroll.unlockAudio, false, "무시한 반복키가 오디오 잠금을 풀었다");
 
 console.log(
-  "입력 라우팅 PASS — 계약·지도·재추첨·다음 런 pointer/keyboard 동등, 빈 슬롯·접힘 gap 차단, 다중 포인터·drop·resize·phase lock/mute",
+  "입력 라우팅 PASS — pointer/keyboard 동등, stale DOM identity·빈 슬롯·접힘 gap 차단, 다중 포인터·drop·resize·phase lock/mute",
 );

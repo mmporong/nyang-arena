@@ -1,11 +1,18 @@
-import { actIntentKind, actUsable, dodgeUsable, dualChoiceActive } from "./battle.ts";
+import {
+  actIntentKind,
+  actUsable,
+  dodgeUsable,
+  dualChoiceActive,
+  sweepDodgeFree,
+  vulnerableWindowBoss,
+} from "./battle.ts";
 import { hitCell, type Layout } from "./layout.ts";
 import { openLanes } from "./map.ts";
 import {
   splitButtonChoice,
   uiInteractionDescriptor,
 } from "./render.ts";
-import { mapStep, type NextChoice, type RunState } from "./run.ts";
+import { mapStep, type NextChoice, type Offer, type RunState } from "./run.ts";
 import type { Intervention } from "./types.ts";
 
 export interface InputDragState {
@@ -25,18 +32,19 @@ export type GameInputEvent =
   | { kind: "pointer-cancel" | "lost-pointer-capture"; pointerId: number }
   | { kind: "resize" }
   | { kind: "pointer-leave" }
-  | { kind: "key-down"; code: string; repeat?: boolean };
+  | { kind: "key-down"; code: string; repeat?: boolean }
+  | { kind: "direct-action"; action: GameInputAction };
 
 export type GameInputAction =
   | { kind: "none" }
   | { kind: "mute" }
-  | { kind: "primary" }
-  | { kind: "intent"; intent: Intervention["kind"]; dual: boolean }
-  | { kind: "run-choice"; choice: NextChoice }
-  | { kind: "raid-contract"; index: number }
-  | { kind: "map-node"; index: number }
-  | { kind: "reroll" }
-  | { kind: "offer"; index: number }
+  | { kind: "primary"; identity?: string }
+  | { kind: "intent"; intent: Intervention["kind"]; dual: boolean; identity?: string }
+  | { kind: "run-choice"; choice: NextChoice; identity?: string }
+  | { kind: "raid-contract"; index: number; identity?: string }
+  | { kind: "map-node"; index: number; identity?: string }
+  | { kind: "reroll"; identity?: string }
+  | { kind: "offer"; index: number; identity?: string }
   | { kind: "move-cat"; from: number; to: number };
 
 /**
@@ -106,6 +114,94 @@ export interface GameInputDispatch {
   hoverCell?: number;
   preventDefault: boolean;
   unlockAudio: boolean;
+}
+
+function offerInputIdentity(offer: Offer): string {
+  return JSON.stringify([
+    offer.kind,
+    offer.breed?.id ?? null,
+    offer.targetUid ?? null,
+    offer.relic?.id ?? null,
+    offer.cost,
+    offer.label,
+    offer.sublabel,
+  ]);
+}
+
+function currentActionIdentity(state: RunState, action: GameInputAction): string | null {
+  switch (action.kind) {
+    case "primary":
+      return JSON.stringify([
+        "primary",
+        state.phase,
+        state.phase === "reward" ? (state.relicDraftActive ? "relics" : "store") : null,
+        state.phase === "reward" ? state.nodeKind : null,
+        state.phase === "gameover" ? [state.seed, state.kind, state.challenge] : null,
+      ]);
+    case "intent": {
+      const boss = vulnerableWindowBoss(state);
+      return JSON.stringify([
+        "intent",
+        state.phase,
+        dualChoiceActive(state),
+        actIntentKind(state),
+        action.intent,
+        action.dual,
+        sweepDodgeFree(state),
+        state.dodgeCharges,
+        boss?.uid ?? null,
+        boss?.thresholdIdx ?? null,
+        boss?.vulnerableCharges ?? null,
+      ]);
+    }
+    case "run-choice":
+      return JSON.stringify(["run-choice", state.phase, state.seed, state.kind, state.challenge, action.choice]);
+    case "raid-contract":
+      return state.raidOffers[action.index]?.id ?? null;
+    case "map-node": {
+      const step = mapStep(state);
+      const node = state.map.steps[step]?.[action.index];
+      return node
+        ? JSON.stringify([state.map.stage, step, action.index, node.kind, node.wave, node.lane, node.next])
+        : null;
+    }
+    case "offer": {
+      const offer = state.offers[action.index];
+      return offer ? offerInputIdentity(offer) : null;
+    }
+    case "reroll":
+      return JSON.stringify([
+        "reroll",
+        state.phase,
+        state.relicDraftActive,
+        state.gold,
+        state.freeRerolls,
+        state.offers.map((offer) => offer ? offerInputIdentity(offer) : null),
+      ]);
+    default:
+      return null;
+  }
+}
+
+/**
+ * 의미 DOM이 보여 준 선택과 나중에 실행할 선택을 묶는다. 같은 슬롯이 재추첨·
+ * 새 단계에서 재사용돼도 사용자가 읽지 않은 다른 항목으로 바뀌어 실행되지 않는다.
+ */
+export function identifyGameInputAction(state: RunState, action: GameInputAction): GameInputAction {
+  const identity = currentActionIdentity(state, action);
+  if (identity === null) return action;
+  switch (action.kind) {
+    case "primary":
+    case "intent":
+    case "run-choice":
+    case "raid-contract":
+    case "map-node":
+    case "reroll":
+    case "offer":
+      return { ...action, identity };
+    default:
+      return action;
+  }
 }
 
 const NONE: GameInputAction = { kind: "none" };
@@ -218,6 +314,71 @@ function keyDown(ctx: GameInputContext, event: Extract<GameInputEvent, { kind: "
 }
 
 /**
+ * 의미 DOM과 다른 비좌표 입력이 stale 상태에서 게임 전이를 우회하지 못하게 하는
+ * 공용 유효성 판정이다. 포인터·단축키가 만드는 명령의 현재 phase 계약과 같다.
+ */
+export function gameInputActionAvailable(state: RunState, action: GameInputAction): boolean {
+  const expectedIdentity = currentActionIdentity(state, action);
+  if (expectedIdentity !== null && (!("identity" in action) || action.identity !== expectedIdentity)) return false;
+
+  switch (action.kind) {
+    case "none":
+      return false;
+    case "mute":
+      return true;
+    case "primary":
+      return state.phase !== "map" && state.phase !== "battle";
+    case "intent": {
+      if (state.phase !== "battle") return false;
+      const dual = dualChoiceActive(state);
+      if (action.dual !== dual) return false;
+      if (dual) return (action.intent === "dodge" || action.intent === "gather") && dodgeUsable(state);
+      return action.intent === "act" && actUsable(state);
+    }
+    case "run-choice":
+      return state.phase === "gameover";
+    case "raid-contract":
+      return state.phase === "map"
+        && Number.isInteger(action.index)
+        && action.index >= 0
+        && state.raidOffers[action.index] !== undefined;
+    case "map-node":
+      return state.phase === "map"
+        && state.raidOffers.length === 0
+        && Number.isInteger(action.index)
+        && openLanes(state.map, mapStep(state)).includes(action.index);
+    case "reroll":
+      // 실패 이유도 같은 실행 경계에서 알려 주므로 자원이 없어도 입력은 유효하다.
+      return state.phase === "reward";
+    case "offer":
+      return state.phase === "reward"
+        && Number.isInteger(action.index)
+        && action.index >= 0
+        && state.offers[action.index] !== null
+        && state.offers[action.index] !== undefined;
+    case "move-cat":
+      return (state.phase === "reward" || state.phase === "prepare")
+        && Number.isInteger(action.from)
+        && Number.isInteger(action.to)
+        && action.from >= 0
+        && action.to >= 0
+        && action.from < state.ally.length
+        && action.to < state.ally.length
+        && state.ally[action.from] !== null;
+  }
+}
+
+function directAction(
+  ctx: GameInputContext,
+  event: Extract<GameInputEvent, { kind: "direct-action" }>,
+): GameInputDispatch {
+  const common = { unlockAudio: true } as const;
+  if (event.action.kind === "mute") return result(ctx.drag, event.action, common);
+  if (ctx.phaseLocked || !gameInputActionAvailable(ctx.state, event.action)) return result(ctx.drag, NONE, common);
+  return result(ctx.drag, event.action, common);
+}
+
+/**
  * Canvas/Window 이벤트를 게임 명령으로 바꾸는 DOM 비의존 경계다.
  *
  * 이 함수는 런 상태를 바꾸지 않는다. 호출자가 반환된 명령을 `chooseNode`,
@@ -230,6 +391,8 @@ export function dispatchGameInput(ctx: GameInputContext, event: GameInputEvent):
       return pointerDown(ctx, event);
     case "key-down":
       return keyDown(ctx, event);
+    case "direct-action":
+      return directAction(ctx, event);
     case "pointer-move": {
       if (ctx.drag.active && event.pointerId !== ctx.drag.pointerId) return result(ctx.drag);
       const drag = ctx.drag.active ? { ...ctx.drag, x: event.x, y: event.y } : copyDrag(ctx.drag);

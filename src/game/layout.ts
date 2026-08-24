@@ -180,7 +180,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
   // 보드 위 진영 라벨("우리 편"/"상대")이 안내 문구와 겹치지 않도록 자리를 뗀다.
   const labelH = Math.round(Math.max(h < 360 ? 6 : tight ? 9 : 14, Math.min(w, h) * 0.032));
 
-  const cardGap = Math.max(6, Math.round(Math.min(w, h) * 0.016));
+  const cardGap = Math.max(8, Math.round(Math.min(w, h) * 0.016));
   const fieldTop = notice.y + notice.h + labelH;
 
   let synergyBar: Rect;
@@ -234,12 +234,17 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
 
     // 오른쪽 줄 위쪽은 머리줄(안내 한 줄 + 다시 뽑기) 몫으로 뗀다.
     const head = Math.round(Math.max(34, Math.min(48, colH * 0.1)));
-    offerCards = { x: rightX, y: colTop + head, w: colW, h: colH - head };
+    const cardTop = colTop + head;
+    // 극저높이 세로줄도 카드 세 장의 44px 터치 높이와 8px 간격은 지킨다.
+    // 중앙 행동 버튼과 x축이 겹치지 않으므로 옆줄은 버튼 위끝까지 사용할 수 있다.
+    const minimumCardsH = 44 * OFFER_SLOTS + cardGap * (OFFER_SLOTS - 1);
+    const cardsH = Math.min(bottomY - cardTop, Math.max(colH - head, minimumCardsH));
+    offerCards = { x: rightX, y: cardTop, w: colW, h: cardsH };
     offersPanel = {
       x: rightX - pad * 0.5,
       y: colTop - pad * 0.4,
       w: colW + pad,
-      h: colH + pad * 0.8,
+      h: Math.max(colH + pad * 0.8, cardTop + cardsH - (colTop - pad * 0.4) + pad * 0.4),
     };
     // 카드가 판을 덮지 않는다. 보상 단계가 모달이 될 일이 없다.
     roomy = true;

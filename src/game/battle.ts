@@ -1215,7 +1215,7 @@ function spendDefenseCharge(state: RunState): boolean {
  * 있으나 마나가 된다.
  */
 export function dodgeUsable(state: RunState): boolean {
-  return defenseResourceAvailable(state) || (sweepZones.length > 0 && sweepBurstCharged);
+  return defenseResourceAvailable(state) || sweepDodgeFree(state);
 }
 
 /**
@@ -2528,6 +2528,16 @@ let sweepBoss: Cat | null = null;
 let sweepBurstCharged = false;
 
 /**
+ * 순차 스윕의 두 번째 파동이 이미 지불한 한 번의 방어 개입을 재사용하는가.
+ * 입력 활성화·실제 소비·시각/접근성 라벨이 이 판정 하나를 공유해야 화면이
+ * 남은 차지를 보여 주면서 실제로는 무료로 처리하는 모순이 생기지 않는다.
+ */
+export function sweepDodgeFree(state: RunState): boolean {
+  const bossTelegraphUp = state.enemy.some((c) => c?.alive && (c.telegraph || c.telegraph2));
+  return sweepZones.length > 0 && sweepBurstCharged && !bossTelegraphUp;
+}
+
+/**
  * 문턱 하나가 파동 두 개(홀수 행 묶음 → 짝수 행 묶음)를 한 번에 예약한다.
  * 실제로 켜는 것은 `advanceSweepQueue`이고, 이후 진행은 `tickSweepQueue`가
  * 보스의 다음 판단과 무관하게 스스로 돈다 — 예전엔 문턱 하나가 행 하나만
@@ -3108,8 +3118,7 @@ export function stepBattle(state: RunState, dtMs: number): void {
     // 처리하므로, 이 한정이 없으면 sweep 중에 뜬 보스 예고까지 공짜·무쿨다운
     // 으로 피하는 길이 열린다(리뷰 A6 — 현재 킷 배치에선 미발현이지만
     // sweep과 다른 예고를 같은 킷에 넣는 순간 터진다).
-    const bossTelegraphUp = state.enemy.some((c) => c?.alive && (c.telegraph || c.telegraph2));
-    const sweepFree = sweepZones.length > 0 && sweepBurstCharged && !bossTelegraphUp;
+    const sweepFree = sweepDodgeFree(state);
     if (intent?.kind === "dodge" && dodgeUsable(state) && doDodge(state)) {
       if (sweepFree) {
         // 공짜 — 이미 이 스윕 문턱에서 차지를 썼다.

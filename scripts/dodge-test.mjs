@@ -11,7 +11,16 @@
  *
  * 실행: npm run dodge:test
  */
-import { clearBattleFx, creepZones, hazardsActive, inTelegraph, stepBattle, sweepZones } from "../src/game/battle.ts";
+import {
+  clearBattleFx,
+  creepZones,
+  hazardsActive,
+  inTelegraph,
+  stepBattle,
+  sweepDodgeFree,
+  sweepZones,
+} from "../src/game/battle.ts";
+import { deriveAccessibilityModel } from "../src/game/accessibility.ts";
 import { BALANCE } from "../src/game/balance.ts";
 import { walkMap, leaveShop } from "./bot-policy.mjs";
 import { isBossStep, STAGE_STEPS } from "../src/game/map.ts";
@@ -478,6 +487,8 @@ console.log("회피 동작 검사\n");
   let paidBudgetOk = 0;
   let freeBudgetAll = 0;
   let freeBudgetOk = 0;
+  let freeModeOk = 0;
+  let freeLabelOk = 0;
   for (let seed = 1; seed <= 40; seed++) {
     /**
      * `sweepZones`(와 `creepZones`)는 battle.ts의 모듈 전역이라 `newRun`이
@@ -570,6 +581,9 @@ console.log("회피 동작 검사\n");
       if (needsSecond) {
         const beforeLocal = sweepBossCat.vulnerableCharges;
         const beforeGlobal = s.dodgeCharges;
+        if (sweepDodgeFree(s)) freeModeOk += 1;
+        const accessibility = deriveAccessibilityModel(s, false);
+        if (accessibility.controls[0]?.label.includes("연쇄 회피")) freeLabelOk += 1;
         s.pending.push({ kind: "act" });
         stepBattle(s, 16);
         freeBudgetAll += 1;
@@ -587,6 +601,10 @@ console.log("회피 동작 검사\n");
     paidBudgetAll > 0 && paidBudgetOk === paidBudgetAll, `${paidBudgetOk}/${paidBudgetAll}`);
   check("순차 스윕 두 번째 무료 파동은 local/global을 모두 보존한다",
     freeBudgetAll > 0 && freeBudgetOk === freeBudgetAll, `${freeBudgetOk}/${freeBudgetAll}`);
+  check("순차 스윕 두 번째 파동은 공용 무료 판정으로 열린다",
+    freeBudgetAll > 0 && freeModeOk === freeBudgetAll, `${freeModeOk}/${freeBudgetAll}`);
+  check("순차 스윕 두 번째 파동의 접근성 라벨은 연쇄 회피다",
+    freeBudgetAll > 0 && freeLabelOk === freeBudgetAll, `${freeLabelOk}/${freeBudgetAll}`);
 }
 
 // ── 11. hazardsActive — creep/sweep만 떠 있어도 참 (하네스 실명 재발 방지) ──
