@@ -1,7 +1,9 @@
 {
-  "schema": 1,
+  "schema": 2,
   "generatedFrom": {
-    "commit": "3c97de0",
+    "commit": "06a775f",
+    "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+    "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
     "dirty": false,
     "reproducible": true,
     "node": "v24.12.0",
@@ -22,42 +24,42 @@
   },
   "distribution": {
     "min": 1,
-    "p25": 8,
+    "p25": 6,
     "median": 14,
-    "p75": 20,
-    "max": 36,
-    "mean": 14.39,
+    "p75": 21,
+    "max": 42,
+    "mean": 14.14,
     "hitMaxWave": 0
   },
   "session": {
-    "battleSecP25": 110.5,
-    "battleSecMedian": 177.8,
-    "battleSecP75": 256.7
+    "battleSecP25": 86.9,
+    "battleSecMedian": 156,
+    "battleSecP75": 222.8
   },
   "waveKinds": {
     "mixed": {
-      "tried": 792,
-      "passPct": 95.6,
-      "p50Sec": 4.1,
-      "p90Sec": 6.3
+      "tried": 617,
+      "passPct": 96.3,
+      "p50Sec": 4,
+      "p90Sec": 6.4
     },
     "rush": {
-      "tried": 779,
-      "passPct": 98.8,
-      "p50Sec": 4.3,
-      "p90Sec": 6.8
+      "tried": 666,
+      "passPct": 99.5,
+      "p50Sec": 4.1,
+      "p90Sec": 6.7
     },
     "snipe": {
-      "tried": 1215,
-      "passPct": 93.3,
+      "tried": 1166,
+      "passPct": 94.4,
       "p50Sec": 6.4,
-      "p90Sec": 10.8
+      "p90Sec": 10.4
     },
     "boss": {
-      "tried": 1531,
-      "passPct": 88.6,
-      "p50Sec": 23.5,
-      "p90Sec": 42.9
+      "tried": 1364,
+      "passPct": 84.7,
+      "p50Sec": 24,
+      "p90Sec": 42.1
     }
   },
   "balance": {
@@ -71,50 +73,303 @@
     "dodgeCharges": 2
   },
   "build": {
-    "bundleBytes": 153462
+    "bundleBytes": 171623
+  },
+  "verification": {
+    "sixAxis": [
+      {
+        "axis": "sim",
+        "status": "PASS",
+        "exitCode": 0,
+        "command": "npm run --silent sim",
+        "seeds": "1..300",
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "node": "v24.12.0",
+        "sha256": "2669a4111fec1bc77a97b35e3bf3ec8e6c3a5e9e8bd7b70a4f9fe6982be9b171",
+        "logShaMatches": true
+      },
+      {
+        "axis": "decisions",
+        "status": "PASS",
+        "exitCode": 0,
+        "command": "npm run --silent decisions",
+        "seeds": "1..300",
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "node": "v24.12.0",
+        "sha256": "3b672c668687f9badc3b076b9d17f640215947f1c5735acce28aa32d40f6375a",
+        "logShaMatches": true
+      },
+      {
+        "axis": "placement",
+        "status": "PASS",
+        "exitCode": 0,
+        "command": "npm run --silent placement",
+        "seeds": "1..1200",
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "node": "v24.12.0",
+        "sha256": "96827b0f780b53b60c0fe2028c70e75220214ff18eb348e6a442e9d29a9ee235",
+        "logShaMatches": true
+      },
+      {
+        "axis": "intervention",
+        "status": "PASS",
+        "exitCode": 0,
+        "command": "npm run --silent intervention",
+        "seeds": "1..300",
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "node": "v24.12.0",
+        "sha256": "b61761ac4cc996e4641576ccc3db4965227a7967602bed334090bedf745d8ab9",
+        "logShaMatches": true
+      },
+      {
+        "axis": "map",
+        "status": "PASS",
+        "exitCode": 0,
+        "command": "npm run --silent map",
+        "seeds": "prep:1..300;policy-space:1..1500",
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "node": "v24.12.0",
+        "sha256": "6345a6e7678898265ed0db4d7f7442aa7a7564ab6e2f151d5bb167eb555c6aae",
+        "logShaMatches": true
+      },
+      {
+        "axis": "relics",
+        "status": "PASS",
+        "exitCode": 0,
+        "command": "npm run --silent relics",
+        "seeds": "1..2000",
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "node": "v24.12.0",
+        "sha256": "858ecb62eb874f364c4dd19b94bd491bc6773790f7e669336714d0db9f4cfd24",
+        "logShaMatches": true
+      }
+    ],
+    "provenanceMatches": true,
+    "allSixPassed": true,
+    "raidContracts": {
+      "source": {
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "command": "node --experimental-strip-types scripts/contract-space.mjs",
+        "seeds": {
+          "from": 10001,
+          "to": 11800,
+          "runs": 1800
+        },
+        "exitCode": 0,
+        "node": "v24.12.0"
+      },
+      "runs": 1800,
+      "seeds": {
+        "from": 10001,
+        "to": 11800
+      },
+      "rewardOnly": {
+        "median": 11,
+        "pass": 0.7810264385692068,
+        "topPickShare": 0.4076142878141996
+      },
+      "contractAware": {
+        "median": 20,
+        "pass": 0.9383480825958702,
+        "topPickShare": 0.3481637740914757
+      },
+      "forcedContractHoldout": {
+        "comparison": "각 계약을 모든 시드의 첫 두 보스에 연속 적용; 평균·95% 구간 비교",
+        "contracts": {
+          "split_night": {
+            "mean": 17.64,
+            "median": 18,
+            "ci95": [
+              17.29,
+              17.99
+            ],
+            "firstTwoBossPass": 0.9524
+          },
+          "spreading_dark": {
+            "mean": 16.73,
+            "median": 18,
+            "ci95": [
+              16.37,
+              17.08
+            ],
+            "firstTwoBossPass": 0.9626
+          },
+          "falling_floor": {
+            "mean": 17.09,
+            "median": 21,
+            "ci95": [
+              16.71,
+              17.46
+            ],
+            "firstTwoBossPass": 0.9407
+          },
+          "mirror_hunt": {
+            "mean": 17.95,
+            "median": 20,
+            "ci95": [
+              17.59,
+              18.3
+            ],
+            "firstTwoBossPass": 0.9575
+          },
+          "last_rescue": {
+            "mean": 16.84,
+            "median": 18,
+            "ci95": [
+              16.48,
+              17.2
+            ],
+            "firstTwoBossPass": 0.9592
+          },
+          "iron_tremor": {
+            "mean": 16.77,
+            "median": 20,
+            "ci95": [
+              16.39,
+              17.14
+            ],
+            "firstTwoBossPass": 0.938
+          }
+        },
+        "top": "mirror_hunt",
+        "runnerUp": "split_night",
+        "meanSpread": 1.22,
+        "topClearlySeparated": false,
+        "everyContractPlayable": true
+      },
+      "medianGain": 9,
+      "firstTwoBossGainPct": 15.7,
+      "gates": {
+        "depth": true,
+        "dominance": true,
+        "balance": true
+      },
+      "evidenceSha256": "47e5a4da6622f9f86dcea4ee91c5d2a300227a690b7c44a056c83c9261397abb"
+    },
+    "mapPreparation": {
+      "source": {
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "command": "node --experimental-strip-types scripts/map-prep-space.mjs",
+        "seeds": {
+          "routeRuns": [
+            {
+              "risk": 1,
+              "from": 100001,
+              "to": 100300,
+              "runs": 300
+            },
+            {
+              "risk": 2,
+              "from": 200001,
+              "to": 200300,
+              "runs": 300
+            },
+            {
+              "risk": 3,
+              "from": 300001,
+              "to": 300300,
+              "runs": 300
+            }
+          ],
+          "outcome": {
+            "from": 300001,
+            "to": 300300,
+            "runs": 300
+          }
+        },
+        "exitCode": 0,
+        "node": "v24.12.0"
+      },
+      "runs": 300,
+      "routes": {
+        "falling_floor": {
+          "risk": 1,
+          "route": "battle",
+          "accessible": 300,
+          "delivered": 300
+        },
+        "split_night": {
+          "risk": 2,
+          "route": "elite",
+          "accessible": 300,
+          "delivered": 300
+        },
+        "spreading_dark": {
+          "risk": 3,
+          "route": "shop",
+          "accessible": 300,
+          "delivered": 300
+        }
+      },
+      "highRiskOutcome": {
+        "contractId": "spreading_dark",
+        "unpreparedPassPct": 74,
+        "preparedPassPct": 91.7,
+        "gainPct": 17.7
+      },
+      "gates": {
+        "access": true,
+        "delivery": true,
+        "outcome": true
+      },
+      "evidenceSha256": "744187334de07563c439e457f28b42fbcf32530c0f7ad66e0c3d0261e35e33e0"
+    },
+    "mapSpace": {
+      "source": {
+        "head": "06a775f8aa15bc604614026df98b1e7ae3b0d923",
+        "tree": "563b78cc7e0278fe9b09b9a0e3e7bf925c08898c",
+        "dirty": false,
+        "command": "node --experimental-strip-types scripts/map-space.mjs",
+        "seeds": {
+          "from": 1,
+          "to": 1500,
+          "runs": 1500
+        },
+        "exitCode": 0,
+        "node": "v24.12.0"
+      },
+      "means": {
+        "전투만": 13.704,
+        "정예 몰빵": 13.740666666666666,
+        "정찰 몰빵": 12.495333333333333,
+        "무작위": 13.632,
+        "읽고 고름": 15.088
+      },
+      "spread": 2.5926666666666662,
+      "readMean": 15.088,
+      "randomMean": 13.632,
+      "bestMean": 15.088,
+      "readGap": 0,
+      "gates": {
+        "effect": true,
+        "read": true
+      },
+      "evidenceSha256": "d3ee5cd87f48af446ac4b374ccab42297668699629b164cbd5dd02749fac14c1"
+    }
   },
   "openIssues": [
-    {
-      "id": "buy-depth-below-bar",
-      "what": "구매 깊이가 기준 아래로 내려갔다",
-      "measured": "깊이 1.3웨이브 (기준 1.5) · 몰빵 피벗이 무작위 구매를 이기는 시드 54%",
-      "diagnosis": "한 걸음의 순서를 map → reward → prepare로 바꾸면서 rollOffers가 전투 직후에서 길을 고른 뒤로 옮겨 갔다. 같은 시드가 다른 카드를 내므로 이건 같은 것을 다시 잰 값이 아니라 다른 표본이다. 그래도 기준을 못 넘은 것은 사실이고, 54%는 짝비교로도 동전 던지기에 가깝다",
-      "history": "순서를 바꾸기 전 2.5 (같은 스크립트·같은 시드 범위)",
-      "consequence": "제출 문서가 내세우던 '깊은 축 셋(구매·유물·개입)'은 이 수치로는 둘이다. 되돌릴지 다시 튜닝할지는 측정으로 정한다",
-      "gate": "npm run decisions가 판정만 찍고 막지 않는다 (exit 0)"
-    },
-    {
-      "id": "placement-no-depth",
-      "what": "배치에 깊이가 없다 — 드래그가 장식이다",
-      "measured": "폭 3.1웨이브(고의적 최악 대비) / 깊이 0.2웨이브(자동 배치 대비)",
-      "diagnosis": "자동 배치(bestFreeCell)가 이미 최선에 가깝다. 관문은 폭으로 잡고 있어 통과하지만, 그 관문은 '배치를 망칠 수 있는가'를 재는 회귀 감시지 '배치가 결정인가'의 증명이 아니다",
-      "tried": [
-        "보스 평타 램프(bossAtkMulFirst 신설) — 탱킹이 없던 문제. 깊이 0.2→0.7, 중앙값 11. 단독으로는 기준 미달",
-        "예고 고정 피해(telegraphFlatShare 신설) — 비율 피해라 전사 190과 마법사 94가 같은 횟수에 죽던 문제. 깊이 0.6, 중앙값 16",
-        "둘을 합침 — 깊이 0.2로 되돌아가고 중앙값 8. bot-policy.mjs에 적힌 '보스가 세지면 축이 압축된다'가 재현됐다",
-        "회피를 순간이동에서 고정거리 밀어내기로 — 배치 깊이 0.2→0.7이지만 구매 깊이가 2.5→1.2로 떨어져 순손실. 되돌렸다"
-      ],
-      "diagnosisRoot": "개입하면 예고를 70~100% 회피하고, 안 맞으면 위치가 결과에 안 닿는다. 통제 아레나(npm run formation)에서 회피 차지를 6에서 1로 줄여도 12칸이 전부 승률 100%였다",
-      "gate": "npm run placement가 폭으로만 판정하고 깊이는 판정만 찍는다 (exit 0)"
-    },
     {
       "id": "strike-not-a-choice",
       "what": "취약 창 연타가 선택이 아니다",
       "measured": "회피만 83.3% → 읽고 판단 85.7% (합산 기준 +2.4%p)",
       "diagnosis": "연타에 비용이 없고 창이 3초로 제한돼 있어 '열리면 무조건 누른다'가 유일한 답이다. 화면에서 가장 화려한 연출인데 결정으로서는 가장 작다",
       "consequence": "강화하거나(비용·상충 부여), 결정이 아닌 보상 연출로 인정하고 그렇게 설명해야 한다"
-    },
-    {
-      "id": "map-axis",
-      "what": "지도(경로 선택)가 결정 기준을 못 넘는다",
-      "measured": "격차 0.9웨이브 (기준 1.5)",
-      "tried": [
-        "정예 보상 강화",
-        "노드를 성격으로 분화",
-        "환전 불가 전술 슬롯(회피 +2/4/6)"
-      ],
-      "diagnosis": "자원이 생선 하나뿐이라 모든 경로 선택이 '더 벌까 덜 쓸까'로 수렴한다",
-      "gate": "npm run map이 exit 1을 내고 npm run verify가 그것 때문에 빨간불이다"
     },
     {
       "id": "matchup-metric-noisy",
