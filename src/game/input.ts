@@ -1,14 +1,9 @@
 import { actIntentKind, actUsable, dodgeUsable, dualChoiceActive } from "./battle.ts";
-import { hitCell, rectHas, type Layout, type Rect } from "./layout.ts";
+import { hitCell, type Layout } from "./layout.ts";
 import { openLanes } from "./map.ts";
 import {
-  gameoverGeometry,
-  nearestMapNode,
-  offerRects,
-  openMapNodeRects,
-  raidContractRects,
-  rerollRect,
   splitButtonChoice,
+  uiInteractionDescriptor,
 } from "./render.ts";
 import { mapStep, type NextChoice, type RunState } from "./run.ts";
 import type { Intervention } from "./types.ts";
@@ -141,52 +136,21 @@ function canRearrange(state: RunState): boolean {
   return state.phase === "reward" || state.phase === "prepare";
 }
 
-function enclosingRect(first: Rect | null, next: Rect): Rect {
-  if (!first) return { ...next };
-  const x = Math.min(first.x, next.x);
-  const y = Math.min(first.y, next.y);
-  return {
-    x,
-    y,
-    w: Math.max(first.x + first.w, next.x + next.w) - x,
-    h: Math.max(first.y + first.h, next.y + next.h) - y,
-  };
-}
-
 function pointerDown(ctx: GameInputContext, event: Extract<GameInputEvent, { kind: "pointer-down" }>): GameInputDispatch {
   const { state, layout, drag } = ctx;
   const { x, y } = event;
   const common = { preventDefault: true, unlockAudio: true } as const;
-
-  // 음소거는 방금 바뀐 화면을 향한 잔여 탭이 아니므로 phase lock보다 먼저다.
-  if (rectHas(layout.mute, x, y)) return result(drag, { kind: "mute" }, common);
-  if (ctx.phaseLocked) return result(drag, NONE, common);
-
-  if (state.phase === "gameover") {
-    const { choices } = gameoverGeometry(layout, state);
-    const choice: NextChoice | null = rectHas(choices.retry, x, y)
-      ? "retry"
-      : rectHas(choices.daily, x, y)
-        ? "daily"
-        : rectHas(choices.challenge, x, y)
-          ? "challenge"
-          : null;
-    if (choice) return result(drag, { kind: "run-choice", choice }, common);
+  const interaction = uiInteractionDescriptor(layout, state, { ...drag, hoverX: x, hoverY: y }, ctx.phaseLocked);
+  if (interaction.mute) return result(drag, { kind: "mute" }, common);
+  if (interaction.gameoverChoice) {
+    return result(drag, { kind: "run-choice", choice: interaction.gameoverChoice }, common);
   }
-
-  // 짧은 세로 화면에서는 계약 티켓이 평소 하단 버튼 자리까지 쓴다. 계약 제안이
-  // 떠 있는 동안은 카드가 유일한 CTA이므로 숨은 primary 기하보다 먼저 판정한다.
-  if (state.phase === "map" && state.raidOffers.length > 0) {
-    const index = raidContractRects(layout, state.raidOffers.length).findIndex((rect) => rectHas(rect, x, y));
-    return result(drag, index >= 0 ? { kind: "raid-contract", index } : NONE, common);
+  if (interaction.raidContractIndex >= 0) {
+    return result(drag, { kind: "raid-contract", index: interaction.raidContractIndex }, common);
   }
-
-  if (rectHas(layout.button, x, y)) {
+  if (interaction.primary) {
     if (state.phase === "battle") {
       const dual = dualChoiceActive(state);
-      if ((dual && !dodgeUsable(state)) || (!dual && !actUsable(state))) {
-        return result(drag, NONE, common);
-      }
       return result(
         drag,
         { kind: "intent", intent: dual ? splitButtonChoice(layout.button, x) : "act", dual },
@@ -195,32 +159,13 @@ function pointerDown(ctx: GameInputContext, event: Extract<GameInputEvent, { kin
     }
     return result(drag, { kind: "primary" }, common);
   }
-
-  if (state.phase === "map") {
-    const node = nearestMapNode(openMapNodeRects(layout, state), x, y);
-    return result(drag, node ? { kind: "map-node", index: node.idx } : NONE, common);
+  if (interaction.mapNodeIndex >= 0) {
+    return result(drag, { kind: "map-node", index: interaction.mapNodeIndex }, common);
   }
-
-  if (state.phase === "reward") {
-    if (rectHas(rerollRect(layout), x, y)) return result(drag, { kind: "reroll" }, common);
-
-    const cards = offerRects(layout);
-    const index = cards.findIndex((rect) => rectHas(rect, x, y));
-    // 빈 카드도 보이는 슬롯이다. 구매 액션 대신 입력만 삼켜 아래 보드로 새지 않게 한다.
-    if (index >= 0) {
-      return result(drag, state.offers[index] ? { kind: "offer", index } : NONE, common);
-    }
-
-    if (!layout.columns) {
-      let panel: Rect | null = layout.offersPanel ? { ...layout.offersPanel } : null;
-      for (const card of cards) panel = enclosingRect(panel, card);
-      if (panel && rectHas(panel, x, y)) return result(drag, NONE, common);
-    }
-  }
-
-  if (!canRearrange(state) || drag.active) return result(drag, NONE, common);
-  const fromCell = hitCell(layout, "ally", x, y);
-  if (fromCell < 0 || !state.ally[fromCell]) return result(drag, NONE, common);
+  if (interaction.reroll) return result(drag, { kind: "reroll" }, common);
+  if (interaction.offerIndex >= 0) return result(drag, { kind: "offer", index: interaction.offerIndex }, common);
+  const fromCell = interaction.draggableCell;
+  if (fromCell < 0) return result(drag, NONE, common);
   return {
     ...result(drag, NONE, common),
     drag: { ...drag, active: true, fromCell, x, y, pointerId: event.pointerId },

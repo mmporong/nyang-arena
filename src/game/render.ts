@@ -26,7 +26,7 @@ import { bossHint, bossOrdinalInStage, isRaidPrepStep, nodeInfo, openLanes, STAG
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted, playUiCue } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
-import { cellRect, fieldToScreen, uiSpace, type Layout, type Rect } from "./layout.ts";
+import { cellRect, fieldToScreen, hitCell, uiSpace, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
   boardUnits,
@@ -2658,11 +2658,244 @@ interface BuyTween {
   startedAt: number;
 }
 
+export interface UiInteractionDescriptor {
+  cursor: "default" | "pointer" | "grab" | "grabbing";
+  mute: boolean;
+  /** 비활성 컨트롤·빈 카드·접힌 상점 패널처럼 아래 판으로 새면 안 되는 영역. */
+  consumesPointer: boolean;
+  offerIndex: number;
+  reroll: boolean;
+  primary: boolean;
+  raidContractIndex: number;
+  mapNodeIndex: number;
+  gameoverChoice: Exclude<NextChoice, "again"> | null;
+  draggableCell: number;
+}
+
+function pointInRect(rect: Rect, x: number, y: number): boolean {
+  return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+}
+
+/** 버튼 얼굴의 pulse와 별개로, 지금 입력을 받아 큐에 보존할 수 있는가. */
+function primaryButtonAcceptsInput(s: RunState): boolean {
+  if (s.phase === "map") return false;
+  if (s.phase !== "battle") return true;
+  // 쿨다운 중 입력도 battle.ts의 pending 큐가 보존한다. 여기서 cooldown이나
+  // pulse 조건으로 막으면 포인터만 예약 입력을 잃고 Space/G와 갈라진다.
+  return dualChoiceActive(s) ? dodgeUsable(s) : actUsable(s);
+}
+
+function enclosingRect(first: Rect | null, next: Rect): Rect {
+  if (!first) return { ...next };
+  const x = Math.min(first.x, next.x);
+  const y = Math.min(first.y, next.y);
+  return {
+    x,
+    y,
+    w: Math.max(first.x + first.w, next.x + next.w) - x,
+    h: Math.max(first.y + first.h, next.y + next.h) - y,
+  };
+}
+
+/**
+ * 한 프레임의 포인터 대상과 cursor를 한곳에서 정한다.
+ *
+ * draw 함수는 이 결과를 소비할 뿐 canvas cursor를 직접 쓰지 않는다. 따라서 지도,
+ * 계약, 상점이 같은 프레임에 그려져도 마지막 draw가 pointer를 default로 덮지 않는다.
+ */
+export function uiInteractionDescriptor(
+  L: Layout,
+  s: RunState,
+  drag: Readonly<DragState>,
+  phaseLocked = false,
+): UiInteractionDescriptor {
+  const none: UiInteractionDescriptor = {
+    cursor: drag.active ? "grabbing" : "default",
+    mute: false,
+    consumesPointer: false,
+    offerIndex: -1,
+    reroll: false,
+    primary: false,
+    raidContractIndex: -1,
+    mapNodeIndex: -1,
+    gameoverChoice: null,
+    draggableCell: -1,
+  };
+  if (drag.active) return none;
+  const { hoverX: x, hoverY: y } = drag;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return none;
+  if (pointInRect(L.mute, x, y)) return { ...none, cursor: "pointer", mute: true, consumesPointer: true };
+  if (phaseLocked) return { ...none, consumesPointer: true };
+
+  if (s.phase === "gameover") {
+    const { choices } = gameoverGeometry(L, s);
+    const gameoverChoice: Exclude<NextChoice, "again"> | null = pointInRect(choices.retry, x, y)
+      ? "retry"
+      : pointInRect(choices.daily, x, y)
+        ? "daily"
+        : pointInRect(choices.challenge, x, y)
+          ? "challenge"
+          : null;
+    if (gameoverChoice) return { ...none, cursor: "pointer", consumesPointer: true, gameoverChoice };
+  }
+
+  if (s.phase === "map") {
+    if (s.raidOffers.length > 0) {
+      const raidContractIndex = raidContractRects(L, s.raidOffers.length).findIndex((rect) => pointInRect(rect, x, y));
+      return raidContractIndex >= 0
+        ? { ...none, cursor: "pointer", consumesPointer: true, raidContractIndex }
+        : { ...none, consumesPointer: true };
+    }
+  }
+
+  if (pointInRect(L.button, x, y) && primaryButtonAcceptsInput(s)) {
+    return { ...none, cursor: "pointer", consumesPointer: true, primary: true };
+  }
+  if (pointInRect(L.button, x, y)) return { ...none, consumesPointer: true };
+
+  if (s.phase === "map") {
+    const node = nearestMapNode(openMapNodeRects(L, s), x, y);
+    return node
+      ? { ...none, cursor: "pointer", consumesPointer: true, mapNodeIndex: node.idx }
+      : { ...none, consumesPointer: true };
+  }
+
+  if (s.phase === "reward") {
+    const reroll = rerollRect(L);
+    if (pointInRect(reroll, x, y)) {
+      // 비용 부족·유물 드래프트도 실제 reroll 경계를 거쳐 즉시 이유를 알려 준다.
+      // 키보드 R과 같은 명령을 내야 실패 outline/notice가 포인터에서도 사라지지 않는다.
+      return { ...none, cursor: "pointer", consumesPointer: true, reroll: true };
+    }
+    const cards = offerRects(L);
+    const slot = cards.findIndex((rect) => pointInRect(rect, x, y));
+    if (slot >= 0) {
+      return s.offers[slot]
+        ? { ...none, cursor: "pointer", consumesPointer: true, offerIndex: slot }
+        : { ...none, consumesPointer: true };
+    }
+    if (!L.columns) {
+      let panel: Rect | null = { ...L.offersPanel };
+      for (const card of cards) panel = enclosingRect(panel, card);
+      if (panel && pointInRect(panel, x, y)) return { ...none, consumesPointer: true };
+    }
+    const cell = hitCell(L, "ally", x, y);
+    if (cell >= 0 && s.ally[cell]) {
+      return { ...none, cursor: "grab", consumesPointer: true, draggableCell: cell };
+    }
+  }
+
+  if (s.phase === "prepare") {
+    const cell = hitCell(L, "ally", x, y);
+    if (cell >= 0 && s.ally[cell]) {
+      return { ...none, cursor: "grab", consumesPointer: true, draggableCell: cell };
+    }
+  }
+  return none;
+}
+
 const buyTweens: BuyTween[] = [];
 /** 비행·도착 확인을 합친 420ms. 다음 입력을 막지 않으면서 적용 위치까지 읽히는 길이다. */
 const BUY_TWEEN_MS = 420;
 /** 모션 축소에서는 비행을 없애고 도착점 확인만 짧게 남긴다. */
 const BUY_REDUCED_MS = 180;
+
+export type OfferPurchaseOutcome = "success" | "insufficient-fish";
+
+export interface OfferPurchaseFeedbackDescriptor {
+  slot: number;
+  rect: Rect;
+  label: "생선 부족";
+  labelX: number;
+  labelY: number;
+  alpha: number;
+  lineWidth: number;
+  durationMs: number;
+  translateX: 0;
+  translateY: 0;
+}
+
+/**
+ * 구매 실패 연출의 순수 기하. 성공은 기존 카드→보드 트윈만 사용하므로 여기서
+ * descriptor를 만들지 않는다. 실패는 카드 자리에서 160~200ms 정지 outline과
+ * 짧은 라벨만 남기며, 화면 밖 좌표나 흔들림을 만들지 않는다.
+ */
+export function offerPurchaseFeedbackDescriptor(
+  L: Layout,
+  slot: number,
+  outcome: OfferPurchaseOutcome,
+  elapsedMs: number,
+  reduceMotion: boolean,
+): OfferPurchaseFeedbackDescriptor | null {
+  if (!Number.isInteger(slot) || outcome === "success" || !Number.isFinite(elapsedMs) || elapsedMs < 0) return null;
+  const source = offerRects(L)[slot];
+  const durationMs = reduceMotion ? 160 : 200;
+  if (!source || elapsedMs >= durationMs) return null;
+  const inset = Math.max(1, Math.min(3, Math.min(source.w, source.h) * 0.025));
+  const x = Math.max(0, Math.min(L.w, source.x + inset));
+  const y = Math.max(0, Math.min(L.h, source.y + inset));
+  const right = Math.max(x, Math.min(L.w, source.x + source.w - inset));
+  const bottom = Math.max(y, Math.min(L.h, source.y + source.h - inset));
+  const progress = Math.min(1, elapsedMs / durationMs);
+  return {
+    slot,
+    rect: { x, y, w: right - x, h: bottom - y },
+    label: "생선 부족",
+    labelX: Math.max(0, Math.min(L.w, source.x + source.w / 2)),
+    labelY: Math.max(0, Math.min(L.h, source.y + Math.max(14, Math.min(24, source.h * 0.18)))),
+    alpha: progress <= 0.58 ? 1 : Math.max(0, 1 - (progress - 0.58) / 0.42),
+    lineWidth: Math.max(2, Math.min(4, L.scale * 2.8)),
+    durationMs,
+    translateX: 0,
+    translateY: 0,
+  };
+}
+
+export interface OfferPurchaseFailure {
+  slot: number;
+  /** 같은 슬롯에 새 카드가 들어와도 실패 표식이 옮겨 붙지 않게 하는 객체 identity. */
+  offer: Offer;
+  snapshot: Pick<Offer, "kind" | "cost" | "label">;
+  startedAt: number;
+}
+
+let offerPurchaseFailure: OfferPurchaseFailure | null = null;
+
+/** 렌더 상태와 무관하게 검증할 수 있는 실패 상태 생성 경계. */
+export function createOfferPurchaseFailure(
+  slot: number,
+  offer: Offer,
+  startedAt: number,
+): OfferPurchaseFailure | null {
+  if (!Number.isInteger(slot) || slot < 0 || slot >= OFFER_SLOTS || !Number.isFinite(startedAt)) return null;
+  return {
+    slot,
+    offer,
+    snapshot: { kind: offer.kind, cost: offer.cost, label: offer.label },
+    startedAt,
+  };
+}
+
+/** 재추첨·구매로 슬롯 내용이 바뀐 뒤 이전 실패 상태를 폐기하는 순수 판정. */
+export function offerPurchaseFailureIsCurrent(
+  failure: OfferPurchaseFailure,
+  offers: readonly (Offer | null)[],
+): boolean {
+  const current = offers[failure.slot];
+  return current === failure.offer &&
+    current.kind === failure.snapshot.kind &&
+    current.cost === failure.snapshot.cost &&
+    current.label === failure.snapshot.label;
+}
+
+export function clearOfferPurchaseFailure(): void {
+  offerPurchaseFailure = null;
+}
+
+/** 생선 부족이 확정된 카드만 등록한다. 소리와 파티클은 의도적으로 없다. */
+export function spawnOfferPurchaseFailure(slot: number, offer: Offer): void {
+  offerPurchaseFailure = createOfferPurchaseFailure(slot, offer, performance.now());
+}
 
 /**
  * 카드를 하나 산 순간 부른다. `main.ts`의 `buyWithFx`가 유일한 호출부다.
@@ -2672,6 +2905,7 @@ const BUY_REDUCED_MS = 180;
  * 몰라도 된다.
  */
 export function spawnBuyTween(offer: Offer, slot: number, cell: number | null): void {
+  clearOfferPurchaseFailure();
   const accent =
     offer.kind === "relic" ? T.fish : offer.kind === "upgrade" ? T.gold : offer.breed ? CLASS_COLOR[offer.breed.cls] : T.fish;
   const cue = offer.kind === "upgrade" ? "upgrade" : "purchase";
@@ -2923,7 +3157,7 @@ function drawRerollButton(
   s: RunState,
   rr: Rect,
 ): void {
-  const canRoll = !s.relicDraftActive && s.gold >= REROLL_COST;
+  const canRoll = !s.relicDraftActive && (s.freeRerolls > 0 || s.gold >= REROLL_COST);
   roundRect(ctx, rr, rr.h * 0.5);
   ctx.fillStyle = canRoll ? "rgba(111,182,220,0.14)" : "rgba(239,224,198,0.04)";
   ctx.fill();
@@ -3405,6 +3639,39 @@ function feedbackAlpha(progress: number, fadeFrom = 0.68): number {
   return Math.max(0, 1 - (progress - fadeFrom) / (1 - fadeFrom));
 }
 
+function drawOfferPurchaseFailure(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const fx = offerPurchaseFailure;
+  if (!fx) return;
+  if (s.phase !== "reward" || !offerPurchaseFailureIsCurrent(fx, s.offers)) {
+    clearOfferPurchaseFailure();
+    return;
+  }
+  const visual = offerPurchaseFeedbackDescriptor(
+    L,
+    fx.slot,
+    "insufficient-fish",
+    performance.now() - fx.startedAt,
+    reducedMotion(),
+  );
+  if (!visual) {
+    clearOfferPurchaseFailure();
+    return;
+  }
+  ctx.save();
+  ctx.globalAlpha = visual.alpha;
+  roundRect(ctx, visual.rect, Math.max(6, L.scale * 8));
+  ctx.strokeStyle = T.action;
+  ctx.lineWidth = visual.lineWidth;
+  ctx.stroke();
+  uiText(ctx, visual.label, visual.labelX, visual.labelY, Math.max(12, Math.min(16, L.scale * 14)), T.gold, {
+    align: "center",
+    weight: 900,
+    outline: true,
+    maxWidth: Math.max(48, visual.rect.w - 12),
+  });
+  ctx.restore();
+}
+
 function drawRerollFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   const fx = rerollFeedback;
   if (!fx) return;
@@ -3420,7 +3687,7 @@ function drawRerollFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunStat
     return;
   }
 
-  const color = fx.success ? T.gold : "#D58A48";
+  const color = fx.success ? T.gold : T.action;
   const alpha = feedbackAlpha(progress, fx.success ? 0.72 : 0.58);
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -3556,9 +3823,44 @@ function drawNextRunFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunSta
 
 /** 모든 선택 확인은 최종 전환 막 위에 그려 새 화면과 입력 상태가 어긋나지 않게 한다. */
 function drawInteractionFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  drawOfferPurchaseFailure(ctx, L, s);
   drawRerollFeedback(ctx, L, s);
   drawMapChoiceFeedback(ctx, L, s);
   drawNextRunFeedback(ctx, L, s);
+}
+
+/** 상점·주 행동·패배 선택이 같은 hover 문법(주황 outline)을 공유한다. */
+function drawUiHoverFeedback(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+  interaction: UiInteractionDescriptor,
+): void {
+  let rect: Rect | null = null;
+  if (interaction.offerIndex >= 0) rect = offerRects(L)[interaction.offerIndex] ?? null;
+  else if (interaction.reroll) rect = rerollRect(L);
+  else if (interaction.primary) rect = L.button;
+  else if (interaction.gameoverChoice) rect = gameoverGeometry(L, s).choices[interaction.gameoverChoice];
+  if (!rect) return;
+
+  const inset = Math.max(1, Math.min(3, Math.min(rect.w, rect.h) * 0.025));
+  const outline: Rect = {
+    x: rect.x + inset,
+    y: rect.y + inset,
+    w: Math.max(0, rect.w - inset * 2),
+    h: Math.max(0, rect.h - inset * 2),
+  };
+  ctx.save();
+  roundRect(ctx, outline, Math.max(6, Math.min(outline.h * 0.26, L.scale * 10)));
+  ctx.strokeStyle = T.action;
+  ctx.lineWidth = Math.max(2, Math.min(3, L.scale * 3));
+  ctx.stroke();
+  if (!reducedMotion()) {
+    ctx.globalAlpha = 0.08;
+    ctx.fillStyle = T.action;
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 export interface MapChoiceLabelGeometry {
@@ -4441,7 +4743,7 @@ function drawRaidContractOverlay(
   ctx: CanvasRenderingContext2D,
   L: Layout,
   s: RunState,
-  drag: DragState,
+  pointer: UiInteractionDescriptor,
 ): void {
   const rects = raidContractRects(L, s.raidOffers.length);
   const target = nextRaidBossTarget(s);
@@ -4467,17 +4769,7 @@ function drawRaidContractOverlay(
     );
   }
 
-  let hovered = -1;
-  rects.forEach((rect, index) => {
-    if (
-      drag.hoverX >= rect.x &&
-      drag.hoverX <= rect.x + rect.w &&
-      drag.hoverY >= rect.y &&
-      drag.hoverY <= rect.y + rect.h
-    ) hovered = index;
-  });
-  ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
-
+  const hovered = pointer.raidContractIndex;
   rects.forEach((rect, index) => {
     const contract = s.raidOffers[index];
     if (!contract) return;
@@ -4637,7 +4929,7 @@ function drawCrown(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: num
   ctx.restore();
 }
 
-function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: DragState): void {
+function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, pointer: UiInteractionDescriptor): void {
   if (s.phase !== "map") return;
   /**
    * 지도는 화면을 통째로 가진다.
@@ -4652,7 +4944,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   ctx.fillStyle = "rgba(10,7,5,0.98)";
   ctx.fillRect(0, 0, L.w, L.h);
   if (s.raidOffers.length > 0) {
-    drawRaidContractOverlay(ctx, L, s, drag);
+    drawRaidContractOverlay(ctx, L, s, pointer);
     return;
   }
   const step = mapStep(s);
@@ -4705,11 +4997,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
    * 고를 수 있는 칸만 반응한다. 못 가는 칸이 커지면 갈 수 있는 줄 알고 누르게
    * 되고, 그건 호버가 정보를 주는 게 아니라 거짓말을 하는 것이다.
    */
-  let hovered = -1;
-  if (drag.hoverX >= 0) {
-    const nearest = nearestMapNode(openMapNodeRects(L, s), drag.hoverX, drag.hoverY);
-    hovered = nearest?.idx ?? -1;
-  }
+  const hovered = pointer.mapNodeIndex;
 
   for (const { rect, step: st, idx } of rects) {
     const node = s.map.steps[st]?.[idx];
@@ -4838,9 +5126,6 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   // 나오던 자리다 — 여기만 앞의 보스 수를 안 세고 있었다.
   const bossLine =
     hotNode?.kind === "boss" ? bossHint(bossForIndex(bossIndexAt(s, step)).id) : null;
-  // 커서까지 바뀌어야 "누를 수 있다"가 끝까지 전달된다. 캔버스 게임은 이걸
-  // 안 하면 그림처럼 보인다.
-  ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
   const info = hotNode ? nodeInfo(hotNode.kind) : null;
   const hotIsPrep = hotNode && prepRoute === hotNode.kind;
   // 스테이지 제목은 아무것도 안 올렸을 때의 기본 줄에만 붙는다 — 노드를
@@ -5970,7 +6255,10 @@ export function render(
   s: RunState,
   drag: DragState,
   hoverCell: number,
+  phaseLocked = false,
 ): void {
+  const interaction = uiInteractionDescriptor(L, s, drag, phaseLocked);
+  ctx.canvas.style.cursor = interaction.cursor;
   watchRaidContractChoice(s);
   drawBackground(ctx, L, s);
   drawArena(ctx, L);
@@ -6000,10 +6288,11 @@ export function render(
   const covered = s.phase === "map";
   if (covered) {
     ctx.restore();
-    drawMap(ctx, L, s, drag);
+    drawMap(ctx, L, s, interaction);
     drawNotice(ctx, L, s);
     drawButton(ctx, L, s);
     drawRaidContractChoiceFeedback(ctx, L);
+    drawUiHoverFeedback(ctx, L, s, interaction);
     watchTransitions(s);
     drawCurtain(ctx, L);
     drawInteractionFeedback(ctx, L, s);
@@ -6091,13 +6380,14 @@ export function render(
   drawBottomZone(ctx, L, s);
   drawBuyTweens(ctx, L);
   drawSynergies(ctx, L, s);
-  drawMap(ctx, L, s, drag);
+  drawMap(ctx, L, s, interaction);
   drawNotice(ctx, L, s);
   // 부검을 먼저 깔고 버튼을 그 위에 올린다. 순서가 반대면 전면 어둠막이 버튼까지
   // 덮어서, 유일하게 누를 수 있는 물건이 비활성처럼 보였다.
   drawGameOver(ctx, L, s);
   drawButton(ctx, L, s);
   drawRaidContractChoiceFeedback(ctx, L);
+  drawUiHoverFeedback(ctx, L, s, interaction);
   // 막은 맨 위다. 아래에 무엇이 있든 전환이 전환으로 읽혀야 한다.
   watchTransitions(s);
   drawCurtain(ctx, L);

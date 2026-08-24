@@ -1,23 +1,30 @@
 import assert from "node:assert/strict";
 
+import { queueIntervention, stepBattle } from "../src/game/battle.ts";
+import { breedById } from "../src/game/breeds.ts";
 import { computeLayout, cellRect, hitCell, rectHas } from "../src/game/layout.ts";
 import { dispatchGameInput, executeGameInputAction } from "../src/game/input.ts";
 import { openLanes } from "../src/game/map.ts";
 import {
+  createOfferPurchaseFailure,
   drawRaidPatternEmblem,
   gameoverGeometry,
   isRaidContractFocused,
   normalizeRaidContractFocusIndex,
+  offerPurchaseFailureIsCurrent,
+  offerPurchaseFeedbackDescriptor,
   openMapNodeRects,
   offerRects,
   raidContractInteractionVisual,
   raidContractRects,
   rerollRect,
   setRaidContractFocusIndex,
+  uiInteractionDescriptor,
 } from "../src/game/render.ts";
 import {
   chooseNode,
   chooseRaidContract,
+  makeCat,
   mapStep,
   moveCat,
   newRun,
@@ -134,6 +141,55 @@ function pointerDown(state, layout, rect, drag = idleDrag(), phaseLocked = false
 const desktop = computeLayout(1280, 800, true);
 const state = newRun(424242);
 
+const failureVisual = offerPurchaseFeedbackDescriptor(desktop, 1, "insufficient-fish", 40, false);
+assert.ok(failureVisual, "생선 부족 카드의 국소 실패 descriptor가 사라졌다");
+assert.equal(failureVisual.durationMs, 200, "구매 실패가 160~220ms 계약을 벗어났다");
+assert.equal(failureVisual.label, "생선 부족", "구매 실패 라벨이 즉시 원인을 말하지 않는다");
+assert.deepEqual(
+  { x: failureVisual.translateX, y: failureVisual.translateY },
+  { x: 0, y: 0 },
+  "구매 실패가 카드 흔들림을 만들었다",
+);
+assert.equal(
+  offerPurchaseFeedbackDescriptor(desktop, 1, "success", 40, false),
+  null,
+  "구매 성공이 실패 outline 경로에 섞였다",
+);
+assert.equal(
+  offerPurchaseFeedbackDescriptor(desktop, 1, "insufficient-fish", 200, false),
+  null,
+  "구매 실패 outline이 계약 시간 뒤에도 남았다",
+);
+const reducedFailure = offerPurchaseFeedbackDescriptor(desktop, 1, "insufficient-fish", 40, true);
+assert.equal(reducedFailure?.durationMs, 160, "reduced-motion 실패 피드백이 160ms 정적 계약을 지키지 않았다");
+assert.equal(
+  offerPurchaseFeedbackDescriptor(desktop, Number.NaN, "insufficient-fish", 40, false),
+  null,
+  "NaN 슬롯이 구매 실패 기하로 들어왔다",
+);
+
+const failedOffer = {
+  kind: "recruit",
+  cost: 99,
+  label: "실패 표본",
+  sublabel: "identity 회귀",
+};
+const failureState = createOfferPurchaseFailure(1, failedOffer, 100);
+assert.ok(failureState, "유효한 구매 실패 상태를 만들지 못했다");
+assert.equal(offerPurchaseFailureIsCurrent(failureState, [null, failedOffer, null]), true);
+assert.equal(
+  offerPurchaseFailureIsCurrent(failureState, [null, { ...failedOffer }, null]),
+  false,
+  "재추첨한 새 카드에 이전 실패 상태가 옮겨 붙었다",
+);
+failedOffer.cost = 98;
+assert.equal(
+  offerPurchaseFailureIsCurrent(failureState, [null, failedOffer, null]),
+  false,
+  "동일 객체의 내용이 바뀌었는데 실패 snapshot이 남았다",
+);
+assert.equal(createOfferPurchaseFailure(Number.NaN, failedOffer, 100), null, "NaN 실패 슬롯이 상태로 등록됐다");
+
 // 짧은 세로 티켓 세 장도 카드 중심과 숫자 1/2/3이 같은 실제 계약 전이를 만든다.
 for (const [w, h] of [[320, 480], [390, 500]]) {
   const mobile = computeLayout(w, h, true);
@@ -225,6 +281,136 @@ assert.notDeepEqual(
   "재추첨이 비용과 카드 중 어느 것도 바꾸지 않았다",
 );
 
+// cursor는 draw 순서가 아니라 한 descriptor가 정한다. 상점 카드·재추첨·주 행동과
+// 패배 선택 모두 같은 pointer 상태를 쓰고, 화면 밖 좌표는 즉시 default로 돌아간다.
+const withHover = (rect) => {
+  const p = center(rect);
+  return { ...idleDrag(), hoverX: p.x, hoverY: p.y };
+};
+const visibleOfferIndex = state.offers.findIndex(Boolean);
+assert.ok(visibleOfferIndex >= 0, "hover 회귀용 상점 카드가 없다");
+const offerHover = uiInteractionDescriptor(desktop, state, withHover(offerRects(desktop)[visibleOfferIndex]));
+assert.equal(offerHover.cursor, "pointer", "상점 카드 hover cursor가 pointer가 아니다");
+assert.equal(offerHover.offerIndex, visibleOfferIndex, "상점 카드 hover slot이 어긋났다");
+const rerollHover = uiInteractionDescriptor(desktop, state, withHover(rerollRect(desktop)));
+assert.equal(rerollHover.reroll, true, "재추첨 hover가 중앙 descriptor에 잡히지 않았다");
+const primaryHover = uiInteractionDescriptor(desktop, state, withHover(desktop.button));
+assert.equal(primaryHover.primary, true, "주 행동 버튼 hover가 중앙 descriptor에 잡히지 않았다");
+assert.equal(
+  uiInteractionDescriptor(desktop, state, { ...idleDrag(), hoverX: Number.NaN, hoverY: 10 }).cursor,
+  "default",
+  "유한하지 않은 좌표가 pointer cursor를 남겼다",
+);
+
+const gameoverHoverState = newRun(181818);
+gameoverHoverState.phase = "gameover";
+const challengeRect = gameoverGeometry(desktop, gameoverHoverState).choices.challenge;
+const gameoverHover = uiInteractionDescriptor(desktop, gameoverHoverState, withHover(challengeRect));
+assert.equal(gameoverHover.cursor, "pointer", "패배 선택 hover cursor가 pointer가 아니다");
+assert.equal(gameoverHover.gameoverChoice, "challenge", "패배 선택 hover 대상이 어긋났다");
+
+const descriptorAction = (interaction, fixtureState) => {
+  if (interaction.mute) return { kind: "mute" };
+  if (interaction.gameoverChoice) return { kind: "run-choice", choice: interaction.gameoverChoice };
+  if (interaction.raidContractIndex >= 0) return { kind: "raid-contract", index: interaction.raidContractIndex };
+  if (interaction.primary) return fixtureState.phase === "battle" ? null : { kind: "primary" };
+  if (interaction.mapNodeIndex >= 0) return { kind: "map-node", index: interaction.mapNodeIndex };
+  if (interaction.reroll) return { kind: "reroll" };
+  if (interaction.offerIndex >= 0) return { kind: "offer", index: interaction.offerIndex };
+  return { kind: "none" };
+};
+
+const parityRaidState = newRun(192001);
+const parityRaidRect = raidContractRects(desktop, parityRaidState.raidOffers.length)[0];
+assert.ok(parityRaidRect, "parity 계약 카드가 없다");
+const parityMapState = newRun(192002);
+assert.equal(chooseRaidContract(parityMapState, 0), true, "parity 지도 상태를 열지 못했다");
+const parityMapNode = openMapNodeRects(desktop, parityMapState)[0];
+assert.ok(parityMapNode, "parity 지도 노드가 없다");
+const parityFixtures = [
+  { name: "raid contract", fixtureState: parityRaidState, point: center(parityRaidRect), locked: false },
+  { name: "map node", fixtureState: parityMapState, point: center(parityMapNode.rect), locked: false },
+  { name: "reward offer", fixtureState: state, point: center(offerRects(desktop)[visibleOfferIndex]), locked: false },
+  { name: "reward reroll", fixtureState: state, point: center(rerollRect(desktop)), locked: false },
+  { name: "gameover choice", fixtureState: gameoverHoverState, point: center(challengeRect), locked: false },
+  { name: "phase-locked raid contract", fixtureState: parityRaidState, point: center(parityRaidRect), locked: true },
+  { name: "phase-locked map node", fixtureState: parityMapState, point: center(parityMapNode.rect), locked: true },
+  { name: "phase-locked primary", fixtureState: state, point: center(desktop.button), locked: true },
+  { name: "phase-locked mute", fixtureState: state, point: center(desktop.mute), locked: true },
+];
+for (const fixture of parityFixtures) {
+  const hover = { ...idleDrag(), hoverX: fixture.point.x, hoverY: fixture.point.y };
+  const descriptor = uiInteractionDescriptor(desktop, fixture.fixtureState, hover, fixture.locked);
+  const dispatched = dispatchGameInput(ctx(fixture.fixtureState, desktop, idleDrag(), fixture.locked), {
+    kind: "pointer-down",
+    pointerId: 41,
+    ...fixture.point,
+  });
+  assert.deepEqual(actionOf(dispatched), descriptorAction(descriptor, fixture.fixtureState), `${fixture.name} descriptor↔dispatch 불일치`);
+}
+
+// 버튼의 pulse는 쿨다운 동안 꺼져도 입력은 큐에 남아야 한다. 포인터와 Space가
+// 같은 intent를 만들고 battle.ts가 잠금 해제 때까지 버리지 않는 기존 계약이다.
+const queuedBattle = newRun(192003);
+queuedBattle.phase = "battle";
+queuedBattle.dodgeCharges = 2;
+queuedBattle.actCooldown = 500;
+const threatenedAlly = queuedBattle.ally.find(Boolean);
+assert.ok(threatenedAlly, "예약 입력 회귀용 아군이 없다");
+const telegraphEnemy = makeCat(breedById(1), "enemy", 0);
+telegraphEnemy.telegraph = {
+  shape: "circle",
+  mode: "avoid",
+  fx: threatenedAlly.fx,
+  fy: threatenedAlly.fy,
+  dirX: 0,
+  dirY: 0,
+  arg: 0.75,
+  reach: 0,
+  fuse: 1200,
+  fuseMax: 1200,
+};
+queuedBattle.enemy[0] = telegraphEnemy;
+const battlePoint = center(desktop.button);
+const battlePointer = dispatchGameInput(ctx(queuedBattle, desktop), {
+  kind: "pointer-down",
+  pointerId: 43,
+  ...battlePoint,
+});
+const battleKey = dispatchGameInput(ctx(queuedBattle, desktop), { kind: "key-down", code: "Space" });
+assert.deepEqual(actionOf(battlePointer), actionOf(battleKey), "쿨다운 중 포인터와 Space 예약 intent가 달라졌다");
+assert.deepEqual(actionOf(battlePointer), { kind: "intent", intent: "act", dual: false });
+const battleHover = uiInteractionDescriptor(desktop, queuedBattle, {
+  ...idleDrag(),
+  hoverX: battlePoint.x,
+  hoverY: battlePoint.y,
+});
+assert.equal(battleHover.primary, true, "쿨다운 중 큐에 넣을 수 있는 포인터 입력이 차단됐다");
+queueIntervention(queuedBattle, { kind: battlePointer.action.intent, dual: battlePointer.action.dual });
+assert.equal(queuedBattle.pending.length, 1, "포인터 예약 intent가 pending에 들어가지 않았다");
+stepBattle(queuedBattle, 16);
+assert.equal(queuedBattle.pending.length, 1, "쿨다운 중 pending intent가 일찍 버려졌다");
+queuedBattle.actCooldown = 0;
+stepBattle(queuedBattle, 16);
+assert.equal(queuedBattle.pending.length, 0, "쿨다운 해제 뒤 pending intent가 소비되지 않았다");
+
+for (const relicDraftActive of [false, true]) {
+  const disabledState = newRun(191919 + Number(relicDraftActive));
+  disabledState.phase = "reward";
+  disabledState.gold = 0;
+  disabledState.freeRerolls = 0;
+  disabledState.relicDraftActive = relicDraftActive;
+  const point = center(rerollRect(desktop));
+  const descriptor = uiInteractionDescriptor(desktop, disabledState, { ...idleDrag(), hoverX: point.x, hoverY: point.y });
+  const dispatched = dispatchGameInput(ctx(disabledState, desktop), { kind: "pointer-down", pointerId: 42, ...point });
+  const keyboard = dispatchGameInput(ctx(disabledState, desktop), { kind: "key-down", code: "KeyR" });
+  assert.equal(descriptor.consumesPointer, true, "재추첨 실패 영역이 아래 입력을 삼키지 않았다");
+  assert.equal(descriptor.reroll, true, "재추첨 실패가 descriptor의 피드백 경계에 들어오지 않았다");
+  assert.equal(descriptor.cursor, "pointer", "실패 이유를 알려 주는 재추첨이 클릭 불가로 보인다");
+  assert.deepEqual(actionOf(dispatched), { kind: "reroll" }, "재추첨 실패가 실제 action 경계를 지나지 않았다");
+  assert.deepEqual(actionOf(dispatched), actionOf(keyboard), "재추첨 실패의 pointer/R 명령이 달라졌다");
+}
+
 // 빈 슬롯은 아래 보드로 새지 않는다.
 state.offers[0] = null;
 const emptySlot = offerRects(desktop)[0];
@@ -255,6 +441,13 @@ for (let cell = 0; cell < state.ally.length && !coveredGap; cell++) {
 }
 assert.ok(coveredGap, "접힌 카드 패널과 실제 고양이가 겹치는 gap 픽스처를 찾지 못했다");
 const gapOutcome = dispatchGameInput(ctx(state, folded), { kind: "pointer-down", pointerId: 7, ...coveredGap });
+const gapDescriptor = uiInteractionDescriptor(folded, state, {
+  ...idleDrag(),
+  hoverX: coveredGap.x,
+  hoverY: coveredGap.y,
+});
+assert.equal(gapDescriptor.consumesPointer, true, "667×275 접힌 패널 gap이 descriptor에서 입력을 삼키지 않았다");
+assert.equal(gapDescriptor.draggableCell, -1, "667×275 접힌 패널 gap이 descriptor에서 고양이를 잡았다");
 assert.deepEqual(actionOf(gapOutcome), { kind: "none" });
 assert.equal(gapOutcome.drag.active, false, "접힌 카드 gap이 뒤의 고양이를 집었다");
 

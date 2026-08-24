@@ -9,10 +9,12 @@ import {
 import { computeLayout, type Layout } from "./game/layout.ts";
 import {
   captureMapChoiceFeedback,
+  clearOfferPurchaseFailure,
   render,
   spawnBuyTween,
   spawnMapChoiceFeedback,
   spawnNextRunFeedback,
+  spawnOfferPurchaseFailure,
   spawnRerollFeedback,
   setRaidContractFocusIndex,
   type DragState,
@@ -392,7 +394,11 @@ function buyWithFx(offer: NonNullable<RunState["offers"][number]>): boolean {
   // buyOffer가 성공하면 이 슬롯을 null로 비운다. 트윈이 어디서 출발했는지는
   // 그 전에 잡아 둬야 한다.
   const slot = state.offers.indexOf(offer);
-  if (!buyOffer(state, offer)) return false;
+  if (!buyOffer(state, offer)) {
+    if (slot >= 0 && state.gold < offer.cost) spawnOfferPurchaseFailure(slot, offer);
+    return false;
+  }
+  clearOfferPurchaseFailure();
   setNotice(state, "");
   // 유물처럼 보드 칸이 안 바뀌는 구매도 있다 — 그런 카드는 보드 한가운데를
   // 향해 날아간다(spawnBuyTween이 처리한다).
@@ -427,6 +433,7 @@ function chooseNodeWithFeedback(idx: number): boolean {
 /** 무료·유료 규칙은 run.ts에 맡기고 실제 결과와 일치하는 피드백만 낸다. */
 function rerollWithFeedback(): boolean {
   const success = rerollOffers(state);
+  if (success) clearOfferPurchaseFailure();
   spawnRerollFeedback(success);
   return success;
 }
@@ -640,7 +647,7 @@ function frame(now: number): void {
   });
   setBed(musicFor(state));
   syncRaidAccessibility();
-  render(ctx!, layout, state, drag, hoverCell);
+  render(ctx!, layout, state, drag, hoverCell, performance.now() - phaseChangedAt < PHASE_LOCK_MS);
   /**
    * 탭이 숨겨지면 루프를 세운다. 브라우저는 숨은 탭의 rAF를 1fps 안팎으로 줄이는데, 그 틈에
    * `dt`가 100ms로 잘려 게임 시간이 10분의 1 속도로 기어가고 배터리는 계속 쓴다. 세워 두면

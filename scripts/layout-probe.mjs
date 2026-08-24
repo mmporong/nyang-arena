@@ -30,6 +30,7 @@ import {
   mapChoiceLabelText,
   mapNodeHitRadius,
   nearestMapNode,
+  offerPurchaseFeedbackDescriptor,
   openMapNodeRects,
   raidContractCardGeometry,
   raidContractGuideGeometry,
@@ -174,6 +175,44 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log("\n전부 통과 — HUD와 안내 문구는 어느 구성에서도 끝까지 보인다");
+
+/* ---------------------------------------------------------------- */
+/* 상점 실패 피드백 기하                                              */
+/* ---------------------------------------------------------------- */
+
+let purchaseFeedbackFailed = 0;
+for (const [name, w, h] of DEVICES) {
+  const L = computeLayout(w, h);
+  for (let slot = 0; slot < 3; slot++) {
+    for (const reduce of [false, true]) {
+      const expectedDuration = reduce ? 160 : 200;
+      for (const elapsed of [0, expectedDuration - 1]) {
+        const visual = offerPurchaseFeedbackDescriptor(L, slot, "insufficient-fish", elapsed, reduce);
+        const values = visual
+          ? [visual.rect.x, visual.rect.y, visual.rect.w, visual.rect.h, visual.labelX, visual.labelY, visual.alpha, visual.lineWidth]
+          : [];
+        const finite = visual !== null && values.every(Number.isFinite);
+        const clipped = visual !== null &&
+          visual.rect.x >= 0 && visual.rect.y >= 0 &&
+          visual.rect.x + visual.rect.w <= w + 0.01 &&
+          visual.rect.y + visual.rect.h <= h + 0.01 &&
+          visual.labelX >= 0 && visual.labelX <= w && visual.labelY >= 0 && visual.labelY <= h;
+        const staticOnly = visual !== null && visual.translateX === 0 && visual.translateY === 0;
+        if (!finite || !clipped || !staticOnly || visual.durationMs !== expectedDuration) {
+          purchaseFeedbackFailed++;
+          console.log(`${name} slot ${slot + 1} ${reduce ? "reduce" : "normal"} 실패`, visual);
+        }
+      }
+      if (offerPurchaseFeedbackDescriptor(L, slot, "success", 0, reduce) !== null) purchaseFeedbackFailed++;
+      if (offerPurchaseFeedbackDescriptor(L, slot, "insufficient-fish", expectedDuration, reduce) !== null) purchaseFeedbackFailed++;
+    }
+  }
+}
+if (purchaseFeedbackFailed > 0) {
+  console.log(`\n${purchaseFeedbackFailed}개 구매 실패 피드백 기하가 화면 경계·시간 계약을 벗어났다`);
+  process.exit(1);
+}
+console.log(`구매 실패 피드백 통과 — ${DEVICES.length}기기 × 3슬롯, 160/200ms 정적 outline·유한 좌표·화면 클리핑`);
 
 /* ---------------------------------------------------------------- */
 /* 죽은 화면의 세 갈래 버튼                                            */
