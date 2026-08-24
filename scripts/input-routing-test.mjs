@@ -4,11 +4,16 @@ import { computeLayout, cellRect, hitCell, rectHas } from "../src/game/layout.ts
 import { dispatchGameInput, executeGameInputAction } from "../src/game/input.ts";
 import { openLanes } from "../src/game/map.ts";
 import {
+  drawRaidPatternEmblem,
   gameoverGeometry,
+  isRaidContractFocused,
+  normalizeRaidContractFocusIndex,
   openMapNodeRects,
   offerRects,
+  raidContractInteractionVisual,
   raidContractRects,
   rerollRect,
+  setRaidContractFocusIndex,
 } from "../src/game/render.ts";
 import {
   chooseNode,
@@ -19,6 +24,7 @@ import {
   nextRunFrom,
   rerollOffers,
 } from "../src/game/run.ts";
+import { RAID_PATTERN_TOKENS } from "../src/validate/raid-contract-schema.ts";
 
 const idleDrag = () => ({
   active: false,
@@ -33,6 +39,70 @@ const idleDrag = () => ({
 const center = (rect) => ({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 });
 const actionOf = (outcome) => outcome.action;
 const ctx = (state, layout, drag = idleDrag(), phaseLocked = false) => ({ state, layout, drag, phaseLocked });
+
+assert.equal(normalizeRaidContractFocusIndex(0), 0, "첫 계약 focus가 사라졌다");
+assert.equal(normalizeRaidContractFocusIndex(2), 2, "셋째 계약 focus가 사라졌다");
+assert.equal(normalizeRaidContractFocusIndex(-1), -1, "focus 해제가 정규화되지 않았다");
+assert.equal(normalizeRaidContractFocusIndex(3), -1, "없는 계약 focus가 Canvas로 새었다");
+
+setRaidContractFocusIndex(0);
+assert.equal(isRaidContractFocused(0), true, "첫 DOM focus가 첫 Canvas 카드에 닿지 않았다");
+assert.equal(isRaidContractFocused(1), false, "DOM focus가 다른 Canvas 카드에도 번졌다");
+setRaidContractFocusIndex(2);
+assert.equal(isRaidContractFocused(2), true, "focus 이동이 셋째 Canvas 카드에 닿지 않았다");
+assert.equal(isRaidContractFocused(2, 0), false, "계약 제안 소멸 뒤 focus가 Canvas에 남았다");
+setRaidContractFocusIndex(-1);
+assert.equal(isRaidContractFocused(2), false, "blur 뒤 Canvas focus가 해제되지 않았다");
+
+assert.deepEqual(
+  raidContractInteractionVisual(false, true),
+  {
+    active: true,
+    borderRole: "focus",
+    borderWidth: 3,
+    focusRing: true,
+    focusRingGap: 4,
+    focusRingWidth: 3,
+    translateY: 0,
+  },
+  "keyboard focus는 금색 3px ring이고 카드를 움직이지 않아야 한다",
+);
+assert.deepEqual(
+  raidContractInteractionVisual(true, false),
+  {
+    active: true,
+    borderRole: "action",
+    borderWidth: 3,
+    focusRing: false,
+    focusRingGap: 4,
+    focusRingWidth: 0,
+    translateY: -4,
+  },
+  "pointer hover는 주황 outline과 4px 상승으로 focus와 달라야 한다",
+);
+
+const emblemSignatures = new Set();
+for (const pattern of RAID_PATTERN_TOKENS) {
+  const calls = [];
+  const fakeContext = {
+    save: () => calls.push(["save"]),
+    beginPath: () => calls.push(["beginPath"]),
+    arc: (...args) => calls.push(["arc", ...args]),
+    fill: () => calls.push(["fill"]),
+    stroke: () => calls.push(["stroke"]),
+    translate: (...args) => calls.push(["translate", ...args]),
+    moveTo: (...args) => calls.push(["moveTo", ...args]),
+    lineTo: (...args) => calls.push(["lineTo", ...args]),
+    closePath: () => calls.push(["closePath"]),
+    restore: () => calls.push(["restore"]),
+  };
+  drawRaidPatternEmblem(fakeContext, { x: 0, y: 0, w: 40, h: 40 }, pattern, "#f5a03c");
+  assert.deepEqual(calls[0], ["save"], `${pattern} 인장이 Canvas 상태를 보존하지 않았다`);
+  assert.deepEqual(calls.at(-1), ["restore"], `${pattern} 인장이 Canvas 상태를 복원하지 않았다`);
+  assert.ok(calls.length > 8, `${pattern} 인장이 빈 도형으로 퇴행했다`);
+  emblemSignatures.add(JSON.stringify(calls));
+}
+assert.equal(emblemSignatures.size, RAID_PATTERN_TOKENS.length, "서로 다른 보스 패턴 인장이 같은 도형으로 뭉개졌다");
 
 function executeRunAction(state, action) {
   const result = {};
@@ -63,6 +133,48 @@ function pointerDown(state, layout, rect, drag = idleDrag(), phaseLocked = false
 
 const desktop = computeLayout(1280, 800, true);
 const state = newRun(424242);
+
+// 짧은 세로 티켓 세 장도 카드 중심과 숫자 1/2/3이 같은 실제 계약 전이를 만든다.
+for (const [w, h] of [[320, 480], [390, 500]]) {
+  const mobile = computeLayout(w, h, true);
+  for (let index = 0; index < 3; index++) {
+    const pointerState = newRun(800000 + w * 10 + h + index);
+    const keyState = newRun(800000 + w * 10 + h + index);
+    const rect = raidContractRects(mobile, pointerState.raidOffers.length)[index];
+    assert.ok(rect, `${w}×${h}의 ${index + 1}번 계약 티켓이 사라졌다`);
+    const pointer = pointerDown(pointerState, mobile, rect);
+    const key = dispatchGameInput(ctx(keyState, mobile), { kind: "key-down", code: `Digit${index + 1}` });
+    assert.deepEqual(actionOf(pointer), { kind: "raid-contract", index });
+    assert.deepEqual(actionOf(pointer), actionOf(key), `${w}×${h} ${index + 1}번 계약의 pointer/keyboard 명령이 달라졌다`);
+    assert.equal(executeRunAction(pointerState, pointer.action).ok, true, `${w}×${h} ${index + 1}번 pointer 계약 전이가 실패했다`);
+    assert.equal(executeRunAction(keyState, key.action).ok, true, `${w}×${h} ${index + 1}번 숫자키 계약 전이가 실패했다`);
+    assert.equal(pointerState.raidContract?.id, keyState.raidContract?.id, `${w}×${h} ${index + 1}번 실제 선택 결과가 달라졌다`);
+  }
+
+  const overlapState = newRun(900000 + w * 10 + h);
+  const third = raidContractRects(mobile, overlapState.raidOffers.length)[2];
+  assert.ok(third, `${w}×${h}의 셋째 계약 티켓이 사라졌다`);
+  const overlap = {
+    x: Math.max(third.x, mobile.button.x),
+    y: Math.max(third.y, mobile.button.y),
+    w: Math.min(third.x + third.w, mobile.button.x + mobile.button.w) - Math.max(third.x, mobile.button.x),
+    h: Math.min(third.y + third.h, mobile.button.y + mobile.button.h) - Math.max(third.y, mobile.button.y),
+  };
+  assert.ok(overlap.w > 0 && overlap.h > 0, `${w}×${h} 회귀 표본이 숨은 primary 영역과 겹치지 않는다`);
+  const overlapPointer = pointerDown(overlapState, mobile, overlap);
+  assert.deepEqual(actionOf(overlapPointer), { kind: "raid-contract", index: 2 }, `${w}×${h}의 숨은 primary 영역이 셋째 계약을 가로챘다`);
+  assert.equal(executeRunAction(overlapState, overlapPointer.action).ok, true, `${w}×${h} 셋째 계약의 겹침 지점 전이가 실패했다`);
+
+  const edgeState = newRun(910000 + w * 10 + h);
+  const edgePointer = dispatchGameInput(ctx(edgeState, mobile), {
+    kind: "pointer-down",
+    pointerId: 1,
+    x: third.x + third.w / 2,
+    y: third.y + third.h - 1,
+  });
+  assert.deepEqual(actionOf(edgePointer), { kind: "raid-contract", index: 2 }, `${w}×${h} 셋째 계약의 하단 1px이 클릭되지 않는다`);
+  assert.equal(executeRunAction(edgeState, edgePointer.action).ok, true, `${w}×${h} 셋째 계약 하단의 실제 전이가 실패했다`);
+}
 
 // 계약 카드의 그림과 입력은 같은 raidContractRects를 쓰고, 숫자키도 같은 명령을 낸다.
 const contractRect = raidContractRects(desktop, state.raidOffers.length)[1];

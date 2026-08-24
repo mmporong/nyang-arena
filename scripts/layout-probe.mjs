@@ -33,8 +33,12 @@ import {
   openMapNodeRects,
   raidContractCardGeometry,
   raidContractGuideGeometry,
+  raidContractInfoContentGeometry,
+  raidContractOverlayHeaderGeometry,
   raidContractRects,
   raidContractChipGeometry,
+  raidContractTitleText,
+  raidContractUsesViewportFooter,
   splitButton,
   splitButtonChoice,
 } from "../src/game/render.ts";
@@ -239,12 +243,14 @@ const contractCtx = {
 function inspectContractLayout(w, h) {
   const L = computeLayout(w, h);
   const cards = raidContractRects(L, 3);
+  const usesViewportFooter = raidContractUsesViewportFooter(L, 3);
+  const bottomLimit = usesViewportFooter ? h : L.button.y - L.actionGap;
   const inside = cards.every(
     (card) =>
       card.x >= 0 &&
       card.y >= L.notice.y + L.notice.h &&
       card.x + card.w <= w + 0.5 &&
-      card.y + card.h <= L.button.y - L.actionGap + 0.5,
+      card.y + card.h <= bottomLimit + 0.5,
   );
   const finger = cards.every((card) => card.w >= 44 && card.h >= 44);
   const separate = cards.every((card, i) => cards.every((other, j) => i === j || overlapArea(card, other) === 0));
@@ -253,7 +259,11 @@ function inspectContractLayout(w, h) {
     ? card.y - (cards[i].y + cards[i].h)
     : card.x - (cards[i].x + cards[i].w));
   const rhythm = cardGaps.every((gap) => gap + 0.5 >= (stacked || L.w < 600 ? 12 : 20));
-  const compactHeight = !stacked || cards.every((card) => card.h >= 112);
+  const compactHeight = !stacked || cards.every((card) => card.h >= (usesViewportFooter ? 104 : 112));
+  const lastCardBottom = Math.max(...cards.map((card) => card.y + card.h));
+  const viewportMode = !usesViewportFooter || (
+    stacked && cards.every((card) => card.h >= 104) && lastCardBottom >= h - 12
+  );
   const bounded = cards.every((card) => card.w <= 420.5 && card.h <= 360.5);
   const header = cards.every((card) => {
     const compactCard = L.h < 380 || card.h <= 168 || card.w <= 280;
@@ -270,10 +280,11 @@ function inspectContractLayout(w, h) {
     const titleStartsAfterKey = g.keyBadgeRect === null || g.titleRect.x >= g.keyBadgeRect.x + g.keyBadgeRect.w + 12 - 0.5;
     const wideRow = !g.compactHeader && titleEndsBeforeSeal && titleStartsAfterKey;
     const titlesFit = RAID_CONTRACT_POOL.every((contract, index) => {
-      const rawTitle = g.narrow ? `${index + 1}` : g.keyBadgeRect ? contract.name : `${index + 1} ${contract.name}`;
+      const rawTitle = raidContractTitleText(contract, index, g);
       const line = wrapLines(contractCtx, rawTitle, g.titleSize, 900, g.titleRect.w, 1)[0] ?? rawTitle;
       const fits = contractCtx.measureText(line).width <= g.titleRect.w + 0.5;
-      return fits && (g.compactHeader || !line.endsWith("…"));
+      const fullNameRequired = usesViewportFooter;
+      return fits && (g.compactHeader || !line.endsWith("…")) && (!fullNameRequired || line.includes(contract.name));
     });
     return g.titleSize >= 16 && regionsInside && (compactRows || wideRow) && titlesFit;
   });
@@ -307,9 +318,10 @@ function inspectContractLayout(w, h) {
   const copyVisible = cards.every((card) => RAID_CONTRACT_POOL.every((contract) => {
     const compactCard = L.h < 380 || card.h <= 168 || card.w <= 280;
     const g = raidContractCardGeometry(card, compactCard);
-    const sidePad = g.ultraCompact ? 5 : Math.max(7, g.pad * 0.65);
-    const ruleW = g.ruleRect.w - sidePad * 2;
-    const counterW = g.counterRect.w - sidePad * 2;
+    const ruleContent = raidContractInfoContentGeometry(g.ruleRect, g, true);
+    const counterContent = raidContractInfoContentGeometry(g.counterRect, g, false);
+    const ruleW = ruleContent.textRect.w;
+    const counterW = counterContent.textRect.w;
     const inlineRule = g.ultraCompact || g.ruleRect.h < g.stackedInfoMinHeight;
     const inlineCounter = g.ultraCompact || g.counterRect.h < g.stackedInfoMinHeight;
     const ruleLines = wrapLines(contractCtx, inlineRule ? `보스 변화 · ${contract.rule}` : contract.rule, g.bodySize, 600, ruleW, inlineRule ? 1 : g.maxLines);
@@ -332,35 +344,57 @@ function inspectContractLayout(w, h) {
     const fullCopy = [...ruleLines, ...counterLines].every((line) => !line.endsWith("…"));
     return fitsAtTwelve && verticalFit && (mayEllipsize || fullCopy);
   }));
+  const emblem = RAID_CONTRACT_POOL.every((contract) => contract.patterns.length > 0) && cards.every((card) => {
+    const compactCard = L.h < 380 || card.h <= 168 || card.w <= 280;
+    const g = raidContractCardGeometry(card, compactCard);
+    const ruleContent = raidContractInfoContentGeometry(g.ruleRect, g, true);
+    const counterContent = raidContractInfoContentGeometry(g.counterRect, g, false);
+    const expected = !g.ultraCompact && g.ruleRect.w >= 260 && g.ruleRect.h >= 56;
+    const seal = ruleContent.emblemRect;
+    const expectedPresence = expected ? seal !== null : seal === null;
+    const sealInside = seal === null || (
+      seal.w >= 32 && seal.w <= 40 && seal.h === seal.w &&
+      seal.x >= g.ruleRect.x - 0.5 && seal.y >= g.ruleRect.y - 0.5 &&
+      seal.x + seal.w <= g.ruleRect.x + g.ruleRect.w + 0.5 &&
+      seal.y + seal.h <= g.ruleRect.y + g.ruleRect.h + 0.5 &&
+      ruleContent.textRect.x >= seal.x + seal.w + 10 - 0.5
+    );
+    return expectedPresence && sealInside && counterContent.emblemRect === null;
+  });
   const guide = raidContractGuideGeometry(L, 3);
   const cardBottom = Math.max(...cards.map((card) => card.y + card.h));
-  const guideClear = guide.dividerY >= cardBottom + 8 - 0.5 && guide.keys.every((key) =>
-    key.x >= 0 && key.y >= cardBottom && key.x + key.w <= w + 0.5 && key.y + key.h <= h + 0.5,
-  );
-  const ok = cards.length === 3 && inside && finger && separate && rhythm && compactHeight && bounded && header && bands && footer && copyVisible && guideClear;
-  return { L, cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, bands, footer, copyVisible, guideClear, ok };
+  const guideMode = guide.visible === !usesViewportFooter;
+  const guideClear = guideMode && (!guide.visible || (
+    guide.dividerY >= cardBottom + 8 - 0.5 && guide.keys.every((key) =>
+      key.x >= 0 && key.y >= cardBottom && key.x + key.w <= w + 0.5 && key.y + key.h <= h + 0.5
+    )
+  ));
+  const overlayHeader = raidContractOverlayHeaderGeometry(L, 3);
+  const headerClear = cards.every((card) => card.y >= overlayHeader.bottomY + 4 - 0.5);
+  const ok = cards.length === 3 && inside && finger && separate && rhythm && compactHeight && viewportMode && bounded && header && bands && footer && copyVisible && emblem && guideClear && headerClear;
+  return { L, cards, stacked, inside, finger, separate, rhythm, compactHeight, viewportMode, bounded, header, bands, footer, copyVisible, emblem, guideClear, headerClear, ok };
 }
 
 console.log("\n첫 화면 악몽 계약 카드");
 console.log("기기               카드 w×h   배치   화면/버튼/겹침  판정");
 for (const [name, w, h] of DEVICES) {
   const result = inspectContractLayout(w, h);
-  const { cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, bands, footer, copyVisible, guideClear, ok } = result;
+  const { cards, stacked, inside, finger, separate, rhythm, compactHeight, viewportMode, bounded, header, bands, footer, copyVisible, emblem, guideClear, headerClear, ok } = result;
   if (!ok) contractFailed++;
   const first = cards[0];
   console.log(
     `${name.padEnd(18)} ${String(Math.round(first.w)).padStart(4)}×${String(Math.round(first.h)).padEnd(4)} ` +
       `${(stacked ? "1열" : "3열").padEnd(4)}   ` +
-      `${inside && finger && separate && rhythm && compactHeight && bounded && header && bands && footer && copyVisible && guideClear ? "OK" : "실패"}              ${ok ? "OK" : "실패"}`,
+      `${inside && finger && separate && rhythm && compactHeight && viewportMode && bounded && header && bands && footer && copyVisible && emblem && guideClear && headerClear ? "OK" : "실패"}              ${ok ? "OK" : "실패"}`,
   );
   if (!ok) {
-    console.log(`  ↳ inside=${inside} finger=${finger} separate=${separate} rhythm=${rhythm} compactHeight=${compactHeight} bounded=${bounded} header=${header} bands=${bands} footer=${footer} copy=${copyVisible} guide=${guideClear}`);
+    console.log(`  ↳ inside=${inside} finger=${finger} separate=${separate} rhythm=${rhythm} compactHeight=${compactHeight} viewport=${viewportMode} bounded=${bounded} header=${header} bands=${bands} footer=${footer} copy=${copyVisible} emblem=${emblem} guide=${guideClear} headerClear=${headerClear}`);
   }
 }
 
 let sweepCases = 0;
 let sweepFailed = 0;
-const sweepReasons = { inside: 0, finger: 0, separate: 0, rhythm: 0, compactHeight: 0, bounded: 0, header: 0, bands: 0, footer: 0, copyVisible: 0, guideClear: 0 };
+const sweepReasons = { inside: 0, finger: 0, separate: 0, rhythm: 0, compactHeight: 0, viewportMode: 0, bounded: 0, header: 0, bands: 0, footer: 0, copyVisible: 0, emblem: 0, guideClear: 0, headerClear: 0 };
 for (let w = 320; w <= 900; w += 20) {
   for (let h = 275; h <= 900; h += 20) {
     sweepCases++;

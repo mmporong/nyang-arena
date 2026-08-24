@@ -14,6 +14,7 @@ import {
   spawnMapChoiceFeedback,
   spawnNextRunFeedback,
   spawnRerollFeedback,
+  setRaidContractFocusIndex,
   type DragState,
 } from "./game/render.ts";
 import {
@@ -71,6 +72,12 @@ const raidA11yButtons = Array.from({ length: 3 }, (_, index) => {
   const button = document.createElement("button");
   button.type = "button";
   button.setAttribute("aria-keyshortcuts", String(index + 1));
+  button.addEventListener("focus", () => setRaidContractFocusIndex(index));
+  button.addEventListener("blur", () => {
+    queueMicrotask(() => {
+      if (!raidA11yControls.contains(document.activeElement)) setRaidContractFocusIndex(-1);
+    });
+  });
   button.addEventListener("click", () => {
     selectRaidContract(index);
     canvas.focus();
@@ -209,6 +216,7 @@ function syncRaidAccessibility(): void {
   raidA11ySignature = signature;
 
   if (offers.length === 0) {
+    setRaidContractFocusIndex(-1);
     if (raidA11yControls.contains(document.activeElement)) canvas.focus();
     raidA11yControls.hidden = true;
     canvas.setAttribute("aria-label", "냥 아레나 게임 화면");

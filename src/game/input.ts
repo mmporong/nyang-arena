@@ -174,6 +174,13 @@ function pointerDown(ctx: GameInputContext, event: Extract<GameInputEvent, { kin
     if (choice) return result(drag, { kind: "run-choice", choice }, common);
   }
 
+  // 짧은 세로 화면에서는 계약 티켓이 평소 하단 버튼 자리까지 쓴다. 계약 제안이
+  // 떠 있는 동안은 카드가 유일한 CTA이므로 숨은 primary 기하보다 먼저 판정한다.
+  if (state.phase === "map" && state.raidOffers.length > 0) {
+    const index = raidContractRects(layout, state.raidOffers.length).findIndex((rect) => rectHas(rect, x, y));
+    return result(drag, index >= 0 ? { kind: "raid-contract", index } : NONE, common);
+  }
+
   if (rectHas(layout.button, x, y)) {
     if (state.phase === "battle") {
       const dual = dualChoiceActive(state);
@@ -190,10 +197,6 @@ function pointerDown(ctx: GameInputContext, event: Extract<GameInputEvent, { kin
   }
 
   if (state.phase === "map") {
-    if (state.raidOffers.length > 0) {
-      const index = raidContractRects(layout, state.raidOffers.length).findIndex((rect) => rectHas(rect, x, y));
-      return result(drag, index >= 0 ? { kind: "raid-contract", index } : NONE, common);
-    }
     const node = nearestMapNode(openMapNodeRects(layout, state), x, y);
     return result(drag, node ? { kind: "map-node", index: node.idx } : NONE, common);
   }
