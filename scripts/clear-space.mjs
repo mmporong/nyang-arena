@@ -1,13 +1,13 @@
 /**
  * 스테이지 클리어율 — "무의식으로 하면 못 깨고, 조건에 맞게 하면 깬다"가 지켜지는가.
  *
- * 결정 축 하네스(구매·배치·개입·지도)는 축을 **하나씩** 바꿔 깊이를 잰다. 그런데 "게임이 적당히
- * 어려운가"는 축 하나가 아니라 **플레이 방식 전체**가 결과를 가르는지의 문제다. 그래서 여기서는
- * 네 축을 한꺼번에 묶은 봇 셋을 같은 시드로 돌려 스테이지별 클리어율을 본다.
+ * 결정 축 하네스는 축을 하나씩 바꿔 깊이를 잰다. 여기서는 두 패널을 같은 시드로 함께 돌린다.
  *
- *   무의식     무작위 구매 · 자동 배치 · 예고를 안 읽고 늘 산개 · 아무 길
- *   기본 봇    가장 비싼 것 · 자동 배치 · 사람 흉내(읽되 늦고 놓침) · 아무 길  ← balance-sim과 같다
- *   조건 충족  몰빵 피벗(로스터 읽음) · 세로로 분산(근접 앞 한 열) · 예고 읽음 · 읽고 고름
+ * 1. 2026-08-23 네 축 기준 적용: 구매·배치·개입·지도만 바꾸고 계약은 모두 안전 정책으로 통제한다.
+ * 2. 현재 다섯 축 통합 관찰: 세 페르소나가 보상/안전/팀 맞춤 계약까지 서로 다르게 고른다.
+ *
+ * 두 번째 패널은 여러 축을 동시에 바꾸므로 계약의 독립 인과 효과가 아니다. 그 판정은 구매·전투를
+ * 통제하는 contract-space만 담당한다. 기존 네 축 임계값도 두 번째 패널에는 적용하지 않는다.
  *
  * 스테이지 k 클리어 = 그 스테이지의 두 번째 보스를 넘어 다음 스테이지 지도에 들어섰다
  * (`map.stage − 1 ≥ k`). 웨이브 번호로 세지 않는 이유: 상점 칸은 걸음만 먹고 웨이브는 안 먹어서
@@ -30,8 +30,10 @@ import { stepBattle } from "../src/game/battle.ts";
 import { newRun, startBattle } from "../src/game/run.ts";
 import { STAGE_STEPS } from "../src/game/map.ts";
 import { runSharded } from "./parallel.mjs";
-import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES, BUY_POLICIES, ARRANGERS } from "./bot-policy.mjs";
+import { walkMap, leaveShop, shopStep } from "./bot-policy.mjs";
 import { BALANCE } from "../src/game/balance.ts";
+import { CLEAR_BASELINE_BOTS, CLEAR_INTEGRATED_BOTS } from "./clear-bots.mjs";
+import { evaluateClearCriteria } from "./clear-criteria.mjs";
 
 const ARGS = process.argv.slice(2);
 const NUMS = ARGS.filter((a, i) => !a.startsWith("--") && ARGS[i - 1] !== "--set");
@@ -53,26 +55,14 @@ const SEED0 = Number(NUMS[1] ?? 0);
 const MAX_WAVE = 60;
 const STAGES = 4;
 
-const BOTS = {
-  "무의식": {
-    buy: BUY_POLICIES["무작위 구매"],
-    place: null,
-    respond: () => makeBossBot({ read: false }),
-    map: MAP_POLICIES["무작위"],
-  },
-  "기본 봇": {
-    buy: BUY_POLICIES["가장 비싼 것(현재)"],
-    place: null,
-    respond: () => makeBossBot(),
-    map: MAP_POLICIES["무작위"],
-  },
-  "조건 충족": {
-    buy: BUY_POLICIES["몰빵 피벗(로스터를 읽음)"],
-    place: ARRANGERS["세로로 분산"],
-    respond: () => makeBossBot(),
-    map: MAP_POLICIES["읽고 고름"],
-  },
-};
+const PANELS = Object.freeze([
+  Object.freeze({ id: "baseline", title: "4축 기준 적용", bots: CLEAR_BASELINE_BOTS }),
+  Object.freeze({ id: "integrated", title: "5축 통합 관찰", bots: CLEAR_INTEGRATED_BOTS }),
+]);
+const botKey = (panel, name) => `${panel.id}/${name}`;
+const BOTS = Object.freeze(
+  Object.fromEntries(PANELS.flatMap((panel) => Object.entries(panel.bots).map(([name, bot]) => [botKey(panel, name), bot]))),
+);
 
 function play(bot, seed) {
   const s = newRun(seed);
@@ -88,7 +78,7 @@ function play(bot, seed) {
       continue;
     }
     if (s.phase === "map") {
-      walkMap(s, bot.map);
+      walkMap(s, bot.map, bot.contract);
       continue;
     }
     if (s.phase === "prepare") {
@@ -108,53 +98,58 @@ const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 const fmt = (x) => `${(x * 100).toFixed(1)}%`.padStart(7);
 
 console.log(
-  `런 ${RUNS}회 · 봇마다 구매·배치·개입·지도를 한꺼번에 고정 · 시드 ${SEED0 + 1}~${SEED0 + RUNS}` +
+  `패널별 런 ${RUNS}회 · 같은 시드 ${SEED0 + 1}~${SEED0 + RUNS}` +
     (OVERRIDES.length ? `  · 덮어씀: ${OVERRIDES.join(" ")}` : "") +
     "\n",
 );
 console.log(`스테이지 k 클리어 = k번째 여정(${STAGE_STEPS}걸음·보스 둘)을 넘어 다음 지도에 들어섬\n`);
-console.log("봇            도달 중앙값  p25  p75   S1 클리어  S2 클리어  S3 클리어  S4 클리어  보스에서 죽음");
 
 const sharded = await runSharded(import.meta.url, Object.keys(BOTS), (name, seed) => play(BOTS[name], seed), { runs: RUNS, seed0: SEED0 });
-const clear = {};
-for (const name of Object.keys(BOTS)) {
-  const rs = sharded[name];
-  const waves = rs.map((r) => r.wave).sort((a, b) => a - b);
-  const rates = [];
-  for (let k = 1; k <= STAGES; k++) rates.push(rs.filter((r) => r.stage - 1 >= k).length / rs.length);
-  clear[name] = rates;
-  const bossDeath = rs.filter((r) => r.bossDeath).length / rs.length;
-  console.log(
-    `${name.padEnd(12)} ${String(pct(waves, 0.5)).padStart(8)} ${String(pct(waves, 0.25)).padStart(5)} ${String(pct(waves, 0.75)).padStart(4)}  ` +
-      rates.map(fmt).join("   ") +
-      `   ${fmt(bossDeath)}`,
-  );
+function printPanel(panel) {
+  console.log(`── ${panel.title} ──`);
+  console.log(`계약 선택 · ${Object.entries(panel.bots).map(([name, bot]) => `${name}=${bot.contractLabel}`).join(" · ")}`);
+  console.log("봇            도달 중앙값  p25  p75   S1 클리어  S2 클리어  S3 클리어  S4 클리어  보스에서 죽음");
+  const clear = {};
+  for (const name of Object.keys(panel.bots)) {
+    const rs = sharded[botKey(panel, name)];
+    const waves = rs.map((r) => r.wave).sort((a, b) => a - b);
+    const counts = [];
+    for (let k = 1; k <= STAGES; k++) counts.push(rs.filter((r) => r.stage - 1 >= k).length);
+    const rates = counts.map((count) => count / rs.length);
+    clear[name] = { counts, rates, runs: rs.length };
+    const bossDeath = rs.filter((r) => r.bossDeath).length / rs.length;
+    console.log(
+      `${name.padEnd(12)} ${String(pct(waves, 0.5)).padStart(8)} ${String(pct(waves, 0.25)).padStart(5)} ${String(pct(waves, 0.75)).padStart(4)}  ` +
+        rates.map(fmt).join("   ") +
+        `   ${fmt(bossDeath)}`,
+    );
+  }
+  console.log();
+  return clear;
 }
+const baselineClear = printPanel(PANELS[0]);
+printPanel(PANELS[1]);
+console.log("5축 패널 판정 없음 — 여러 축을 함께 바꾼 제품 페르소나 관찰이며, 계약 독립 효과는 npm run contracts가 판정");
 
 /**
- * 판정은 사전 등록 기준을 그대로 읽는다. 여기서는 **관측**이다 — measure-all의 OBSERVE에 들어가
- * 기록되지만 exit 코드로 관문을 빨갛게 만들지는 않는다. 난이도를 바꾼 뒤 이 표가 기준 안으로
- * 들어오면 그때 관문으로 올린다(이 주석을 고칠 것).
+ * 2026-08-23의 기준은 계약 도입 전 네 축 봇에 정의됐다. 그러므로 계약을 동일하게 통제한 첫 패널만
+ * 대조한다. 여기서는 관측이다 — measure-all의 OBSERVE에 기록되지만 exit 코드로 관문을 바꾸지 않는다.
  */
-const mindless = clear["무의식"];
-const skilled = clear["조건 충족"];
-const checks = [
-  ["완주 게이트 조건÷무의식 ≥ 3배", mindless[2] > 0 ? skilled[2] / mindless[2] >= 3 : skilled[2] >= 0.2, mindless[2] > 0 ? skilled[2] / mindless[2] : Infinity],
-  ["무의식 완주 S3 ≤ 20%", mindless[2] <= 0.2, mindless[2]],
-  ["깊이 확대 격차 S2 ≥ 40%p", skilled[1] - mindless[1] >= 0.4, skilled[1] - mindless[1]],
-  ["깊이 확대 격차 S3 ≥ 40%p", skilled[2] - mindless[2] >= 0.4, skilled[2] - mindless[2]],
-  ["조건 충족 S1 ≥ 85%", skilled[0] >= 0.85, skilled[0]],
-];
-console.log("\n기준 대조 (완주가 결정을 가르는가 · 격차가 깊이에 따라 벌어지는가)");
+const mindless = baselineClear["무의식"];
+const skilled = baselineClear["조건 충족"];
+const checks = evaluateClearCriteria(mindless, skilled);
+console.log("\n4축 기준 대조 (계약 동일 통제 · 완주가 결정을 가르는가)");
 let bad = 0;
 for (const [label, ok, v] of checks) {
   if (!ok) bad += 1;
-  const shown = Number.isFinite(v) && v > 3 && label.includes("배") ? `${v.toFixed(1)}배` : `${(v * 100).toFixed(1)}%`;
+  const shown = label.includes("배")
+    ? Number.isFinite(v) ? `${v.toFixed(1)}배` : "∞배"
+    : `${(v * 100).toFixed(1)}%`;
   console.log(`  ${ok ? "충족" : "미달"}  ${label.padEnd(24)} ${shown}`);
 }
-console.log(`  기록  무의식 S1 ${(mindless[0] * 100).toFixed(1)}% (장르 관행상 관대해도 됨 — 기준 없음)`);
+console.log(`  기록  무의식 S1 ${(mindless.rates[0] * 100).toFixed(1)}% (장르 관행상 관대해도 됨 — 기준 없음)`);
 console.log(
   bad === 0
-    ? "\n판정: 난이도가 결정을 가른다 — 완주는 조건을 맞춰야 하고, 격차는 깊이에 따라 벌어진다"
-    : `\n판정: 기준 ${bad}건 미달 — 결정 게이트가 약하다 (관측, 관문 아님)`,
+    ? "\n관측: 현재 제품이 2026-08-23 네 축 기준을 충족한다"
+    : `\n관측: 2026-08-23 네 축 기준 ${bad}건 미달 (관문 아님)`,
 );
