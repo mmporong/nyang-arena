@@ -26,6 +26,7 @@ import {
   raidPrepRoute,
   raidShareCode,
 } from "../src/game/raid.ts";
+import { RAID_CONTRACT_POOL } from "../src/validate/raid-contract-schema.ts";
 import {
   ARRANGERS,
   BUY_POLICIES,
@@ -56,6 +57,25 @@ function reachFirstBoss(state) {
 }
 
 const seed = 424242;
+
+// 카드 문구와 실행 배열은 같은 대응을 말해야 한다. 패턴만 바꾸고 카피를
+// 그대로 두면 플레이어가 산개/집결 중 틀린 행동을 학습한다.
+const mirrorHunt = RAID_CONTRACT_POOL.find(({ id }) => id === "mirror_hunt");
+assert(mirrorHunt, "거울 사냥 계약이 출고 풀에 있어야 한다");
+assert.equal(
+  [...mirrorHunt.patterns, ...(mirrorHunt.phase2Patterns ?? [])].includes("polarity"),
+  true,
+  "거울 사냥 실행 배열에 극성이 있어야 한다",
+);
+assert.equal(mirrorHunt.patterns.includes("hearth"), true, "거울 사냥 전반에 구원로가 있어야 한다");
+assert.equal(mirrorHunt.patterns.includes("seize"), true, "거울 사냥 전반에 집결 표식이 있어야 한다");
+assert.equal(mirrorHunt.phase2Patterns?.includes("circle"), true, "거울 사냥 후반에 원형 장판이 있어야 한다");
+assert.match(mirrorHunt.rule, /극성/);
+assert.match(mirrorHunt.rule, /구원로/);
+assert.match(mirrorHunt.rule, /원형 장판/);
+assert.match(mirrorHunt.counter, /모여/);
+assert.match(mirrorHunt.counter, /밖으로/);
+
 assert.equal(parseRaidSeed("424242"), seed, "십진 데모 시드를 읽어야 한다");
 assert.equal(parseRaidSeed(" 424242 "), seed, "시드 양끝 공백은 무시해야 한다");
 assert.equal(parseRaidSeed("FFFFFFFF"), null, "십진수가 아닌 시드를 허용했다");

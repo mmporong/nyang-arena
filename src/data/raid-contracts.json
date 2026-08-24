@@ -59,20 +59,21 @@
   {
     "id": "mirror_hunt",
     "name": "거울 사냥",
-    "rule": "보스가 원형 장판과 극성을 번갈아 뒤집습니다.",
-    "counter": "극성 표시를 읽고 안전한 대형으로 바꾸세요.",
+    "rule": "보스가 극성 사이에 구원로와 원형 장판을 엽니다.",
+    "counter": "극성을 읽고 구원로엔 모여 장판 밖으로 피하세요.",
     "risk": 2,
     "rewardFish": 3,
     "patterns": [
       "polarity",
       "hearth",
-      "seize"
+      "seize",
+      "cone"
     ],
     "proofCode": "CODEX-04",
     "phase2Patterns": [
       "polarity",
       "cone",
-      "seize"
+      "circle"
     ]
   },
   {
