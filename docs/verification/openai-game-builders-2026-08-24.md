@@ -18,6 +18,23 @@
 `dirty:false`, `reproducible:true`, provenance `MATCH`를 유지했다. 그 결과는 증거
 커밋 `fe63458`에 기록했다.
 
+## UI/UX 간격 개선 증거
+
+- 기능 커밋: `f2538cdb6b8b893788e087db0d4edf4c556c542b`
+- Git tree: `b20f96b125595f53b57c0b5d94591fe323a9829a`
+- 명령: 깨끗한 기능 커밋에서 `npm run verify`
+- 결과: 종료 코드 `0`, `dirty:false`, `reproducible:true`, provenance `MATCH`
+- 반응형: 대표 16기기와 `320..900 × 275..900` 20px 간격 960경계에서 카드·footer·
+  header·지도 라벨·44px 입력·행동 구역 겹침 0
+- 독립 코드 리뷰: HIGH/MEDIUM/LOW finding 0, 자동 기하·타입 기준 승인
+
+UI 변경 전 생성 기준과 새 JSON을 기계 비교했다. `generatedFrom`, UI 변경으로
+의도적으로 달라지는 `build.bundleBytes`, 그리고 커밋·tree를 포함하는 증거 출처와
+그 출처까지 해시하는 evidence SHA만 비교에서 제외했다. 나머지 게임 분포·세션·
+웨이브·밸런스·계약·지도·유물 지표는 바이트 직렬화 기준으로 같았고, 아래 6축 원시
+로그 SHA도 6/6 같았다. 번들은 `171,623 → 175,524 bytes`로 `3,901 bytes` 늘었으며
+이는 새 UI 기하·라벨·접근성 렌더 코드의 의도된 출고 비용이다.
+
 최종 GitHub Actions
 [32688784697](https://github.com/mmporong/nyang-arena/actions/runs/32688784697)은
 `fe63458f4c8be6d15e55484e60ce91b75d7f1d32`와 tree
@@ -56,7 +73,7 @@ manifest 여섯 행의 HEAD·tree·Node·dirty가 모두 대상과 같고, 저�
 ## 회귀·출고 증거
 
 - 상태 불변식: 300런, 518,665스텝, 위반 0
-- 계약 UI: 10기기 카드 3장·터치 영역·겹침·카피 예산 PASS
+- 계약 UI: 대표 16기기 + 960경계 카드 3장·터치 영역·겹침·카피 예산 PASS
 - 회피: 위험·집결·스윕 대응과 도적 도약을 포함한 전 항목 PASS
 - 오디오·에셋 계약 PASS: Canvas 아이콘 17종, BGM 8개, 스프라이트 186장
 - 프로덕션 빌드 PASS: `dist/index.html` 3.38KB,
