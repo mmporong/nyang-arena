@@ -1,16 +1,19 @@
-import { clearBattleFx, dualChoiceActive, hazardZones, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
+import { clearBattleFx, hazardZones, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
 import { BALANCE } from "./game/balance.ts";
-import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
 import {
-  gameoverGeometry,
-  nearestMapNode,
-  openMapNodeRects,
-  offerRects,
-  raidContractRects,
+  dispatchGameInput,
+  executeGameInputAction,
+  type GameInputEffects,
+  type GameInputEvent,
+} from "./game/input.ts";
+import { computeLayout, type Layout } from "./game/layout.ts";
+import {
+  captureMapChoiceFeedback,
   render,
-  rerollRect,
   spawnBuyTween,
-  splitButtonChoice,
+  spawnMapChoiceFeedback,
+  spawnNextRunFeedback,
+  spawnRerollFeedback,
   type DragState,
 } from "./game/render.ts";
 import {
@@ -19,7 +22,6 @@ import {
   chooseRaidContract,
   chooseSharedRaidContract,
   leaveShop,
-  mapStep,
   moveCat,
   newRun,
   nextRunFrom,
@@ -31,14 +33,12 @@ import {
 } from "./game/run.ts";
 import { parseRaidSeed, parseRaidShareCode, raidRiskLabel, raidShareCode } from "./game/raid.ts";
 import { RAID_CONTRACT_POOL_STATUS } from "./validate/raid-contract-schema.ts";
-import { openLanes } from "./game/map.ts";
 import { cellToField, type Intervention } from "./game/types.ts";
 import { loadSprites } from "./game/sprites.ts";
 import { loadIcons } from "./game/icons.ts";
 import {
   createBossSignalObserver,
   playBossSignal,
-  playSting,
   setAudioVisibility,
   setBed,
   toggleMute,
@@ -255,12 +255,6 @@ const PHASE_LOCK_MS = 350;
  * "얼마나 오래 눌렀나"가 아무 뜻도 갖지 않게 됐다.
  */
 
-function cancelDrag(): void {
-  drag.active = false;
-  drag.fromCell = -1;
-  drag.pointerId = -1;
-}
-
 function resize(): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const w = app!.clientWidth;
@@ -274,7 +268,7 @@ function resize(): void {
   layout = computeLayout(w, h, state.phase !== "battle");
   // 드래그 중 회전하거나 주소창이 접히면 보드 위치가 통째로 바뀐다.
   // 옛 레이아웃으로 잡은 출발 셀을 새 레이아웃 좌표에 드롭하면 엉뚱한 칸으로 간다.
-  cancelDrag();
+  routeInput({ kind: "resize" });
 }
 
 function pointerPos(e: PointerEvent): { x: number; y: number } {
@@ -301,10 +295,6 @@ function pointerPos(e: PointerEvent): { x: number; y: number } {
  * 바로 전투로 넘어간다) `startBattle` 직전의 자리로서 실재하고, 무엇보다
  * 헤드리스 하네스 열여섯 개가 그 전이를 기준으로 계측한다.
  */
-function canRearrange(): boolean {
-  return state.phase === "reward" || state.phase === "prepare";
-}
-
 function onPrimaryAction(): void {
   switch (state.phase) {
     case "prepare":
@@ -346,7 +336,7 @@ function startNextRun(choice: NextChoice): void {
   const url = new URL(location.href);
   url.searchParams.delete("raid");
   history.replaceState(null, "", url);
-  playSting("title");
+  spawnNextRunFeedback(choice);
 }
 
 /**
@@ -415,197 +405,81 @@ function buyWithFx(offer: NonNullable<RunState["offers"][number]>): boolean {
   return true;
 }
 
+/** 지도 전이는 즉시 적용하고, 성공한 선택의 위치만 렌더 전용으로 남긴다. */
+function chooseNodeWithFeedback(idx: number): boolean {
+  const feedback = captureMapChoiceFeedback(layout, state, idx);
+  if (!chooseNode(state, idx)) {
+    setNotice(state, "그 길로는 갈 수 없어요");
+    return false;
+  }
+  if (feedback) spawnMapChoiceFeedback(feedback);
+  return true;
+}
+
+/** 무료·유료 규칙은 run.ts에 맡기고 실제 결과와 일치하는 피드백만 낸다. */
+function rerollWithFeedback(): boolean {
+  const success = rerollOffers(state);
+  spawnRerollFeedback(success);
+  return success;
+}
+
+const inputEffects: GameInputEffects = {
+  mute: toggleMute,
+  primary: onPrimaryAction,
+  intent: pushIntent,
+  runChoice: startNextRun,
+  raidContract: selectRaidContract,
+  mapNode: chooseNodeWithFeedback,
+  reroll: rerollWithFeedback,
+  offer: (index) => {
+    const offer = state.offers[index];
+    if (offer && !buyWithFx(offer) && state.gold < offer.cost) {
+      setNotice(state, "생선이 조금 모자라요");
+    }
+  },
+  moveCat: (from, to) => moveCat(state, from, to),
+};
+
+/** DOM 이벤트는 좌표만 정규화하고, 실제 입력 정책은 Node 테스트와 같은 경계를 지난다. */
+function routeInput(event: GameInputEvent): boolean {
+  const outcome = dispatchGameInput(
+    {
+      state,
+      layout,
+      drag,
+      phaseLocked: performance.now() - phaseChangedAt < PHASE_LOCK_MS,
+    },
+    event,
+  );
+  Object.assign(drag, outcome.drag);
+  if (outcome.hoverCell !== undefined) hoverCell = outcome.hoverCell;
+  if (outcome.unlockAudio) unlockAudio();
+  executeGameInputAction(outcome.action, inputEffects);
+  return outcome.preventDefault;
+}
+
 canvas.addEventListener("pointerdown", (e) => {
-  e.preventDefault();
-  // 브라우저는 사용자 입력 전에 소리를 안 낸다. 이 탭이 그 입력이다.
-  unlockAudio();
+  const { x, y } = pointerPos(e);
+  if (routeInput({ kind: "pointer-down", pointerId: e.pointerId, x, y })) e.preventDefault();
   try {
     canvas.setPointerCapture(e.pointerId);
   } catch {
     // 일부 브라우저는 활성 포인터가 아니면 던진다. 캡처는 편의 기능이므로 무시한다.
   }
-  const { x, y } = pointerPos(e);
-
-  /**
-   * 음소거는 페이즈 잠금보다 먼저 본다.
-   *
-   * 아래 잠금은 "국면이 방금 바뀌었으니 이 탭은 이전 화면을 향한 것"이라는
-   * 판단인데, 음소거에는 그 논리가 안 맞는다. 소리를 끄려는 손은 화면이
-   * 무엇으로 바뀌었든 소리를 끄려는 손이다. 시끄러워서 누른 버튼이
-   * 안 먹으면 그다음은 탭이 닫힌다.
-   */
-  if (rectHas(layout.mute, x, y)) {
-    toggleMute();
-    return;
-  }
-
-  // 페이즈가 막 바뀌었으면 이 탭은 이전 화면을 향한 것이다. 버린다.
-  if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
-
-  // 죽은 화면의 세 갈래(같은 시드 · 오늘의 시드 · 도전 +1). 큰 버튼보다 먼저 본다 —
-  // 판 안에 있으므로 겹치지는 않지만, 순서를 정해 두면 나중에 겹쳐도 규칙이 남는다.
-  if (state.phase === "gameover") {
-    const { choices } = gameoverGeometry(layout, state);
-    const pick: NextChoice | null = rectHas(choices.retry, x, y)
-      ? "retry"
-      : rectHas(choices.daily, x, y)
-        ? "daily"
-        : rectHas(choices.challenge, x, y)
-          ? "challenge"
-          : null;
-    if (pick) {
-      startNextRun(pick);
-      return;
-    }
-  }
-
-  if (rectHas(layout.button, x, y)) {
-    if (state.phase === "battle") {
-      // 누르는 즉시 들어간다. 뗄 때까지 기다릴 이유가 없어졌다 — 길게 누르기가
-      // 뜻하던 것(뭉침)이 사라졌고, 취약 창에서는 연타가 곧 화력이다.
-      //
-      // **지금은 극성(polarity)만 버튼이 두 짝이다(C1).** `dualChoiceActive`
-      // (battle.ts) 하나가 그 기준이다 — 원버튼 폐기가 검토 중이라, 나중에
-      // 그 게이트가 넓어지면(모든 예고에서 산개/집결을 직접 고르는 쪽으로)
-      // 여기는 손댈 것이 없다. `splitButtonChoice`가 render.ts의 가운데 경계를 쓰므로
-      // 그림과 히트테스트가 어긋나지 않는다. 게이트가 닫혀 있으면 예전처럼
-      // `act` 하나뿐.
-      if (dualChoiceActive(state)) {
-        pushIntent(splitButtonChoice(layout.button, x), true);
-      } else {
-        pushIntent("act");
-      }
-      return;
-    }
-    onPrimaryAction();
-    return;
-  }
-
-  if (state.phase === "map") {
-    if (state.raidOffers.length > 0) {
-      const cards = raidContractRects(layout, state.raidOffers.length);
-      for (let i = 0; i < cards.length; i++) {
-        const card = cards[i];
-        if (card && rectHas(card, x, y)) {
-          selectRaidContract(i);
-          return;
-        }
-      }
-      return;
-    }
-    const nearest = nearestMapNode(openMapNodeRects(layout, state), x, y);
-    if (nearest) {
-      // 44px 원이 좁은 화면에서 겹치면 배열 첫 칸이 아니라 손가락에 가까운 칸을 고른다.
-      const n = nearest;
-      if (!chooseNode(state, n.idx)) setNotice(state, "그 길로는 갈 수 없어요");
-      return;
-    }
-    return;
-  }
-
-  if (state.phase === "reward") {
-    if (rectHas(rerollRect(layout), x, y)) {
-      rerollOffers(state);
-      return;
-    }
-    /**
-     * 카드 자리는 **빈 자리여도 탭을 삼킨다.**
-     *
-     * 전에는 `offer &&`가 조건에 있어서, 이미 산 자리를 누르면 아래로 흘러
-     * 보드 검사에 닿았다. 화면에는 빈 카드 틀이 그려져 있는데 그 위를 누르면
-     * 뒤에 있는 고양이가 잡히는 셈이다. 구매·배치가 한 화면이 되면서 그
-     * 뒤에 실제로 보드가 있게 됐다.
-     */
-    const rects = offerRects(layout);
-    for (let i = 0; i < rects.length; i++) {
-      const r = rects[i];
-      if (!r || !rectHas(r, x, y)) continue;
-      const offer = state.offers[i];
-      // buyOffer가 실패 사유별로 notice를 세팅한다. 덮어쓰면 거짓 안내가 뜬다.
-      // (보드 만석인데 "생선이 부족합니다"가 뜨던 버그)
-      if (offer && !buyWithFx(offer) && state.gold < offer.cost) {
-        setNotice(state, "생선이 조금 모자라요");
-      }
-      return;
-    }
-
-    /**
-     * 카드 사이 틈도 삼킨다 — **접힌 구성에서만** 문제가 된다.
-     *
-     * 접힌 화면에서는 카드 줄이 판 위로 자라므로, 카드 사각형 사이의 빈틈을
-     * 누르면 보이지도 않는 판의 고양이가 잡힌다(667x275에서 패널의 5~18%가
-     * 그런 자리였다). 세로줄 구성에서는 패널이 판을 아예 안 덮으므로 이
-     * 조건이 걸리지 않는다.
-     */
-    if (!layout.columns) {
-      // 카드는 패널 띠 **위로 자란다.** 그래서 패널 사각형만 막으면 카드보다
-      // 위쪽의 틈이 그대로 샜다(667x275에서 0.5%). 카드들을 감싸는 상자까지
-      // 함께 삼킨다.
-      let box = layout.offersPanel ?? null;
-      for (const r of rects) {
-        if (!r) continue;
-        box = box
-          ? {
-              x: Math.min(box.x, r.x),
-              y: Math.min(box.y, r.y),
-              w: Math.max(box.x + box.w, r.x + r.w) - Math.min(box.x, r.x),
-              h: Math.max(box.y + box.h, r.y + r.h) - Math.min(box.y, r.y),
-            }
-          : r;
-      }
-      if (box && rectHas(box, x, y)) return;
-    }
-  }
-
-  if (!canRearrange()) return;
-  // 이미 다른 손가락이 끌고 있으면 새 포인터는 무시한다.
-  // 그러지 않으면 두 번째 손가락이 fromCell을 덮어써서, 첫 손가락을 뗄 때
-  // 엉뚱한 고양이가 엉뚱한 칸으로 옮겨진다(핀치줌 시도 시 실제로 발생).
-  if (drag.active) return;
-  const cell = hitCell(layout, "ally", x, y);
-  if (cell >= 0 && state.ally[cell]) {
-    drag.active = true;
-    drag.fromCell = cell;
-    drag.x = x;
-    drag.y = y;
-    drag.pointerId = e.pointerId;
-  }
 });
 
 canvas.addEventListener("pointermove", (e) => {
-  const { x, y } = pointerPos(e);
-  if (drag.active) {
-    if (e.pointerId !== drag.pointerId) return;
-    drag.x = x;
-    drag.y = y;
-  }
-  drag.hoverX = x;
-  drag.hoverY = y;
-  hoverCell = canRearrange() ? hitCell(layout, "ally", x, y) : -1;
+  routeInput({ kind: "pointer-move", pointerId: e.pointerId, ...pointerPos(e) });
 });
-
-function endDrag(e: PointerEvent): void {
-  if (!drag.active || e.pointerId !== drag.pointerId) return;
-  const { x, y } = pointerPos(e);
-  const to = hitCell(layout, "ally", x, y);
-  if (to >= 0) moveCat(state, drag.fromCell, to);
-  cancelDrag();
-}
 
 // 캔버스 밖에서 버튼을 떼면 캔버스에는 pointerup이 오지 않는다.
-// setPointerCapture가 실패했을 때(try/catch로 삼킴) 드래그가 영구히 걸린 채
-// 유령 고양이가 커서를 따라다니므로, window에서도 받는다.
+// setPointerCapture가 실패했을 때도 window 경계가 소유 포인터의 drop을 마무리한다.
 window.addEventListener("pointerup", (e) => {
-  endDrag(e);
+  routeInput({ kind: "pointer-up", pointerId: e.pointerId, ...pointerPos(e) });
 });
-window.addEventListener("pointercancel", () => {
-  cancelDrag();
-});
-canvas.addEventListener("pointerleave", () => {
-  drag.hoverX = -1;
-  drag.hoverY = -1;
-});
-canvas.addEventListener("lostpointercapture", cancelDrag);
+window.addEventListener("pointercancel", (e) => routeInput({ kind: "pointer-cancel", pointerId: e.pointerId }));
+canvas.addEventListener("pointerleave", () => routeInput({ kind: "pointer-leave" }));
+canvas.addEventListener("lostpointercapture", (e) => routeInput({ kind: "lost-pointer-capture", pointerId: e.pointerId }));
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 /* ------------------------------------------------------------------ */
@@ -654,72 +528,10 @@ function pushIntent(kind: Intervention["kind"] = "act", dual = false): void {
 }
 
 window.addEventListener("keydown", (e) => {
-  // 연타를 그대로 받는 것은 취약 창(연타가 곧 화력) 때문이다. G도 같은
-  // 이유로 반복을 받는다 — 안 받으면 극성에서 산개(Space)만 연타되고
-  // 집결(G)은 꾹 눌러도 한 번만 나가는 비대칭이 생긴다.
-  if (e.repeat && e.code !== "Space" && e.code !== "KeyG") return;
-  unlockAudio();
-
-  // 음소거는 페이즈 잠금 위에 있다. 탭 쪽과 같은 이유다.
-  if (e.code === "KeyM") {
-    toggleMute();
-    return;
-  }
-  if (performance.now() - phaseChangedAt < PHASE_LOCK_MS) return;
-
-  switch (e.code) {
-    case "Space":
-      e.preventDefault();
-      // 취약 창에는 연타가 곧 화력이라 자동 반복도 그대로 받는다.
-      if (dualChoiceActive(state)) pushIntent("dodge", true);
-      else pushIntent("act");
-      return;
-    case "KeyG":
-      e.preventDefault();
-      // 게이트가 닫혀 있으면 버튼·Space와 완전히 같은 일(act)을 한다 — 몰라도
-      // 손해가 없는 키여야 한다.
-      if (dualChoiceActive(state)) pushIntent("gather", true);
-      else pushIntent("act");
-      return;
-    case "Enter":
-      if (state.phase !== "battle") onPrimaryAction();
-      return;
-    case "KeyR":
-      if (state.phase === "reward") rerollOffers(state);
-      return;
-    case "Digit1":
-    case "Digit2":
-    case "Digit3":
-    case "Digit4": {
-      const slot = Number(e.code.slice(5)) - 1;
-      if (state.phase === "gameover") {
-        // 죽은 화면의 세 갈래를 1·2·3으로. 화면의 버튼 순서와 같다. 4는 버튼이
-        // 없으므로 아무 일도 안 한다 — 지도 단축키로 새지 않게 여기서 끝낸다.
-        const pick = (["retry", "daily", "challenge"] as const)[slot];
-        if (pick) startNextRun(pick);
-        return;
-      }
-      if (state.phase === "map") {
-        if (state.raidOffers.length > 0) {
-          selectRaidContract(slot);
-          return;
-        }
-        // 지도에서는 고를 수 있는 칸만 순서대로 센다. 갈 수 없는 칸을 세면
-        // 번호가 화면과 어긍난다.
-        const step = mapStep(state);
-        const idx = openLanes(state.map, step)[slot];
-        if (idx !== undefined) chooseNode(state, idx);
-        return;
-      }
-      if (state.phase !== "reward") return;
-      if (slot > 2) return;
-      const offer = state.offers[slot];
-      if (!offer) return;
-      if (!buyWithFx(offer) && state.gold < offer.cost) setNotice(state, "생선이 조금 모자라요");
-      return;
-    }
-  }
+  // 자동 반복·phase lock·음소거 우선순위는 포인터와 같은 production 경계가 정한다.
+  if (routeInput({ kind: "key-down", code: e.code, repeat: e.repeat })) e.preventDefault();
 });
+
 
 /**
  * `?debug=1`일 때만 런 상태를 창에 노출한다.

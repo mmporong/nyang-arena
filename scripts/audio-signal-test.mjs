@@ -59,8 +59,26 @@ assert.deepEqual(
       frequenciesHz: [523, 659, 784],
       offsetsSec: [0, 0.065, 0.13],
     },
+    reroll: {
+      motif: "shuffle-three-note",
+      durationSec: 0.19,
+      frequenciesHz: [740, 620, 820],
+      offsetsSec: [0, 0.055, 0.11],
+    },
+    map: {
+      motif: "route-confirm",
+      durationSec: 0.22,
+      frequenciesHz: [440, 660, 880],
+      offsetsSec: [0, 0.04, 0.1],
+    },
+    reentry: {
+      motif: "launch-octaves",
+      durationSec: 0.28,
+      frequenciesHz: [196, 392, 784],
+      offsetsSec: [0, 0.07, 0.14],
+    },
   },
-  "계약·구매·강화 큐는 서로 다른 소리 문법을 유지해야 한다",
+  "상호작용별 UI 큐는 구분되는 소리 문법을 유지해야 한다",
 );
 for (const [kind, spec] of Object.entries(UI_CUE_CONTRACT)) {
   assert.ok(spec.durationSec <= 0.36, `${kind}: 선택 피드백 전체 길이는 360ms 이내`);
@@ -72,6 +90,16 @@ assert.ok(
     (voice, index, voices) => index === 0 || voice.frequencyHz > voices[index - 1].frequencyHz,
   ),
   "강화 큐는 상승 3음이어야 한다",
+);
+assert.ok(
+  UI_CUE_CONTRACT.reroll.voices[1].frequencyHz < UI_CUE_CONTRACT.reroll.voices[0].frequencyHz &&
+    UI_CUE_CONTRACT.reroll.voices[2].frequencyHz > UI_CUE_CONTRACT.reroll.voices[0].frequencyHz,
+  "재추첨 큐는 아래로 섞고 위로 확정하는 3음이어야 한다",
+);
+assert.deepEqual(
+  UI_CUE_CONTRACT.reentry.voices.map((voice) => voice.frequencyHz),
+  [196, 392, 784],
+  "재진입 큐는 옥타브 단위로 상승해야 한다",
 );
 
 const emitted = [];

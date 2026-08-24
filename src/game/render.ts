@@ -18,7 +18,7 @@ import {
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { bossHint, bossOrdinalInStage, isRaidPrepStep, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
+import { bossHint, bossOrdinalInStage, isRaidPrepStep, nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted, playUiCue } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
@@ -40,6 +40,7 @@ import {
   CODEX_TOTALS,
   loadCodex,
   type Codex,
+  type NextChoice,
   type Offer,
   type RunState,
 } from "./run.ts";
@@ -3306,6 +3307,255 @@ export function nearestMapNode<T extends { rect: Rect }>(
   return nearest;
 }
 
+/** 지도 표식과 선택 확인이 같은 종류 색을 쓰는 단일 경계. */
+function mapNodeAccent(kind: NodeKind): string {
+  if (kind === "boss") return T.enemy;
+  if (kind === "elite") return T.vuln;
+  if (kind === "shop") return T.fish;
+  return T.ally;
+}
+
+/**
+ * 지도 전이가 끝난 뒤에도 남길 수 있는 최소 snapshot.
+ *
+ * 이전 지도 면이나 다른 노드는 저장하지 않는다. 선택 순간의 위치를 화면 비율로
+ * 들고 있으므로 320ms 안에 회전하더라도 고리가 새 화면 밖으로 밀리지 않는다.
+ */
+export interface MapChoiceFeedbackSnapshot {
+  xRatio: number;
+  yRatio: number;
+  radiusRatio: number;
+  label: string;
+  accent: string;
+}
+
+export function captureMapChoiceFeedback(
+  L: Layout,
+  s: RunState,
+  idx: number,
+): MapChoiceFeedbackSnapshot | null {
+  const hit = openMapNodeRects(L, s).find((entry) => entry.idx === idx);
+  if (!hit) return null;
+  const node = s.map.steps[hit.step]?.[idx];
+  if (!node) return null;
+  const label = node.kind === "boss"
+    ? bossForIndex(bossIndexAt(s, hit.step)).name
+    : nodeInfo(node.kind).name;
+  const basis = Math.max(1, Math.min(L.w, L.h));
+  return {
+    xRatio: (hit.rect.x + hit.rect.w / 2) / Math.max(1, L.w),
+    yRatio: (hit.rect.y + hit.rect.h / 2) / Math.max(1, L.h),
+    radiusRatio: Math.max(18, hit.rect.w / 2) / basis,
+    label,
+    accent: mapNodeAccent(node.kind),
+  };
+}
+
+interface TimedFeedback {
+  startedAt: number;
+}
+
+interface RerollFeedback extends TimedFeedback {
+  success: boolean;
+}
+
+interface MapChoiceFeedback extends TimedFeedback {
+  snapshot: MapChoiceFeedbackSnapshot;
+}
+
+interface NextRunFeedback extends TimedFeedback {
+  choice: NextChoice;
+}
+
+let rerollFeedback: RerollFeedback | null = null;
+let mapChoiceFeedback: MapChoiceFeedback | null = null;
+let nextRunFeedback: NextRunFeedback | null = null;
+
+/** 실제 재추첨 결과가 정해진 뒤에만 부른다. 실패에는 성공음을 내지 않는다. */
+export function spawnRerollFeedback(success: boolean): void {
+  rerollFeedback = { success, startedAt: performance.now() };
+  if (success) playUiCue("reroll");
+}
+
+/** `chooseNode`가 성공한 뒤, 전이 전에 잡아 둔 위치만 남긴다. */
+export function spawnMapChoiceFeedback(snapshot: MapChoiceFeedbackSnapshot): void {
+  mapChoiceFeedback = { snapshot, startedAt: performance.now() };
+  playUiCue("map");
+}
+
+/** 새 런은 즉시 시작하고 이전 버튼 대신 선택 이름만 짧게 남긴다. */
+export function spawnNextRunFeedback(choice: NextChoice): void {
+  rerollFeedback = null;
+  mapChoiceFeedback = null;
+  nextRunFeedback = { choice, startedAt: performance.now() };
+  playUiCue("reentry");
+}
+
+function feedbackProgress(startedAt: number, duration: number): number {
+  return (performance.now() - startedAt) / duration;
+}
+
+function feedbackAlpha(progress: number, fadeFrom = 0.68): number {
+  if (progress <= fadeFrom) return 1;
+  return Math.max(0, 1 - (progress - fadeFrom) / (1 - fadeFrom));
+}
+
+function drawRerollFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const fx = rerollFeedback;
+  if (!fx) return;
+  if (s.phase !== "reward") {
+    rerollFeedback = null;
+    return;
+  }
+  const reduce = reducedMotion();
+  const duration = reduce ? 160 : fx.success ? 300 : 220;
+  const progress = feedbackProgress(fx.startedAt, duration);
+  if (progress >= 1) {
+    rerollFeedback = null;
+    return;
+  }
+
+  const color = fx.success ? T.gold : "#D58A48";
+  const alpha = feedbackAlpha(progress, fx.success ? 0.72 : 0.58);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  if (!fx.success) {
+    roundRect(ctx, L.offerCards, Math.max(7, L.scale * 9));
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, L.scale * 2.4);
+    ctx.stroke();
+  } else {
+    const rects = offerRects(L);
+    rects.forEach((rect, index) => {
+      const stagger = reduce ? 0 : index * 0.12;
+      const local = Math.max(0, Math.min(1, (progress - stagger) / Math.max(0.01, 1 - stagger)));
+      if (progress < stagger) return;
+      roundRect(ctx, rect, Math.max(6, L.scale * 8));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(2, L.scale * (reduce ? 2.2 : 3.2 - local));
+      ctx.stroke();
+      if (!reduce) {
+        const sweepX = rect.x + rect.w * easeOutCubic(local);
+        const glow = ctx.createLinearGradient(sweepX - rect.w * 0.16, 0, sweepX + rect.w * 0.08, 0);
+        glow.addColorStop(0, "rgba(240,186,74,0)");
+        glow.addColorStop(0.65, `rgba(240,186,74,${0.14 * (1 - local * 0.35)})`);
+        glow.addColorStop(1, "rgba(240,186,74,0)");
+        ctx.fillStyle = glow;
+        roundRect(ctx, rect, Math.max(6, L.scale * 8));
+        ctx.fill();
+      }
+    });
+  }
+  const label = fx.success ? "새 제안" : "재추첨 불가";
+  uiText(
+    ctx,
+    label,
+    L.offerCards.x + L.offerCards.w / 2,
+    L.offerCards.y + Math.max(14, L.scale * 16),
+    Math.max(12, Math.min(17, L.scale * 15)),
+    color,
+    { align: "center", weight: 900, outline: true, maxWidth: L.offerCards.w * 0.8 },
+  );
+  ctx.restore();
+}
+
+function drawMapChoiceFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const fx = mapChoiceFeedback;
+  if (!fx) return;
+  if (s.phase !== "reward") {
+    mapChoiceFeedback = null;
+    return;
+  }
+  const reduce = reducedMotion();
+  const duration = reduce ? 160 : 320;
+  const progress = feedbackProgress(fx.startedAt, duration);
+  if (progress >= 1) {
+    mapChoiceFeedback = null;
+    return;
+  }
+  const { snapshot } = fx;
+  const basis = Math.max(1, Math.min(L.w, L.h));
+  const cx = snapshot.xRatio * L.w;
+  const cy = snapshot.yRatio * L.h;
+  const baseRadius = Math.max(18, snapshot.radiusRatio * basis);
+  const ringRadius = reduce ? baseRadius * 1.2 : baseRadius * (1 + easeOutCubic(progress) * 0.9);
+  const alpha = feedbackAlpha(progress, 0.65);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = snapshot.accent;
+  ctx.lineWidth = Math.max(2, L.scale * (reduce ? 2.6 : 4 - progress * 1.8));
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+  ctx.stroke();
+  if (!reduce) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, baseRadius * (0.72 + progress * 0.2), 0, Math.PI * 2);
+    ctx.strokeStyle = T.paper;
+    ctx.lineWidth = Math.max(1, L.scale * 1.4);
+    ctx.stroke();
+  }
+  uiText(
+    ctx,
+    `경로 확정 · ${snapshot.label}`,
+    cx,
+    cy + ringRadius + Math.max(15, L.scale * 14),
+    Math.max(12, Math.min(16, L.scale * 14)),
+    T.paper,
+    { align: "center", weight: 900, outline: true, maxWidth: Math.max(150, L.w * 0.32) },
+  );
+  ctx.restore();
+}
+
+function nextRunChoiceLabel(choice: NextChoice): string {
+  if (choice === "retry") return "같은 판 재도전";
+  if (choice === "daily") return "오늘의 시드";
+  if (choice === "challenge") return "도전 +1";
+  return "한 판 더";
+}
+
+function drawNextRunFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const fx = nextRunFeedback;
+  if (!fx) return;
+  if (s.phase !== "map") {
+    nextRunFeedback = null;
+    return;
+  }
+  const reduce = reducedMotion();
+  const duration = reduce ? 160 : 320;
+  const progress = feedbackProgress(fx.startedAt, duration);
+  if (progress >= 1) {
+    nextRunFeedback = null;
+    return;
+  }
+  const alpha = feedbackAlpha(progress, 0.64);
+  const w = Math.min(L.w * 0.7, Math.max(190, L.scale * 300));
+  const h = Math.max(42, L.scale * 48);
+  const x = L.w / 2 - w / 2;
+  const y = L.h / 2 + Math.min(L.h * 0.18, L.scale * 74);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  roundRect(ctx, { x, y, w, h }, h / 2);
+  ctx.fillStyle = "rgba(28,19,14,0.92)";
+  ctx.fill();
+  ctx.strokeStyle = T.gold;
+  ctx.lineWidth = Math.max(2, L.scale * 2.2);
+  ctx.stroke();
+  uiText(ctx, `새 런 · ${nextRunChoiceLabel(fx.choice)}`, L.w / 2, y + h / 2, Math.max(13, L.scale * 15), T.gold, {
+    align: "center",
+    weight: 900,
+    outline: true,
+    maxWidth: w - Math.max(20, L.scale * 28),
+  });
+  ctx.restore();
+}
+
+/** 모든 선택 확인은 최종 전환 막 위에 그려 새 화면과 입력 상태가 어긋나지 않게 한다. */
+function drawInteractionFeedback(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  drawRerollFeedback(ctx, L, s);
+  drawMapChoiceFeedback(ctx, L, s);
+  drawNextRunFeedback(ctx, L, s);
+}
+
 export interface MapChoiceLabelGeometry {
   y: number;
   fontSize: number;
@@ -4169,11 +4419,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     const contractPrep = pickable && prepRoute === node.kind;
     const shortcut = pickable ? openOrder.indexOf(idx) + 1 : 0;
 
-    const hue =
-      node.kind === "boss" ? T.enemy
-      : node.kind === "elite" ? T.vuln
-      : node.kind === "shop" ? T.fish
-      : T.ally;
+    const hue = mapNodeAccent(node.kind);
     // 고를 수 있는 칸만 살아 있다. 나머지는 지도의 배경이다.
     const alpha = pickable ? 1 : taken ? 0.62 : done ? 0.26 : 0.46;
 
@@ -5448,6 +5694,7 @@ export function render(
     drawRaidContractChoiceFeedback(ctx, L);
     watchTransitions(s);
     drawCurtain(ctx, L);
+    drawInteractionFeedback(ctx, L, s);
     return;
   }
 
@@ -5542,4 +5789,5 @@ export function render(
   // 막은 맨 위다. 아래에 무엇이 있든 전환이 전환으로 읽혀야 한다.
   watchTransitions(s);
   drawCurtain(ctx, L);
+  drawInteractionFeedback(ctx, L, s);
 }

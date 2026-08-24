@@ -236,6 +236,9 @@ try {
   audio.playUiCue("contract");
   audio.playUiCue("purchase");
   audio.playUiCue("upgrade");
+  audio.playUiCue("reroll");
+  audio.playUiCue("map");
+  audio.playUiCue("reentry");
   assert.equal(FakeAudioContext.instances.length, 0, "잠금 전에는 AudioContext를 만들지 않는다");
 
   audio.unlockAudio();
@@ -254,12 +257,18 @@ try {
   });
   assertUiCueGraph(audio, context, "purchase", { frequenciesHz: [660, 990], durationSec: 0.18 });
   assertUiCueGraph(audio, context, "upgrade", { frequenciesHz: [523, 659, 784], durationSec: 0.25 });
+  assertUiCueGraph(audio, context, "reroll", { frequenciesHz: [740, 620, 820], durationSec: 0.19 });
+  assertUiCueGraph(audio, context, "map", { frequenciesHz: [440, 660, 880], durationSec: 0.22 });
+  assertUiCueGraph(audio, context, "reentry", { frequenciesHz: [196, 392, 784], durationSec: 0.28 });
 
   globalThis.document.hidden = true;
   const hiddenNodeCount = nodeCount(context);
   audio.playUiCue("contract");
   audio.playUiCue("purchase");
   audio.playUiCue("upgrade");
+  audio.playUiCue("reroll");
+  audio.playUiCue("map");
+  audio.playUiCue("reentry");
   assert.equal(nodeCount(context), hiddenNodeCount, "숨은 탭에서는 UI 큐 노드를 만들지 않는다");
   globalThis.document.hidden = false;
 
@@ -271,6 +280,9 @@ try {
   audio.playUiCue("contract");
   audio.playUiCue("purchase");
   audio.playUiCue("upgrade");
+  audio.playUiCue("reroll");
+  audio.playUiCue("map");
+  audio.playUiCue("reentry");
   assert.equal(nodeCount(context), mutedNodeCount, "음소거 중에는 신호 노드를 만들지 않는다");
 
   context.suspendBehavior = "reject";

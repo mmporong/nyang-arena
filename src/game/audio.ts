@@ -66,7 +66,7 @@ const BASE_URL = import.meta.env?.BASE_URL ?? "/";
 
 export type BossSignal = "avoid" | "gather" | "vulnerable";
 
-export type UiCue = "contract" | "purchase" | "upgrade";
+export type UiCue = "contract" | "purchase" | "upgrade" | "reroll" | "map" | "reentry";
 
 interface UiCueVoice {
   frequencyHz: number;
@@ -79,7 +79,13 @@ interface UiCueVoice {
 
 interface UiCueSpec {
   /** DESIGN.md의 소리 문법을 테스트가 고정할 수 있는 짧은 식별자. */
-  motif: "snap-stamp-approve" | "two-note" | "rising-three-note";
+  motif:
+    | "snap-stamp-approve"
+    | "two-note"
+    | "rising-three-note"
+    | "shuffle-three-note"
+    | "route-confirm"
+    | "launch-octaves";
   durationSec: number;
   voices: readonly UiCueVoice[];
 }
@@ -114,6 +120,33 @@ export const UI_CUE_CONTRACT = {
       { frequencyHz: 523, type: "triangle", offsetSec: 0, lengthSec: 0.12, peak: 0.095, attackSec: 0.004 },
       { frequencyHz: 659, type: "triangle", offsetSec: 0.065, lengthSec: 0.12, peak: 0.1, attackSec: 0.004 },
       { frequencyHz: 784, type: "sine", offsetSec: 0.13, lengthSec: 0.12, peak: 0.105, attackSec: 0.004 },
+    ],
+  },
+  reroll: {
+    motif: "shuffle-three-note",
+    durationSec: 0.19,
+    voices: [
+      { frequencyHz: 740, type: "triangle", offsetSec: 0, lengthSec: 0.08, peak: 0.08, attackSec: 0.003 },
+      { frequencyHz: 620, type: "triangle", offsetSec: 0.055, lengthSec: 0.08, peak: 0.08, attackSec: 0.003 },
+      { frequencyHz: 820, type: "sine", offsetSec: 0.11, lengthSec: 0.08, peak: 0.085, attackSec: 0.003 },
+    ],
+  },
+  map: {
+    motif: "route-confirm",
+    durationSec: 0.22,
+    voices: [
+      { frequencyHz: 440, type: "square", offsetSec: 0, lengthSec: 0.035, peak: 0.06, attackSec: 0 },
+      { frequencyHz: 660, type: "triangle", offsetSec: 0.04, lengthSec: 0.12, peak: 0.09, attackSec: 0.004 },
+      { frequencyHz: 880, type: "sine", offsetSec: 0.1, lengthSec: 0.12, peak: 0.085, attackSec: 0.004 },
+    ],
+  },
+  reentry: {
+    motif: "launch-octaves",
+    durationSec: 0.28,
+    voices: [
+      { frequencyHz: 196, type: "triangle", offsetSec: 0, lengthSec: 0.14, peak: 0.09, attackSec: 0.006 },
+      { frequencyHz: 392, type: "triangle", offsetSec: 0.07, lengthSec: 0.14, peak: 0.095, attackSec: 0.006 },
+      { frequencyHz: 784, type: "sine", offsetSec: 0.14, lengthSec: 0.14, peak: 0.1, attackSec: 0.006 },
     ],
   },
 } as const satisfies Record<UiCue, UiCueSpec>;
