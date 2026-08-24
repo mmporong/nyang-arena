@@ -12,15 +12,17 @@
 
 | 구분 | 실측 | 계약 |
 |---|---:|---|
-| 캐릭터 스프라이트 | 186장 | 31 ID × 6포즈 |
+| 캐릭터 source | 186장 | `assets/sprites-src/`, 31 ID × 6포즈 |
+| 런타임 atlas | 2장 | base 120셀 + extra 66셀, 이미지 요청 정확히 2회 |
 | 포즈 | 각 31장 | `idle/sleep/wink/move/back/run` |
 | 스프라이트 규격 | 전부 197×197 RGBA | 균일 셀·투명 배경 |
 | 아이콘 | 논리 17종 | Canvas 2D 패스 17종 · 이미지 파일 0장 |
 | 원본 시트 | 1374×4306 RGBA | 저장소 밖 `CatCharacterSheet.png` |
 | 생성 도구 | Python 3 + Pillow 12.1.1 실측 | 런타임 의존성 아님 |
 
-`src/game/sprites.ts`는 시작할 때 게임에 쓰는 ID의 6포즈를 전부 로드한다. 한 장이 실패해도
-게임은 뜨고 렌더러의 Canvas 폴백 도형으로 내려가지만, 출고 에셋은 186장이 모두 있어야 한다.
+`src/game/sprites.ts`는 부트를 막지 않고 atlas 두 장을 singleton으로 로드한다. 한 장이 실패해도
+나머지 frame을 쓰며 누락 ID는 공용 Canvas 고양이 폴백으로 내려간다. source 186장은 모두
+197×197 RGBA이고 공통 alpha bbox `(2,2)-(194,194)`를 가져야 한다.
 
 ## 3. 정준 파이프라인
 
@@ -30,7 +32,8 @@
 - 다른 기기에서는 `NYANG_SHEET`에 절대경로를 준다.
 - 원본은 6열 × 20행이다. 열은 `idle/sleep/wink/move/back/run`, 셀은 197×197,
   시작점 `(124,144)`, 피치 208px이다.
-- 원본 대용량 시트는 커밋하지 않고, 생성된 개별 PNG만 `public/sprites/`에 커밋한다.
+- 원본 대용량 시트는 커밋하지 않는다. 개별 source는 `assets/sprites-src/`, 런타임 atlas 두 장은
+  `public/sprites/`에 커밋한다.
 
 PowerShell 실행 순서:
 
@@ -38,23 +41,26 @@ PowerShell 실행 순서:
 cd $HOME\nyang-arena
 $env:NYANG_SHEET = "$HOME\PKM\06_Ideas\assets\CatCharacterSheet.png"
 npm.cmd run slice
-npm.cmd run recolor
 Remove-Item Env:NYANG_SHEET
 ```
 
 ### 3-2. 슬라이스
 
-`scripts/slice-sprites.py`가 원본 20행을 `public/sprites/01_*`~`20_*` 120장으로 자른다.
+`npm run slice`는 slice→recolor→atlas 단일 파이프라인이다. `scripts/slice-sprites.py`가 원본
+20행을 `assets/sprites-src/01_*`~`20_*` 120장으로 임시 디렉터리에 자른다.
 
 - 배경 제거는 셀 테두리에서 시작하는 flood fill만 쓴다. 전역 색상 치환은 흰색·크림색
   몸통까지 지우므로 금지한다.
 - 타이트 크롭을 하지 않는다. 197×197 셀을 유지해야 포즈 전환 때 발 위치가 튀지 않는다.
 - 파일명은 `<2자리 ID>_<pose>.png`다.
+- 빈 셀·저불투명·크기·alpha bbox 위반이 하나라도 있으면 대상 source를 교체하지 않는다.
+  120장이 모두 완성·검증된 뒤에만 해당 파일을 교체한다.
 
 ### 3-3. 리컬러
 
 `scripts/recolor-sprites.py`가 20개 원본 중 지정된 바탕을 색조 변환해 ID 21~31의 66장을
-미리 굽는다. 런타임 `hue-rotate`는 쓰지 않는다.
+미리 굽는다. 런타임 `hue-rotate`는 쓰지 않는다. 원본 누락·197×197 RGBA 위반이 있으면
+실패하며, 임시 디렉터리의 66장이 모두 검증된 뒤에만 파생 source를 교체한다.
 
 | 새 ID | 바탕 ID | 용도 |
 |---:|---:|---|
@@ -65,23 +71,20 @@ Remove-Item Env:NYANG_SHEET
 리컬러는 명암 순서와 알파를 보존하고 색상·채도를 덮어쓴다. 원본과 파생본은 같은
 197×197 앵커를 공유한다.
 
-### 3-4. 출고 검수
+### 3-4. Atlas와 자동 검수
 
 다음 조건을 모두 만족해야 생성 결과를 스테이징할 수 있다.
 
-1. `public/sprites/`에 PNG가 정확히 186장이고 ID 01~31이 각각 6장이다.
-2. 여섯 포즈별 개수가 각각 31장이다.
-3. 전 파일이 197×197 RGBA이며 투명 배경을 가진다.
-4. 각 포즈의 몸 중심과 발바닥 기준선은 같은 ID의 `idle` 대비 ±2px 안이다.
-5. 불투명 픽셀이 비어 있지 않고, 흰색·크림색 몸통에 flood fill 구멍이 없다.
-6. 리컬러 11종은 바탕과 실루엣·알파가 같고 색만 다르다.
-7. 브라우저에서 10기기 프로브, 실제 보드 100%·150% 크기, 밝고 어두운 배경을 확인한다.
-8. 결과 파일만 경로별로 스테이징하고 `git diff --cached --stat`으로 범위를 확인한다.
-
-슬라이스·리컬러 스크립트 자체는 빈 셀을 경고하고 계속하거나 바탕 포즈가 없으면 조용히
-건너뛴다. 대신 `npm run asset:test`가 출고 전에 31 ID × 6포즈의 정확한 파일명,
-197×197 RGBA PNG 헤더를 fail-closed로 검사한다. ID 31의 리컬러 로그 이름이 현재 품종명
-`허깨비`가 아니라 옛 이름 `메아리`로 남은 문제는 다음 파이프라인 변경에서 고친다.
+1. `assets/sprites-src/`에 PNG가 정확히 186장이고 ID 01~31이 각각 6장이다.
+2. 전 source가 197×197 RGBA, alpha bbox `(2,2)-(194,194)`다.
+3. `atlas-base.png`는 1152×3840/120셀, `atlas-extra.png`는 1152×2112/66셀이며 둘 다 4096px 미만이다.
+4. `scripts/sprite-atlas.mjs`는 두 atlas를 메모리에서 모두 완성한 뒤 쓰며 `--check`는 source와
+   결정적으로 일치하는지 읽기 전용으로 확인한다.
+5. `npm run atlas:test`는 signature·CRC·truncation·dimension·inflate 상한·bbox·누락 source를,
+   `npm run sprite:loader:test`는 singleton·오류·timeout·late-load·wrong-size를 적대 검증한다.
+6. `npm run asset:test`는 atlas의 186셀을 decode해 source crop과 byte-exact인지 확인한다.
+7. `npm run browser:runtime:test`는 production 번들의 atlas 요청 2회·legacy 요청 0회와 한 atlas
+   실패 시 비차단 부트·부분 frame·Canvas 폴백을 실제 브라우저에서 확인한다.
 
 ## 4. 필요 에셋 목록
 

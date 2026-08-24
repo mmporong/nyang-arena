@@ -27,7 +27,8 @@ import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./
 import { isMuted, playUiCue } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
 import { cellRect, fieldToScreen, hitCell, uiSpace, type Layout, type Rect } from "./layout.ts";
-import { spriteFor } from "./sprites.ts";
+import { SPRITE_CROP, spriteDrawRect } from "./sprite-atlas.ts";
+import { spriteFor, type SpriteFrame } from "./sprites.ts";
 import {
   boardUnits,
   OFFER_SLOTS,
@@ -52,6 +53,15 @@ import { RELICS, type Relic } from "./relics.ts";
 import { raidPrepLabel, raidPrepRoute, raidRiskLabel, raidShareCode } from "./raid.ts";
 import { stageTheme, tintForEnemy } from "./stages.ts";
 import type { RaidContract } from "../validate/raid-contract-schema.ts";
+
+const debugSpriteFallback = typeof location !== "undefined"
+  && new URLSearchParams(location.search).get("debug") === "1";
+let spriteFallbackDraws = 0;
+
+/** production 판정에는 관여하지 않는 debug 전용 누적 관찰값이다. */
+export function spriteFallbackDrawCount(): number {
+  return spriteFallbackDraws;
+}
 
 /** 유물 총 종류. 오른쪽 줄이 "몇 개 중 몇 개"를 말하고 칸 높이를 여기서 뽑는다. */
 const RELIC_TOTAL = RELICS.length;
@@ -972,17 +982,17 @@ function drawVulnerableRing(
  */
 let tintBuf: HTMLCanvasElement | null = null;
 
-function tintedSprite(img: HTMLImageElement, tint: string): CanvasImageSource {
-  const w = img.naturalWidth || img.width;
-  const h = img.naturalHeight || img.height;
-  if (!tintBuf || tintBuf.width !== w || tintBuf.height !== h) {
+function tintedSprite(frame: SpriteFrame, tint: string): CanvasImageSource {
+  const w = SPRITE_CROP.w;
+  const h = SPRITE_CROP.h;
+  if (!tintBuf) {
     tintBuf = document.createElement("canvas");
     tintBuf.width = w;
     tintBuf.height = h;
   }
   const g = tintBuf.getContext("2d")!;
   g.clearRect(0, 0, w, h);
-  g.drawImage(img, 0, 0);
+  g.drawImage(frame.image, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
   g.save();
   g.globalCompositeOperation = "source-atop";
   // 균일 α0.4는 명암을 6할로 눌러 무늬가 죽는다(recolor-sprites.py가 지키는
@@ -992,6 +1002,59 @@ function tintedSprite(img: HTMLImageElement, tint: string): CanvasImageSource {
   g.fillRect(0, 0, w, h);
   g.restore();
   return tintBuf;
+}
+
+/** atlas crop과 원본 197px 여백 보정을 모든 렌더 경로에 똑같이 적용한다. */
+function drawSpriteFrame(
+  ctx: CanvasRenderingContext2D,
+  frame: SpriteFrame,
+  x: number,
+  y: number,
+  size: number,
+  croppedSource?: CanvasImageSource,
+): void {
+  const { dx, dy, dw, dh } = spriteDrawRect(x, y, size);
+  if (croppedSource) {
+    ctx.drawImage(croppedSource, 0, 0, SPRITE_CROP.w, SPRITE_CROP.h, dx, dy, dw, dh);
+  } else {
+    ctx.drawImage(frame.image, frame.sx, frame.sy, frame.sw, frame.sh, dx, dy, dw, dh);
+  }
+}
+
+/** atlas가 없어도 전장·카드·드래그에서 고양이임을 잃지 않는 공용 Canvas 폴백. */
+function drawCatFallback(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+): void {
+  if (debugSpriteFallback) spriteFallbackDraws += 1;
+  const cx = x + size / 2;
+  const cy = y + size * 0.52;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "rgba(20,12,10,0.78)";
+  ctx.lineWidth = Math.max(1.5, size * 0.035);
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx - size * 0.34, cy - size * 0.2);
+  ctx.lineTo(cx - size * 0.27, cy - size * 0.46);
+  ctx.lineTo(cx - size * 0.08, cy - size * 0.31);
+  ctx.lineTo(cx + size * 0.08, cy - size * 0.31);
+  ctx.lineTo(cx + size * 0.27, cy - size * 0.46);
+  ctx.lineTo(cx + size * 0.34, cy - size * 0.2);
+  ctx.bezierCurveTo(cx + size * 0.42, cy + size * 0.18, cx + size * 0.27, cy + size * 0.42, cx, cy + size * 0.42);
+  ctx.bezierCurveTo(cx - size * 0.27, cy + size * 0.42, cx - size * 0.42, cy + size * 0.18, cx - size * 0.34, cy - size * 0.2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255,245,218,0.92)";
+  ctx.beginPath();
+  ctx.arc(cx - size * 0.12, cy - size * 0.06, Math.max(1, size * 0.035), 0, Math.PI * 2);
+  ctx.arc(cx + size * 0.12, cy - size * 0.06, Math.max(1, size * 0.035), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 export function catBodySize(L: Layout, radius: number, sizeMul = 1): number {
@@ -1128,21 +1191,21 @@ function drawCat(
   // `cat.alive`가 그대로 true라 위 분기 어느 것도 안 걸릴 수 있다.
   ctx.globalAlpha *= blinkFade;
 
-  const img = spriteFor(cat.breed.id, cat.pose);
+  const frame = spriteFor(cat.breed.id, cat.pose);
   /**
    * 스테이지 테마의 잔몹 색조 — 버퍼에서 입힌 스프라이트로 바꿔치기한다.
    * 반전·플래시 등 아래 그리기 경로는 그대로 탄다. 보스(radius>0)와
    * 저격수는 뺀다: PRD가 우두머리는 칭호·배너로 못박았고, 보스 사각형은
    * 잔몹의 22.8배 면적이라 색조가 판을 덮는다.
    */
-  let src: CanvasImageSource | null = img;
+  let tinted: CanvasImageSource | undefined;
   // 저격수는 radius(0.85)로 이미 걸러지지만 id 검사를 겹쳐 둔다 —
   // "공용 미니보스는 스테이지 색을 안 입는다"는 의도가 조건에서 읽히게.
-  if (img && cat.side === "enemy" && cat.radius === 0 && cat.breed.id !== SNIPER_BREED.id) {
+  if (frame && cat.side === "enemy" && cat.radius === 0 && cat.breed.id !== SNIPER_BREED.id) {
     const tint = tintForEnemy(stage, cat.breed.id);
-    if (tint) src = tintedSprite(img, tint);
+    if (tint) tinted = tintedSprite(frame, tint);
   }
-  if (src && img) {
+  if (frame) {
     if (cat.flash > 0) ctx.filter = "brightness(2.4) saturate(0.6)";
     if (cat.side === "enemy") {
       // 적은 좌우를 뒤집어 **우리 쪽을 보게** 한다. 양쪽이 같은 방향을 보고
@@ -1154,17 +1217,15 @@ function drawCat(
       ctx.save();
       ctx.translate(cx * 2, 0);
       ctx.scale(-1, 1);
-      ctx.drawImage(src, x, y, size, size);
+      drawSpriteFrame(ctx, frame, x, y, size, tinted);
       ctx.restore();
     } else {
-      ctx.drawImage(src, x, y, size, size);
+      drawSpriteFrame(ctx, frame, x, y, size, tinted);
     }
     // filter 대입은 빈 값("none")이어도 drawImage 단가를 1.6배로 올린다 — 켰을 때만 끈다.
     if (cat.flash > 0) ctx.filter = "none";
   } else {
-    ctx.fillStyle = cat.side === "ally" ? T.ally : T.enemy;
-    roundRect(ctx, { x, y, w: size, h: size }, size * 0.2);
-    ctx.fill();
+    drawCatFallback(ctx, x, y, size, cat.side === "ally" ? T.ally : T.enemy);
   }
 
   ctx.restore();
@@ -2269,12 +2330,15 @@ function drawPortraitWell(
   ctx.fillRect(well.x, well.y, well.w, well.h);
 
   const { pose, bob } = cardIdle(seed, t);
-  const img = spriteFor(breedId, pose);
+  const frame = spriteFor(breedId, pose);
   // 0.86인 이유: 흔들림 폭(±sz*0.05)까지 우물 안에 들어와야 발이 잘리지 않는다.
   const sz = Math.min(well.w, well.h) * 0.86;
-  if (img) {
+  if (frame) {
     ctx.globalAlpha = afford ? 1 : 0.45;
-    ctx.drawImage(img, cx - sz / 2, cy - sz / 2 + bob * sz * 0.05, sz, sz);
+    drawSpriteFrame(ctx, frame, cx - sz / 2, cy - sz / 2 + bob * sz * 0.05, sz);
+  } else {
+    ctx.globalAlpha = afford ? 1 : 0.45;
+    drawCatFallback(ctx, cx - sz / 2, cy - sz / 2 + bob * sz * 0.05, sz, accent);
   }
   ctx.restore();
 
@@ -2967,9 +3031,11 @@ function drawBuyTweens(ctx: CanvasRenderingContext2D, L: Layout): void {
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, alpha);
-    const img = tw.breedId !== null ? spriteFor(tw.breedId, "idle") : null;
-    if (img) {
-      ctx.drawImage(img, cx - size / 2, cy - size / 2, size, size);
+    const frame = tw.breedId !== null ? spriteFor(tw.breedId, "idle") : null;
+    if (frame) {
+      drawSpriteFrame(ctx, frame, cx - size / 2, cy - size / 2, size);
+    } else if (tw.breedId !== null) {
+      drawCatFallback(ctx, cx - size / 2, cy - size / 2, size, tw.accent);
     } else {
       // 유물·강화 카드는 그림이 없다. 직업색 대신 카드 색조로 남긴다.
       roundRect(ctx, { x: cx - size / 2, y: cy - size / 2, w: size, h: size }, size * 0.22);
@@ -6365,11 +6431,13 @@ export function render(
     const cat = s.ally[drag.fromCell];
     if (cat) {
       const size = L.cell * CAT_SCALE;
-      const img = spriteFor(cat.breed.id, "move");
+      const frame = spriteFor(cat.breed.id, "move");
       ctx.save();
       ctx.globalAlpha = 0.95;
-      if (img)
-        ctx.drawImage(img, drag.x - size / 2, drag.y - size / 2, size, size);
+      if (frame)
+        drawSpriteFrame(ctx, frame, drag.x - size / 2, drag.y - size / 2, size);
+      else
+        drawCatFallback(ctx, drag.x - size / 2, drag.y - size / 2, size, T.ally);
       ctx.restore();
     }
   }

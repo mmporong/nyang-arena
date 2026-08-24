@@ -329,6 +329,7 @@ async function main() {
       loadingFailures: [],
       forbiddenChannels: [],
     };
+    const pageRequests = [];
     const pendingRequests = new Set();
     let lastNetworkActivity = Date.now();
     cdp.on((message) => {
@@ -350,7 +351,10 @@ async function main() {
       if (message.method === "Network.requestWillBeSent") {
         const requestUrl = message.params.request.url;
         lastNetworkActivity = Date.now();
-        if (/^https?:/u.test(requestUrl)) pendingRequests.add(message.params.requestId);
+        if (/^https?:/u.test(requestUrl)) {
+          pendingRequests.add(message.params.requestId);
+          pageRequests.push(requestUrl);
+        }
         if (/^https?:/u.test(requestUrl) && new URL(requestUrl).origin !== origin) faults.externalRequests.push(requestUrl);
         if (message.params.type === "EventSource") {
           faults.forbiddenChannels.push({ kind: "EventSource", url: requestUrl });
@@ -437,6 +441,13 @@ async function main() {
     assert(bootState.uniqueColors >= 4, `캔버스가 단색에 가깝습니다 (${bootState.uniqueColors}색)`);
     assert(bootState.phase === "map" && bootState.raidOffers === 3, "초기 계약 세 장이 열리지 않았습니다");
     assert(bootState.a11yButtons === 3, `접근성 계약 버튼이 세 개가 아닙니다 (${bootState.a11yButtons})`);
+    assert(bootState.runtime.sprites.state === "ready", `sprite 상태가 ready가 아닙니다 (${bootState.runtime.sprites.state})`);
+    assert(bootState.runtime.sprites.frameDescriptors === 186 && bootState.runtime.sprites.fallbackFrames === 0, "186 frame descriptor가 준비되지 않았습니다");
+    const happyAtlasRequests = pageRequests.filter((url) => /\/sprites\/atlas-(?:base|extra)\.png(?:$|\?)/u.test(url));
+    const happyLegacyRequests = pageRequests.filter((url) => /\/sprites\/\d{2}_[a-z]+\.png(?:$|\?)/u.test(url));
+    assert(happyAtlasRequests.length === 2, `정상 sprite 요청이 정확히 2회가 아닙니다 (${happyAtlasRequests.length})`);
+    assert(new Set(happyAtlasRequests.map((url) => new URL(url).pathname)).size === 2, "같은 atlas가 중복 요청됐습니다");
+    assert(happyLegacyRequests.length === 0, `legacy 개별 sprite 요청 ${happyLegacyRequests.length}회`);
     console.log(
       `browser-runtime boot PASS · ${browserVersion.product} · protocol ${browserVersion.protocolVersion} · ${basename(browserPath)} · colors ${bootState.uniqueColors}`,
     );
@@ -577,6 +588,161 @@ async function main() {
     console.log(
       `browser-runtime boundary PASS · HTTP ${requests.length} · external/forbidden/errors 0 · CSP compat ${faults.compatibilityNotices.length}`,
     );
+
+    // 별도 탭에서 base atlas 하나를 네트워크 단계에서 막는다. 정상 탭의
+    // singleton/cache와 섞지 않고 실제 production 실패 격리를 검증한다.
+    const { targetId: degradedTargetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+    const { sessionId: degradedSessionId } = await cdp.send("Target.attachToTarget", {
+      targetId: degradedTargetId,
+      flatten: true,
+    });
+    const degraded = {
+      exceptions: [],
+      consoleErrors: [],
+      logErrors: [],
+      blockedLogs: [],
+      requests: [],
+      pending: new Set(),
+      lastActivity: Date.now(),
+      pausedRequestId: null,
+    };
+    cdp.on((message) => {
+      if (message.sessionId !== degradedSessionId) return;
+      if (message.method === "Runtime.exceptionThrown") degraded.exceptions.push(message.params.exceptionDetails);
+      if (message.method === "Runtime.consoleAPICalled" && message.params.type === "error") {
+        degraded.consoleErrors.push(message.params.args);
+      }
+      if (message.method === "Log.entryAdded" && message.params.entry.level === "error") {
+        const entry = message.params.entry;
+        if (
+          entry.source === "network"
+          && /ERR_BLOCKED_BY_CLIENT/u.test(entry.text)
+          && /atlas-base\.png/u.test(entry.url ?? "")
+        ) {
+          degraded.blockedLogs.push(entry);
+        } else if (!(entry.source === "security" && /Unrecognized Content-Security-Policy directive 'webrtc'/u.test(entry.text))) {
+          degraded.logErrors.push(entry);
+        }
+      }
+      if (message.method === "Network.requestWillBeSent" && /^https?:/u.test(message.params.request.url)) {
+        degraded.requests.push(message.params.request.url);
+        degraded.pending.add(message.params.requestId);
+        degraded.lastActivity = Date.now();
+      }
+      if (message.method === "Network.loadingFinished" || message.method === "Network.loadingFailed") {
+        degraded.pending.delete(message.params.requestId);
+        degraded.lastActivity = Date.now();
+      }
+      if (message.method === "Fetch.requestPaused") {
+        degraded.pausedRequestId = message.params.requestId;
+      }
+    });
+    await Promise.all([
+      cdp.send("Runtime.enable", {}, degradedSessionId),
+      cdp.send("Page.enable", {}, degradedSessionId),
+      cdp.send("Network.enable", {}, degradedSessionId),
+      cdp.send("Log.enable", {}, degradedSessionId),
+      cdp.send("Fetch.enable", {
+        patterns: [{ urlPattern: "*atlas-base.png*", requestStage: "Request" }],
+      }, degradedSessionId),
+    ]);
+    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, degradedSessionId);
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: 1280,
+      height: 800,
+      deviceScaleFactor: 1,
+      mobile: false,
+      screenOrientation: { type: "landscapePrimary", angle: 90 },
+    }, degradedSessionId);
+    await cdp.send("Target.activateTarget", { targetId: degradedTargetId });
+    await cdp.send("Page.navigate", { url: `${origin}${APP_BASE}/?seed=424242&debug=1&atlas-failure=1` }, degradedSessionId);
+    const bootBeforeSprites = await waitFor(
+      "atlas 대기 중 비동기 부트",
+      () => evaluate(cdp, degradedSessionId, `(() => {
+        if (!window.nyang) return null;
+        return {
+          bootGone: document.querySelector("#boot").classList.contains("gone"),
+          phase: window.nyang.phase,
+          runtime: window.nyang.runtime,
+        };
+      })()`),
+      (value) => value?.bootGone
+        && value.phase === "map"
+        && value.runtime.frameCount >= 1
+        && !value.runtime.assetsReady
+        && value.runtime.sprites.state === "loading"
+        && value.runtime.sprites.frameDescriptors === 66
+        && degraded.pausedRequestId,
+      10_000,
+    );
+    assert(bootBeforeSprites.runtime.sprites.frameDescriptors === 66, "대기 중 extra atlas frame을 사용하지 못했습니다");
+    await cdp.send("Fetch.failRequest", {
+      requestId: degraded.pausedRequestId,
+      errorReason: "BlockedByClient",
+    }, degradedSessionId);
+    const degradedState = await waitFor(
+      "atlas 일부 실패 격리",
+      () => evaluate(cdp, degradedSessionId, `(() => {
+        const canvas = document.querySelector("canvas");
+        if (!canvas || !window.nyang) return null;
+        const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        const colors = new Set();
+        const stride = Math.max(4, Math.floor((canvas.width * canvas.height) / 8000) * 4);
+        for (let i = 0; i < pixels.length; i += stride) {
+          colors.add(pixels[i] + "," + pixels[i + 1] + "," + pixels[i + 2] + "," + pixels[i + 3]);
+          if (colors.size >= 12) break;
+        }
+        return {
+          bootGone: document.querySelector("#boot").classList.contains("gone"),
+          phase: window.nyang.phase,
+          runtime: window.nyang.runtime,
+          colors: colors.size,
+        };
+      })()`),
+      (value) => value?.bootGone
+        && value.runtime.frameCount >= 1
+        && value.runtime.assetsReady
+        && value.runtime.sprites.settled,
+      20_000,
+    );
+    assert(degradedState.phase === "map" && degradedState.colors >= 4, "atlas 실패 시 첫 map frame이 그려지지 않았습니다");
+    assert(degradedState.runtime.sprites.state === "degraded", `부분 실패 상태가 degraded가 아닙니다 (${degradedState.runtime.sprites.state})`);
+    assert(JSON.stringify(degradedState.runtime.sprites.readyAtlases) === '["extra"]', "extra atlas만 ready여야 합니다");
+    assert(JSON.stringify(degradedState.runtime.sprites.failedAtlases) === '["base"]', "base atlas만 failed여야 합니다");
+    assert(degradedState.runtime.sprites.frameDescriptors === 66 && degradedState.runtime.sprites.fallbackFrames === 120, "부분 atlas frame/fallback 수가 다릅니다");
+    const fallbackBeforeRoute = degradedState.runtime.spriteFallbackDraws;
+    await delay(400);
+    await pressDigit1(cdp, degradedSessionId);
+    await waitFor(
+      "degraded 탭 실제 입력",
+      () => evaluate(cdp, degradedSessionId, `({ phase: window.nyang.phase, offers: window.nyang.raidOffers.length })`),
+      (value) => value?.phase === "map" && value.offers === 0,
+    );
+    await delay(400);
+    await pressDigit1(cdp, degradedSessionId);
+    const degradedReward = await waitFor(
+      "degraded map→reward와 Canvas 폴백",
+      () => evaluate(cdp, degradedSessionId, `({
+        phase: window.nyang.phase,
+        fallbackDraws: window.nyang.runtime.spriteFallbackDraws,
+      })`),
+      (value) => value?.phase === "reward" && value.fallbackDraws > fallbackBeforeRoute,
+    );
+    assert(degradedReward.fallbackDraws > fallbackBeforeRoute, "실제 Canvas 고양이 폴백이 그려지지 않았습니다");
+    await waitFor(
+      "degraded 네트워크 유휴",
+      async () => ({ pending: degraded.pending.size, idleMs: Date.now() - degraded.lastActivity }),
+      (value) => value.pending === 0 && value.idleMs >= 400,
+      10_000,
+    );
+    const degradedAtlasRequests = degraded.requests.filter((url) => /\/sprites\/atlas-(?:base|extra)\.png(?:$|\?)/u.test(url));
+    const degradedLegacyRequests = degraded.requests.filter((url) => /\/sprites\/\d{2}_[a-z]+\.png(?:$|\?)/u.test(url));
+    assert(degradedAtlasRequests.length === 2 && degradedLegacyRequests.length === 0, "degraded 탭 sprite 요청 계약이 다릅니다");
+    assert(degraded.exceptions.length === 0, `degraded Runtime 예외 ${degraded.exceptions.length}건`);
+    assert(degraded.consoleErrors.length === 0, `degraded console.error ${degraded.consoleErrors.length}건`);
+    assert(degraded.logErrors.length === 0, `degraded Log error ${degraded.logErrors.length}건`);
+    assert(degraded.blockedLogs.length === 1, `예상한 atlas 차단 로그가 정확히 1건이 아닙니다 (${degraded.blockedLogs.length})`);
+    console.log(`browser-runtime sprite failure PASS · async boot/map→reward · extra 66 + fallback 120 · fallback draws ${degradedReward.fallbackDraws} · runtime errors 0`);
   } finally {
     if (cdp) {
       try {

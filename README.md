@@ -195,7 +195,7 @@ npm run dev        # 개발 서버
 npm run build      # 타입체크 + 프로덕션 빌드
 npm test           # 검증기 적대 테스트
 npm run audio:runtime:test # Web Audio 스케줄·정리·음소거·숨김 전환
-npm run asset:test # 외부 아이콘 0장·Canvas 17종·186장 스프라이트 계약
+npm run asset:test # source 186장·runtime atlas 2장·셀 byte-exact 계약
 npm run map        # 위험별 준비 경로 + 통제 보스 A/B
 npm run qa:manual  # Windows: 자동 사전점검 + 실제 화면·청취 2문항 QA
 npm run sim        # 밸런스 시뮬레이션
@@ -224,7 +224,7 @@ npm run verify     # 위 전부 + 불변식 + 결정 축 전체 (관문)
 |---|---|
 | `dev` `build` `test` `sim` `verify` 등 | **없다.** Node 24.12.0이면 끝 |
 | `npm run docs` (PDF) | python3 + `pip install markdown` + Chrome/Chromium |
-| `npm run slice` (스프라이트 재생성) | python3 + Pillow + 원본 시트. **보통 필요 없다** — `public/sprites/`의 결과물 186장이 커밋돼 있다. 원본을 옮겼다면 `NYANG_SHEET=/경로/CatCharacterSheet.png npm run slice` |
+| `npm run slice` (스프라이트 전체 재생성) | python3 + Pillow + 원본 시트. **보통 필요 없다** — source 186장과 runtime atlas 2장이 커밋돼 있다. 원본을 옮겼다면 `NYANG_SHEET=/경로/CatCharacterSheet.png npm run slice`; slice→recolor→atlas를 한 번에 수행한다 |
 | `npm run gen:synergies` | `OPENAI_API_KEY`. 없으면 커밋된 후보 파일을 쓴다 |
 
 `git clone` 주소가 SSH(`git@github.com:...`)라 새 기기에서는 SSH 키를 등록하거나
@@ -238,10 +238,11 @@ TypeScript · Vite · Canvas 2D · Web Audio. 엔진·프레임워크 없음.
 붉은 위험·청록 집결·금빛 취약 신호는 파일 요청 없이 Web Audio로 합성하고,
 같은 예고가 여러 프레임 유지돼도 상승 순간에만 한 번 울린다. 숨은 탭에서는
 게임 루프와 오디오를 함께 멈춘다. 음소거는 HUD 오른쪽 끝 또는 `M`.
-아트는 자체 제작 픽셀 고양이 20종 × 6포즈 시트를 `npm run slice`로 잘라 쓴다 —
+아트 source는 자체 제작 픽셀 고양이 20종 × 6포즈 시트를 `npm run slice`로 잘라 만든다 —
 우리 8종, 악몽 8종, 보스 4종으로 스무 장을 다 쓴다. 그 위에 `npm run recolor`가
 밝기만 남기고 색을 갈아 우리 7종(직업별 셋째 넷 + 소환사 셋)·악몽 4종을 더 만들어
-지금은 우리 15종·악몽 12종이다.
+지금은 우리 15종·악몽 12종이다. 31 ID × 6포즈 source는 `assets/sprites-src/`에 보존하고,
+브라우저는 `public/sprites/atlas-base.png`와 `atlas-extra.png` 두 장만 요청한다.
 
 ## 라이선스 / 출처
 

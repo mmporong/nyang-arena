@@ -135,7 +135,11 @@ function templatePathKind(expression, context) {
   if (!baseDeclaration || !isConstDeclaration(baseDeclaration) || !baseDeclaration.initializer) return null;
   if (!isSameOriginBase(baseDeclaration.initializer, context)) return null;
   if (first.literal.text === "bgm/") return "bgm";
-  if (first.literal.text === "sprites/") return "sprites";
+  if (
+    first.literal.text === "sprites/" ||
+    first.literal.text === "sprites/atlas-base.png" ||
+    first.literal.text === "sprites/atlas-extra.png"
+  ) return "sprites";
   return null;
 }
 

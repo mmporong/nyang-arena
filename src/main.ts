@@ -11,6 +11,7 @@ import {
   captureMapChoiceFeedback,
   clearOfferPurchaseFailure,
   render,
+  spriteFallbackDrawCount,
   spawnBuyTween,
   spawnMapChoiceFeedback,
   spawnNextRunFeedback,
@@ -37,7 +38,7 @@ import {
 import { parseRaidSeed, parseRaidShareCode, raidRiskLabel, raidShareCode } from "./game/raid.ts";
 import { RAID_CONTRACT_POOL_STATUS } from "./validate/raid-contract-schema.ts";
 import { cellToField, type Intervention } from "./game/types.ts";
-import { loadSprites } from "./game/sprites.ts";
+import { loadSprites, spriteStatus } from "./game/sprites.ts";
 import { loadIcons } from "./game/icons.ts";
 import {
   createBossSignalObserver,
@@ -666,6 +667,8 @@ if (debugEnabled) {
         ...runtimeObservation,
         lastInput: runtimeObservation.lastInput ? { ...runtimeObservation.lastInput } : null,
         lastResize: runtimeObservation.lastResize ? { ...runtimeObservation.lastResize } : null,
+        sprites: spriteStatus(),
+        spriteFallbackDraws: spriteFallbackDrawCount(),
       },
     }),
   });
@@ -769,9 +772,12 @@ document.addEventListener("visibilitychange", () => {
 });
 
 async function boot0(): Promise<void> {
-  // 둘을 나란히 기다린다. 아이콘은 33KB뿐이라 스프라이트보다 먼저 끝난다.
-  await Promise.all([loadSprites(), loadIcons()]);
-  if (debugEnabled) runtimeObservation.assetsReady = true;
+  // atlas는 느리거나 하나가 실패해도 첫 지도를 막지 않는다. 아이콘 계약만
+  // 먼저 확정하고, sprite job의 settled 여부는 debug 관찰값으로 따로 남긴다.
+  void loadSprites().then(() => {
+    if (debugEnabled) runtimeObservation.assetsReady = true;
+  });
+  await loadIcons();
   resize();
   window.addEventListener("resize", resize);
   let orientationTimer: number | null = null;

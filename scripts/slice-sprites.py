@@ -14,6 +14,7 @@
 """
 import os
 import sys
+import tempfile
 from collections import deque
 from pathlib import Path
 
@@ -24,9 +25,10 @@ from PIL import Image
 #
 #   NYANG_SHEET=/경로/CatCharacterSheet.png npm run slice
 #
-# 보통은 돌릴 일이 없다 — 잘라 낸 결과 120장이 public/sprites/에 커밋돼 있다.
+# 보통은 돌릴 일이 없다 — 잘라 낸 120장은 assets/sprites-src에 보존하고
+# `npm run atlas`가 public/sprites의 런타임 atlas 두 장을 다시 만든다.
 SHEET = Path(os.environ.get("NYANG_SHEET") or Path.home() / "PKM/06_Ideas/assets/CatCharacterSheet.png")
-OUT = Path(__file__).resolve().parent.parent / "public/sprites"
+OUT = Path(__file__).resolve().parent.parent / "assets/sprites-src"
 
 ORIGIN_X, ORIGIN_Y, PITCH, CELL = 124, 144, 208, 197
 POSES = ["idle", "sleep", "wink", "move", "back", "run"]
@@ -74,28 +76,49 @@ def main():
         sys.exit(f"시트를 찾을 수 없음: {SHEET}")
 
     sheet = Image.open(SHEET).convert("RGBA")
+    required_width = ORIGIN_X + PITCH * (len(POSES) - 1) + CELL
+    required_height = ORIGIN_Y + PITCH * (ROWS - 1) + CELL
+    if sheet.width < required_width or sheet.height < required_height:
+        sys.exit(f"시트 크기 부족: {sheet.size}, 최소 {(required_width, required_height)}")
     OUT.mkdir(parents=True, exist_ok=True)
 
-    written = 0
-    for row in range(ROWS):
-        for col, pose in enumerate(POSES):
-            box = (
-                ORIGIN_X + PITCH * col,
-                ORIGIN_Y + PITCH * row,
-                ORIGIN_X + PITCH * col + CELL,
-                ORIGIN_Y + PITCH * row + CELL,
-            )
-            cell = strip_background(sheet.crop(box))
-            bbox = cell.getbbox()
-            if bbox is None:
-                print(f"  경고: 빈 셀 {row + 1:02d}_{pose}")
-                continue
-            # 남은 불투명 픽셀이 셀의 1% 미만이면 배경 제거가 몸통까지 먹은 것
-            opaque = sum(1 for p in cell.getdata() if p[3] > 0)
-            if opaque < CELL * CELL * 0.01:
-                print(f"  경고: {row + 1:02d}_{pose} 불투명 픽셀 {opaque}개뿐")
-            cell.save(OUT / f"{row + 1:02d}_{pose}.png")
-            written += 1
+    expected = {f"{row + 1:02d}_{pose}.png" for row in range(ROWS) for pose in POSES}
+    with tempfile.TemporaryDirectory(prefix="nyang-slice-", dir=OUT.parent) as temporary:
+        staging = Path(temporary)
+        written = 0
+        for row in range(ROWS):
+            for col, pose in enumerate(POSES):
+                name = f"{row + 1:02d}_{pose}.png"
+                box = (
+                    ORIGIN_X + PITCH * col,
+                    ORIGIN_Y + PITCH * row,
+                    ORIGIN_X + PITCH * col + CELL,
+                    ORIGIN_Y + PITCH * row + CELL,
+                )
+                cell = strip_background(sheet.crop(box))
+                bbox = cell.getbbox()
+                if bbox is None:
+                    raise RuntimeError(f"빈 셀: {name}")
+                # 저불투명 입력은 stale 대상 파일로 가려지지 않게 즉시 실패한다.
+                opaque = sum(1 for pixel in cell.getdata() if pixel[3] > 0)
+                if opaque < CELL * CELL * 0.01:
+                    raise RuntimeError(f"저불투명 셀: {name} ({opaque}개)")
+                if bbox != (2, 2, 194, 194):
+                    raise RuntimeError(f"alpha bbox 위반: {name} {bbox}")
+                cell.save(staging / name)
+                written += 1
+
+        actual = {path.name for path in staging.glob("*.png")}
+        if written != 120 or actual != expected:
+            raise RuntimeError(f"슬라이스 완성도 위반: written={written}, files={len(actual)}")
+        for name in sorted(expected):
+            with Image.open(staging / name) as candidate:
+                if candidate.size != (CELL, CELL) or candidate.mode != "RGBA":
+                    raise RuntimeError(f"출력 규격 위반: {name} {candidate.size}/{candidate.mode}")
+
+        # 120개가 모두 검증된 뒤에만 해당 ID의 기존 source를 원자적으로 교체한다.
+        for name in sorted(expected):
+            os.replace(staging / name, OUT / name)
 
     print(f"완료: {written}장 → {OUT} (각 {CELL}x{CELL})")
 

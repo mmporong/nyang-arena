@@ -19,19 +19,22 @@
 
 ## 2. 현재 비주얼 파이프라인 (있는 것 — 처음부터 그리는 게 아니다)
 
-- **스프라이트 186장**: `public/sprites/NN_pose.png`, 31품종 × 6포즈(idle/sleep/wink/move/back/run).
-  우리 8종 + 악몽 8종 + 보스/저격대. 로더는 `src/game/sprites.ts`(`spriteFor(breedId, pose)`).
+- **스프라이트 source 186장**: `assets/sprites-src/NN_pose.png`, 31품종 × 6포즈
+  (idle/sleep/wink/move/back/run). 런타임은 `public/sprites/atlas-base.png`(ID 1~20)와
+  `atlas-extra.png`(ID 21~31) 두 요청만 사용한다. 로더는 `src/game/sprites.ts`.
 - **아이콘 논리 17종**: `icons.ts`의 Canvas 2D 패스 17종 · 이미지 요청 0건.
 - **BGM**: `public/bgm/`(title/prepare/boss/outro, mp3+ogg). 오디오는 `src/game/audio.ts`.
 - **아트 소스 파이프라인**:
   - 원본 시트 `CatCharacterSheet.png`(20마리, **레포 밖** — `PKM/06_Ideas/assets/`, 환경변수
     `NYANG_SHEET`로 경로 지정). 용량 때문에 커밋하지 않는다.
-  - `npm run slice`(`scripts/slice-sprites.py`) — 시트를 6열×20행 격자로 슬라이싱, 197×197 균일 셀.
+  - `npm run slice` — 시트를 6열×20행으로 슬라이싱하고 리컬러한 뒤 atlas 두 장까지 한 번에 재생성한다.
   - `npm run recolor`(`scripts/recolor-sprites.py`) — 시트에 20마리뿐이라 **밝기 순서만 남기고
     색상·채도를 덮어써** 21~31품종을 만든다(런타임 hue-rotate가 아니라 미리 굽는다).
-  - 산출물은 `public/sprites/`에 커밋된다(원본과 같은 취급).
-- **렌더**: `src/game/render.ts`가 `spriteFor()`로 그리고, **로드 실패 시 `src/game/icons.ts`의
-  폴백 도형**을 그린다. 배경은 `src/game/backdrop.ts`. 텍스트·토큰은 `theme.ts`.
+  - source 186장은 `assets/sprites-src/`, 런타임 atlas 2장은 `public/sprites/`에 커밋된다.
+  - `npm run atlas:check`·`atlas:test`·`sprite:loader:test`·`asset:test`가 결정성, hostile PNG,
+    loader 실패 격리, 186개 셀의 source byte 일치를 자동 검증한다.
+- **렌더**: `src/game/render.ts`가 atlas crop을 그리고, atlas 일부가 실패하면 공용 Canvas 고양이
+  폴백을 쓴다. 배경은 `src/game/backdrop.ts`. 텍스트·토큰은 `theme.ts`.
 - **VFX·연출은 코드다**(스프라이트가 아니다): 예고(`drawTelegraphs` — 위험/집합/취약),
   타격·데미지·화면 연출 등은 전부 Canvas 2D에 그린다. `TELEGRAPH_FUSE_MS = 1200`(`bosses.ts`).
 
@@ -108,7 +111,7 @@
 ## 8. Codex 실행 메모
 
 - 로컬 `~/nyang-arena`에서 실행. 레포는 최신(main)이 GitHub에 푸시돼 있다.
-- 소스 시트가 필요하면: `NYANG_SHEET=<CatCharacterSheet.png 경로> npm run slice` 후 `npm run recolor`.
+- 소스 시트가 필요하면: `NYANG_SHEET=<CatCharacterSheet.png 경로> npm run slice`.
 - 시작 지시 예: **"docs/art-brief.md를 읽어라. 트랙 A(인게임 VFX·연출)의 분석·명세·구현을
   먼저 끝내고, 트랙 B(아트 에셋)는 파이프라인 정리 + 필요 에셋 목록까지만. 하드 제약 §3을 반드시
   지키고, 각 커밋에서 verify 6축·metrics 불변을 증거로 남겨라."**

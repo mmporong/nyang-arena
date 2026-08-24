@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drawIcon, ICON_NAMES } from "../src/game/icons.ts";
+import {
+  SPRITE_ATLASES,
+  SPRITE_CROP,
+  SPRITE_POSES,
+  SPRITE_SOURCE_SIZE,
+  spriteFrameRect,
+  spriteSourceName,
+} from "../src/game/sprite-atlas.ts";
+import { decodePng, validateSourcePng } from "./sprite-atlas.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ICON_DIR = join(ROOT, "public", "icons");
 const BGM_DIR = join(ROOT, "public", "bgm");
 const SPRITE_DIR = join(ROOT, "public", "sprites");
+const SPRITE_SOURCE_DIR = join(ROOT, "assets", "sprites-src");
 const ICON_SOURCE = join(ROOT, "src", "game", "icons.ts");
 
 /** UI 아이콘은 공개 재배포 가능한 자체 Canvas 경로만 허용한다. */
@@ -134,30 +145,64 @@ const bgmEntries = readdirSync(BGM_DIR, { withFileTypes: true });
 assert.ok(bgmEntries.every((entry) => entry.isFile()), "public/bgm에는 파일 외 항목이 없어야 한다");
 assert.deepEqual(bgmEntries.map((entry) => entry.name).sort(), expectedBgm, "public/bgm은 승인된 8개 트랙만 포함해야 한다");
 
-const poses = ["idle", "sleep", "wink", "move", "back", "run"];
 const expectedSprites = [];
 for (let id = 1; id <= 31; id += 1) {
-  for (const pose of poses) expectedSprites.push(`${String(id).padStart(2, "0")}_${pose}.png`);
+  for (const pose of SPRITE_POSES) expectedSprites.push(spriteSourceName(id, pose));
 }
 expectedSprites.sort();
-const spriteEntries = readdirSync(SPRITE_DIR, { withFileTypes: true });
-assert.ok(spriteEntries.every((entry) => entry.isFile()), "public/sprites에는 파일 외 항목이 없어야 한다");
-const actualSprites = spriteEntries.map((entry) => entry.name).sort();
-assert.deepEqual(actualSprites, expectedSprites, "스프라이트는 31 ID × 6포즈가 정확히 있어야 한다");
+const sourceEntries = readdirSync(SPRITE_SOURCE_DIR, { withFileTypes: true });
+assert.ok(sourceEntries.every((entry) => entry.isFile()), "assets/sprites-src에는 파일 외 항목이 없어야 한다");
+const actualSources = sourceEntries.map((entry) => entry.name).sort();
+assert.deepEqual(actualSources, expectedSprites, "source는 31 ID × 6포즈가 정확히 있어야 한다");
 
-const pngSignature = "89504e470d0a1a0a";
-let spriteBytes = 0;
-for (const name of actualSprites) {
-  const path = join(SPRITE_DIR, name);
-  const data = readFileSync(path);
-  assert.equal(data.subarray(0, 8).toString("hex"), pngSignature, `${name}은 PNG가 아니다`);
-  assert.equal(data.readUInt32BE(16), 197, `${name} 너비는 197px여야 한다`);
-  assert.equal(data.readUInt32BE(20), 197, `${name} 높이는 197px여야 한다`);
-  assert.equal(data[24], 8, `${name} 비트 깊이는 8이어야 한다`);
-  assert.equal(data[25], 6, `${name} 색상 형식은 RGBA여야 한다`);
-  spriteBytes += data.length;
+const sourceDigest = createHash("sha256");
+const decodedSources = new Map();
+let sourceBytes = 0;
+for (const name of actualSources) {
+  const encoded = readFileSync(join(SPRITE_SOURCE_DIR, name));
+  const decoded = validateSourcePng(encoded, name);
+  assert.equal(decoded.width, SPRITE_SOURCE_SIZE);
+  assert.equal(decoded.height, SPRITE_SOURCE_SIZE);
+  decodedSources.set(name, decoded);
+  sourceDigest.update(name).update("\0").update(encoded);
+  sourceBytes += encoded.length;
 }
 
+const publicEntries = readdirSync(SPRITE_DIR, { withFileTypes: true });
+assert.ok(publicEntries.every((entry) => entry.isFile()), "public/sprites에는 atlas 파일만 있어야 한다");
+assert.deepEqual(publicEntries.map((entry) => entry.name).sort(), SPRITE_ATLASES.map((atlas) => atlas.file).sort());
+
+let atlasBytes = 0;
+let atlasDecodedBytes = 0;
+for (const atlas of SPRITE_ATLASES) {
+  const encoded = readFileSync(join(SPRITE_DIR, atlas.file));
+  // decodePng가 signature·모든 chunk CRC·형식·payload 길이를 함께 검증한다.
+  const decoded = decodePng(encoded, atlas.file);
+  assert.equal(decoded.width, atlas.width, `${atlas.file} width`);
+  assert.equal(decoded.height, atlas.height, `${atlas.file} height`);
+  assert.ok(atlas.width < 4096 && atlas.height < 4096, `${atlas.file}은 4096 미만이어야 한다`);
+  for (let id = atlas.firstId; id <= atlas.lastId; id += 1) {
+    for (const pose of SPRITE_POSES) {
+      const frame = spriteFrameRect(id, pose);
+      assert.ok(frame && frame.atlas === atlas.key);
+      const source = decodedSources.get(spriteSourceName(id, pose));
+      for (let y = 0; y < SPRITE_CROP.h; y += 1) {
+        const sourceStart = ((y + SPRITE_CROP.y) * source.width + SPRITE_CROP.x) * 4;
+        const atlasStart = ((frame.sy + y) * decoded.width + frame.sx) * 4;
+        assert.deepEqual(
+          decoded.data.subarray(atlasStart, atlasStart + SPRITE_CROP.w * 4),
+          source.data.subarray(sourceStart, sourceStart + SPRITE_CROP.w * 4),
+          `${atlas.file}/${id}/${pose} 픽셀`,
+        );
+      }
+    }
+  }
+  atlasBytes += encoded.length;
+  atlasDecodedBytes += decoded.data.length;
+}
+const legacyDecodedBytes = actualSources.length * SPRITE_SOURCE_SIZE * SPRITE_SOURCE_SIZE * 4;
+assert.ok(atlasDecodedBytes < legacyDecodedBytes, "atlas decoded payload가 legacy보다 작아야 한다");
+
 console.log(
-  `asset contract passed — 아이콘 파일 ${actualIconFiles.length}장 · Canvas ${expectedIcons.length}종/4크기 런타임 · BGM ${bgmEntries.length}개 · 스프라이트 ${actualSprites.length}장/${spriteBytes} bytes`,
+  `asset contract passed — 아이콘 ${expectedIcons.length}종 · BGM ${bgmEntries.length}개 · source ${actualSources.length}장/${sourceBytes} bytes/${sourceDigest.digest("hex").slice(0, 16)} · atlas 2장/${atlasBytes} bytes · decoded ${legacyDecodedBytes}→${atlasDecodedBytes}`,
 );

@@ -17,16 +17,19 @@
 눌러 넣는데, 그러지 않으면 순검정과 순백이 어떤 색상을 줘도 안 물들기
 때문이다(자세한 것은 아래 상수 주석).
 
-산출물은 `public/sprites/`에 커밋된다. 원본과 같은 취급이다.
+산출물은 `assets/sprites-src/`에 커밋된다. `npm run recolor`은 완료 뒤
+Node atlas 생성기를 호출해 public 런타임 파일 두 장도 갱신한다.
 """
 
 import colorsys
 import pathlib
+import os
 import sys
+import tempfile
 
 from PIL import Image
 
-OUT = pathlib.Path(__file__).resolve().parent.parent / "public" / "sprites"
+OUT = pathlib.Path(__file__).resolve().parent.parent / "assets" / "sprites-src"
 POSES = ["idle", "sleep", "wink", "move", "back", "run"]
 
 # 밝기를 눌러 넣을 범위.
@@ -108,19 +111,35 @@ def main() -> int:
         print(f"스프라이트 폴더가 없다: {OUT}", file=sys.stderr)
         return 1
 
-    written = 0
-    for entry in RECOLORS:
-        new_id, base_id, hue, label = entry[:4]
-        lo, hi = (entry[4], entry[5]) if len(entry) > 5 else (LO, HI)
-        for pose in POSES:
-            src_path = OUT / f"{base_id:02d}_{pose}.png"
-            if not src_path.exists():
-                # 바탕에 없는 포즈는 조용히 넘긴다. 슬라이서도 빈 칸을 건너뛴다.
-                continue
-            with Image.open(src_path) as src:
-                recolor(src, hue, lo, hi).save(OUT / f"{new_id:02d}_{pose}.png")
-            written += 1
-        print(f"  {new_id:02d}  ← {base_id:02d}  색상 {hue:.2f}  {label}")
+    expected = {f"{entry[0]:02d}_{pose}.png" for entry in RECOLORS for pose in POSES}
+    with tempfile.TemporaryDirectory(prefix="nyang-recolor-", dir=OUT.parent) as temporary:
+        staging = pathlib.Path(temporary)
+        written = 0
+        for entry in RECOLORS:
+            new_id, base_id, hue, label = entry[:4]
+            lo, hi = (entry[4], entry[5]) if len(entry) > 5 else (LO, HI)
+            for pose in POSES:
+                src_path = OUT / f"{base_id:02d}_{pose}.png"
+                if not src_path.is_file():
+                    raise RuntimeError(f"리컬러 원본 누락: {src_path.name}")
+                with Image.open(src_path) as src:
+                    if src.size != (197, 197) or src.mode != "RGBA":
+                        raise RuntimeError(f"리컬러 원본 규격 위반: {src_path.name} {src.size}/{src.mode}")
+                    recolor(src, hue, lo, hi).save(staging / f"{new_id:02d}_{pose}.png")
+                written += 1
+            print(f"  {new_id:02d}  ← {base_id:02d}  색상 {hue:.2f}  {label}")
+
+        actual = {path.name for path in staging.glob("*.png")}
+        if written != 66 or actual != expected:
+            raise RuntimeError(f"리컬러 완성도 위반: written={written}, files={len(actual)}")
+        for name in sorted(expected):
+            with Image.open(staging / name) as candidate:
+                if candidate.size != (197, 197) or candidate.mode != "RGBA":
+                    raise RuntimeError(f"리컬러 출력 규격 위반: {name} {candidate.size}/{candidate.mode}")
+
+        # 66개가 모두 검증된 뒤에만 파생 ID를 교체한다.
+        for name in sorted(expected):
+            os.replace(staging / name, OUT / name)
 
     print(f"완료: {written}장 → {OUT}")
     return 0
