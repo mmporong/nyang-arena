@@ -27,6 +27,26 @@ function Test-Yes {
   return @("y", "yes") -contains $Value.Trim().ToLowerInvariant()
 }
 
+function Get-Sha256Hex {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  $stream = [System.IO.File]::Open(
+    $Path,
+    [System.IO.FileMode]::Open,
+    [System.IO.FileAccess]::Read,
+    [System.IO.FileShare]::Read
+  )
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $hashBytes = $sha256.ComputeHash($stream)
+  } finally {
+    $sha256.Dispose()
+    $stream.Dispose()
+  }
+
+  return -join @($hashBytes | ForEach-Object { $_.ToString("X2") })
+}
+
 Push-Location $repoPath
 try {
   if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
@@ -49,7 +69,7 @@ try {
   if ($localBundles.Count -ne 1) {
     throw "Expected exactly one local index JavaScript bundle, found $($localBundles.Count)."
   }
-  $localHash = (Get-FileHash -LiteralPath $localBundles[0].FullName -Algorithm SHA256).Hash
+  $localHash = Get-Sha256Hex -Path $localBundles[0].FullName
 
   Write-Host "`n[AUTO] public deployment responses" -ForegroundColor Cyan
   $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
