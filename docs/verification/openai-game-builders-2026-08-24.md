@@ -43,6 +43,44 @@ UI 변경 전 생성 기준과 새 JSON을 기계 비교했다. `generatedFrom`,
 manifest와 metrics에 6/6 일치했다. 최종 배포 뒤 `npm run qa:manual -- --AutomatedOnly`도
 통과했고, 로컬·공개 JavaScript 번들 SHA-256이 일치했다.
 
+## 계약 선택·구매 반응 개선 증거
+
+- 기능 커밋: `9e291e3b60910d1d3c1476e01d154a3ac4ec6723`
+- Git tree: `c6d8ea9b17056aefe7a7cb85db217bed8f7c85bf`
+- 명령: 깨끗한 기능 커밋에서 `npm run verify`
+- 결과: 종료 코드 `0`, `dirty:false`, `reproducible:true`, provenance `MATCH`,
+  6축 `allSixPassed:true`
+- 변경 경계: `DESIGN.md`, 렌더·오디오와 그 검증 스크립트만 변경했다. 전투·밸런스·
+  계약 규칙·상태 전이 파일과 런타임 패키지는 변경하지 않았다.
+- 독립 코드 리뷰: 최초 제목·본문 겹침, compact 말줄임, reduced-motion 고리 팽창
+  finding을 수정한 뒤 CRITICAL/HIGH/MEDIUM/LOW 0건. 독립 검증의 구현 자동 기준 PASS.
+
+사용자 캡처와 같은 `1901×891`에서 카드 한 장은 `420×360`, 제목 `24px`, 본문
+`16px`, 내부 밴드 최대 간격 `8px`, 내부 높이 사용률 `90.24%`다. 기존처럼 긴
+문장 두 줄 뒤 200px가 넘는 빈 카드 면을 두지 않고 `번호·제목·위험 / 위험 트랙 /
+보스 변화 / 내 대응 / 보상·선택`의 다섯 밴드로 채웠다. 큰 비활성 CTA는 없애고
+카드 바로 아래에 입력 키 안내를 두었다. 대표 17기기와
+`320..900 × 275..900` 20px 간격 960경계에서 제목·본문 실제 글리프 하단, 카드·
+footer·guide·44px 입력 영역, 지도 라벨의 겹침이 0임을 프로브가 확인했다.
+
+성공한 계약 선택은 지도 상태를 즉시 반영하면서 선택한 자리의 금색 outline·위험
+도장·파편·보상 수치만 최대 360ms 남긴다. 이전 카드 면이나 미선택 카드를 다시
+그리지 않아 지도 입력과 보이는 화면이 갈리지 않는다. 성공한 구매·강화는 카드에서
+적용 위치로 이어지는 비행, 도착 고리·광선과 `생선 -N` 결과 문구를 남긴다. 실패
+입력에는 성공음이 없다. Web Audio 확인음은 기존 master·음소거·자동재생 잠금·숨은
+탭 규칙을 재사용하며, 테스트에서 잠금 전 context 0, hidden·muted 신규 노드 0,
+재생 종료 뒤 oscillator·gain·bus 해제를 확인했다. `prefers-reduced-motion`에서는
+이동·크기 변화·광선·파편을 빼고 고정 반경·고정 선 두께와 alpha 감쇠만 남긴다.
+
+변경 전 `d9bbffa`의 metrics와 새 생성 JSON을 같은 함수로 정규화했다. 모든 깊이에서
+`generatedFrom`, `bundleBytes`, `head`, `tree`, `dirty`, `node`, `reproducible`,
+`provenanceMatches`, `allSixPassed`, `evidenceSha256` 키를 제외하고 객체·배열 순서를
+유지한 compact JSON은 양쪽 모두 4,934 code units / 5,565 UTF-8 bytes이며 SHA-256
+`7280fb34f742472e2e63f9faddccd78dca649b5e848eae1fc12006d592e3c2eb`로 바이트
+동일하다. 아래 6축 원시 출력 SHA도 6/6 같다. JavaScript 번들은
+`175,524 → 184,628 bytes`로 `9,104 bytes` 늘었고, 이는 카드 기하·선택/구매 VFX·
+Web Audio 확인음의 의도된 출고 비용이다.
+
 ## 결정 축 6개
 
 | 축 | 시드 | 종료 | 원시 출력 SHA-256 |
