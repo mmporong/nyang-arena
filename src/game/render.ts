@@ -20,7 +20,7 @@ import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BRE
 import { drawScene, type Scene } from "./backdrop.ts";
 import { bossHint, bossOrdinalInStage, isRaidPrepStep, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
-import { isMuted } from "./audio.ts";
+import { isMuted, playUiCue } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
 import { cellRect, fieldToScreen, uiSpace, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
@@ -2647,14 +2647,16 @@ interface BuyTween {
   cell: number | null;
   breedId: number | null;
   accent: string;
+  label: string;
+  cost: number;
   startedAt: number;
 }
 
 const buyTweens: BuyTween[] = [];
-/** 150~250ms 중간값. 너무 길면 다음 카드를 가리고, 너무 짧으면 어디로 갔는지 안 읽힌다. */
-const BUY_TWEEN_MS = 210;
+/** 비행·도착 확인을 합친 420ms. 다음 입력을 막지 않으면서 적용 위치까지 읽히는 길이다. */
+const BUY_TWEEN_MS = 420;
 /** 모션 축소에서는 비행을 없애고 도착점 확인만 짧게 남긴다. */
-const BUY_REDUCED_MS = 160;
+const BUY_REDUCED_MS = 180;
 
 /**
  * 카드를 하나 산 순간 부른다. `main.ts`의 `buyWithFx`가 유일한 호출부다.
@@ -2666,13 +2668,27 @@ const BUY_REDUCED_MS = 160;
 export function spawnBuyTween(offer: Offer, slot: number, cell: number | null): void {
   const accent =
     offer.kind === "relic" ? T.fish : offer.kind === "upgrade" ? T.gold : offer.breed ? CLASS_COLOR[offer.breed.cls] : T.fish;
+  const cue = offer.kind === "upgrade" ? "upgrade" : "purchase";
+  const label =
+    offer.kind === "relic"
+      ? "유물 획득"
+      : offer.kind === "upgrade"
+        ? "강화 완료"
+        : offer.kind === "replace"
+          ? "교체 완료"
+          : "영입 완료";
   buyTweens.push({
     slot,
     cell,
     breedId: offer.breed ? offer.breed.id : null,
     accent,
+    label,
+    cost: offer.cost,
     startedAt: performance.now(),
   });
+  // 성공한 구매만 이 함수에 도달한다. 실패 입력에 확인음이 나면 사용자는
+  // 거래가 성립했다고 오해하므로 `buyOffer` 바깥의 이 경계를 유지한다.
+  playUiCue(cue);
 }
 
 /** 진행 중인 구매 트윈을 그리고, 끝난 것은 지운다. */
@@ -2693,7 +2709,8 @@ function drawBuyTweens(ctx: CanvasRenderingContext2D, L: Layout): void {
     const to = tw.cell === null ? L.allyBoard : cellRect(L, "ally", tw.cell);
     const toCx = to.x + to.w / 2;
     const toCy = to.y + to.h / 2;
-    const e = easeOutCubic(t);
+    const flightT = Math.min(1, t / 0.62);
+    const e = easeOutCubic(flightT);
     const fromCx = from ? from.x + from.w / 2 : toCx;
     const fromCy = from ? from.y + from.h / 2 : toCy;
     const cx = reduce ? toCx : fromCx + (toCx - fromCx) * e;
@@ -2701,10 +2718,10 @@ function drawBuyTweens(ctx: CanvasRenderingContext2D, L: Layout): void {
     // 축소 설정에서는 크기 이동도 없애고 도착 지점에 정적인 확인만 남긴다.
     const scale = reduce
       ? 0.72
-      : t < 0.35
-        ? 1 + (t / 0.35) * 0.18
-        : 1.18 - ((t - 0.35) / 0.65) * 0.7;
-    const alpha = reduce ? 1 - t : t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
+      : flightT < 0.42
+        ? 0.96 + (flightT / 0.42) * 0.22
+        : 1.18 - ((flightT - 0.42) / 0.58) * 0.56;
+    const alpha = reduce ? 1 - t : t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
     const basis = reduce ? Math.min(to.w, to.h) : Math.min(from?.w ?? to.w, from?.h ?? to.h);
     const size = basis * scale;
 
@@ -2720,6 +2737,41 @@ function drawBuyTweens(ctx: CanvasRenderingContext2D, L: Layout): void {
       ctx.fill();
     }
     ctx.restore();
+
+    // 비행이 끝나는 순간 거래 결과가 도착점에 남는다. 카드가 사라지고 생선만
+    // 줄던 이전 흐름과 달리, 무엇이 어디에 적용됐는지를 한 프레임에 연결한다.
+    const arrival = reduce ? t : Math.max(0, (t - 0.42) / 0.58);
+    if (arrival > 0) {
+      const ringT = easeOutCubic(arrival);
+      const ringR = Math.min(to.w, to.h) * (reduce ? 0.6 : 0.28 + ringT * 0.52);
+      const ringAlpha = Math.max(0, 1 - arrival);
+      ctx.save();
+      ctx.globalAlpha = ringAlpha;
+      ctx.strokeStyle = tw.accent;
+      ctx.lineWidth = Math.max(2, basis * 0.055 * (reduce ? 1 : 1 - arrival * 0.35));
+      ctx.beginPath();
+      ctx.arc(toCx, toCy, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      if (!reduce) {
+        for (let ray = 0; ray < 6; ray++) {
+          const angle = -Math.PI / 2 + (Math.PI * 2 * ray) / 6;
+          const inner = ringR * 0.72;
+          const outer = ringR * (0.96 + 0.16 * (ray % 2));
+          ctx.beginPath();
+          ctx.moveTo(toCx + Math.cos(angle) * inner, toCy + Math.sin(angle) * inner);
+          ctx.lineTo(toCx + Math.cos(angle) * outer, toCy + Math.sin(angle) * outer);
+          ctx.stroke();
+        }
+      }
+      const labelY = toCy - Math.min(to.h * 0.58, 48) - (reduce ? 0 : arrival * 12);
+      uiText(ctx, `${tw.label} · 생선 -${tw.cost}`, toCx, labelY, Math.max(12, Math.min(16, basis * 0.24)), T.paper, {
+        align: "center",
+        weight: 800,
+        outline: true,
+        maxWidth: Math.max(120, to.w * 1.7),
+      });
+      ctx.restore();
+    }
   }
 }
 
@@ -3308,23 +3360,40 @@ export function raidContractRects(L: Layout, count = 3): Rect[] {
   const stacked = wantsStacked && availableH >= 112 * count + stackedGap * (count - 1);
   const gap = stacked || L.w < 600 ? stackedGap : 24;
   if (stacked) {
-    const w = Math.min(L.w - uiSpace(L.scale, 3) * 2, Math.max(260, L.w * 0.88));
-    const h = (availableH - gap * (count - 1)) / count;
+    const w = Math.min(420, L.w - uiSpace(L.scale, 3) * 2, Math.max(260, L.w * 0.88));
+    const availableCardH = (availableH - gap * (count - 1)) / count;
+    // 세로 화면이 길다고 카드 본문을 늘리지 않는다. 계약은 장문의 문서가 아니라
+    // 네 구역을 빠르게 견주는 티켓이고, 남는 높이는 카드 **사이 밖**에 둔다.
+    const targetH = L.h >= 720 ? 168 : L.h >= 560 ? 148 : 136;
+    const h = Math.min(availableCardH, targetH);
+    const groupH = h * count + gap * (count - 1);
+    const groupTop = top + (availableH - groupH) / 2;
     return Array.from({ length: count }, (_, i) => ({
       x: L.w / 2 - w / 2,
-      y: top + i * (h + gap),
+      y: groupTop + i * (h + gap),
       w,
       h,
     }));
   }
   const maxCardW = 420;
-  const maxCardH = 440;
+  const maxCardH = L.w < 600 && L.h >= 380
+    ? Math.min(220, availableH)
+    : L.h >= 760
+      ? 360
+      : L.h >= 620
+        ? 340
+        : L.h >= 480
+          ? 310
+          : availableH;
   const side = uiSpace(L.scale, 4);
   const availableW = Math.min(L.w - side * 2, maxCardW * count + gap * (count - 1));
   const w = (availableW - gap * (count - 1)) / count;
   const h = Math.min(availableH, maxCardH);
   const left = (L.w - availableW) / 2;
-  const y = top + (availableH - h) / 2;
+  // 제목·부제와 카드 사이를 먼저 묶는다. 카드를 전체 가용 높이의 정중앙에
+  // 놓으면 높이를 줄인 만큼 위쪽 공백이 다시 커져, 사용자가 지적한 느슨한
+  // 화면이 형태만 바뀐 채 남는다.
+  const y = top + Math.min(16, Math.max(0, availableH - h));
   return Array.from({ length: count }, (_, i) => ({
     x: left + i * (w + gap),
     y,
@@ -3333,78 +3402,181 @@ export function raidContractRects(L: Layout, count = 3): Rect[] {
   }));
 }
 
+export interface RaidContractGuideGeometry {
+  dividerY: number;
+  labelRightX: number;
+  cy: number;
+  keys: Rect[];
+}
+
+/** 계약 카드가 곧 CTA이므로, 비활성 큰 버튼 대신 카드 바로 아래 입력 키만 둔다. */
+export function raidContractGuideGeometry(L: Layout, count = 3): RaidContractGuideGeometry {
+  const keySize = Math.max(24, Math.min(32, L.button.h * 0.52));
+  const keyGap = 6;
+  const groupW = keySize * count + keyGap * (count - 1);
+  const groupX = L.button.x + L.button.w / 2 - groupW / 2;
+  const cards = raidContractRects(L, count);
+  const cardBottom = Math.max(...cards.map((card) => card.y + card.h));
+  const cy = Math.min(L.button.y + L.button.h / 2, cardBottom + 28 + keySize / 2);
+  const keyY = cy - keySize / 2;
+  return {
+    dividerY: keyY - 12,
+    labelRightX: groupX - 12,
+    cy,
+    keys: Array.from({ length: count }, (_, index) => ({
+      x: groupX + index * (keySize + keyGap),
+      y: keyY,
+      w: keySize,
+      h: keySize,
+    })),
+  };
+}
+
 export interface RaidContractCardGeometry {
   narrow: boolean;
+  ultraCompact: boolean;
   compactHeader: boolean;
   pad: number;
   titleSize: number;
   bodySize: number;
-  textTop: number;
-  lineH: number;
-  sectionGap: number;
+  labelSize: number;
   maxLines: number;
+  headerRect: Rect;
+  riskRect: Rect | null;
+  ruleRect: Rect;
+  counterRect: Rect;
+  footerRect: Rect;
+  keyBadgeRect: Rect | null;
+  titleRect: Rect;
+  riskSealRect: Rect;
   contentBottomY: number;
   footerLineY: number;
   rewardY: number;
   rewardMaxWidth: number;
+  stackedInfoMinHeight: number;
   keyRect: Rect | null;
 }
 
 /** 계약 카드 내부의 제목·본문·footer 경계. 실제 그림과 프로브가 같은 값을 쓴다. */
 export function raidContractCardGeometry(rect: Rect, compact: boolean): RaidContractCardGeometry {
   const narrow = rect.w < 180;
-  const short = rect.h < 112;
-  const pad = compact || narrow || short ? 8 : Math.max(12, Math.min(16, rect.w * 0.05));
-  const fullTitleSize = Math.max(14, Math.min(narrow ? 16 : compact ? 18 : 24, rect.h * (compact ? 0.12 : 0.09)));
-  const bodySize = compact
+  const ultraCompact = rect.h < 140 || (rect.w < 150 && rect.h < 190);
+  const short = rect.h < 168;
+  const pad = ultraCompact ? 8 : compact || narrow || short ? 10 : Math.max(12, Math.min(16, rect.w * 0.05));
+  const baseTitleSize = Math.max(16, Math.min(narrow ? 17 : compact ? 19 : 24, rect.h * (ultraCompact ? 0.17 : compact ? 0.13 : 0.075)));
+  const bodySize = compact || ultraCompact
     ? 12
-    : Math.max(12, Math.min(narrow ? 12 : 16, rect.h * 0.057));
-  // 한 행 header는 번호·최대 7자 제목·발톱·위험 문구 사이 8px을 확보할 때만 쓴다.
-  const titleHalfW = fullTitleSize * 0.92 * 7 / 2;
-  const numberRight = pad + bodySize * 0.92;
-  const riskLeft = rect.w - pad - Math.max(bodySize * 5.1, bodySize * 0.92 * 5);
-  const compactHeader = rect.w / 2 - titleHalfW < numberRight + 8 ||
-    rect.w / 2 + titleHalfW + 8 > riskLeft;
-  const titleSize = compactHeader ? Math.min(fullTitleSize, 18) : fullTitleSize;
-  const textTop = rect.y + pad + titleSize * (compactHeader ? 2.2 : 1.45);
-  const lineH = bodySize * (compact ? 1.2 : 1.35);
-  const sectionGap = bodySize * (compact ? 0.25 : 0.45);
-  const rewardY = rect.y + rect.h - pad - bodySize * 0.15;
-  const footerLineY = rewardY - bodySize * (compact ? 1.2 : 1.45);
-  // 규칙과 대응이 같은 줄 예산을 나눠 쓴다. 좁고 높은 카드는 4~8줄까지 써
-  // 폭 때문에 생긴 세로 여백을 실제 설명으로 돌려준다.
-  const bodyBudget = footerLineY - 8 - textTop;
-  const maxLines = Math.max(
-    1,
-    Math.min(8, Math.floor((bodyBudget - sectionGap - bodySize / 2 + lineH) / (lineH * 2))),
-  );
-  const worstCounterY = textTop + maxLines * lineH + sectionGap;
-  const contentBottomY = worstCounterY + (maxLines - 1) * lineH + bodySize / 2;
-  const keyW = Math.max(46, bodySize * 4.1);
+    : Math.max(12, Math.min(narrow ? 13 : 16, rect.h * 0.05));
+  const labelSize = Math.max(10, Math.min(12, bodySize * 0.78));
+  const gap = ultraCompact ? 2 : compact ? 4 : 8;
+  const inner: Rect = {
+    x: rect.x + pad,
+    y: rect.y + pad,
+    w: Math.max(1, rect.w - pad * 2),
+    h: Math.max(1, rect.h - pad * 2),
+  };
+  const headerH = ultraCompact ? Math.min(34, inner.h * 0.34) : compact ? Math.min(44, inner.h * 0.3) : Math.min(60, inner.h * 0.22);
+  const riskH = ultraCompact ? 0 : compact ? Math.max(14, Math.min(18, inner.h * 0.12)) : Math.max(20, Math.min(26, inner.h * 0.09));
+  const footerH = ultraCompact ? Math.max(22, Math.min(28, inner.h * 0.28)) : compact ? Math.max(30, Math.min(40, inner.h * 0.24)) : Math.max(50, Math.min(60, inner.h * 0.2));
+  const gapCount = riskH > 0 ? 4 : 3;
+  const infoTotal = Math.max(2, inner.h - headerH - riskH - footerH - gap * gapCount);
+  const ruleH = infoTotal / 2;
+  const counterH = infoTotal - ruleH;
+
+  const headerRect: Rect = { x: inner.x, y: inner.y, w: inner.w, h: headerH };
+  let y = headerRect.y + headerRect.h + gap;
+  const riskRect: Rect | null = riskH > 0 ? { x: inner.x, y, w: inner.w, h: riskH } : null;
+  if (riskRect) y += riskRect.h + gap;
+  const ruleRect: Rect = { x: inner.x, y, w: inner.w, h: ruleH };
+  y += ruleRect.h + gap;
+  const counterRect: Rect = { x: inner.x, y, w: inner.w, h: counterH };
+  y += counterRect.h + gap;
+  const footerRect: Rect = { x: inner.x, y, w: inner.w, h: Math.max(1, inner.y + inner.h - y) };
+
+  const inlineNumber = rect.w < 300;
+  const badgeSize = Math.max(22, Math.min(34, headerRect.h * 0.68));
+  let keyBadgeRect: Rect | null = inlineNumber
+    ? null
+    : { x: headerRect.x, y: headerRect.y + (headerRect.h - badgeSize) / 2, w: badgeSize, h: badgeSize };
+  const sealW = ultraCompact
+    ? Math.max(46, Math.min(58, headerRect.w * 0.42))
+    : inlineNumber
+      ? Math.max(50, Math.min(60, headerRect.w * 0.34))
+    : Math.max(62, Math.min(82, headerRect.h * 1.42));
+  let riskSealRect: Rect = {
+    x: headerRect.x + headerRect.w - sealW,
+    y: headerRect.y,
+    w: sealW,
+    h: headerRect.h,
+  };
+  let titleX = keyBadgeRect ? keyBadgeRect.x + keyBadgeRect.w + 12 : headerRect.x;
+  let titleRect: Rect = {
+    x: titleX,
+    y: headerRect.y,
+    w: Math.max(1, riskSealRect.x - 12 - titleX),
+    h: headerRect.h,
+  };
+  // 가장 긴 이름을 16px에서조차 위험 봉인 옆에 둘 수 없으면 제목과 위험을
+  // 두 줄로 나눈다. 먼저 글자를 줄여 맞추면 8px까지 작아져도 겹침을 숨기므로,
+  // 배치를 결정한 뒤 16px 하한을 고정한다.
+  const minimumTitleChars = keyBadgeRect ? 7 : 9;
+  const compactHeader = titleRect.w < minimumTitleChars * 16 * 0.92;
+  if (compactHeader) {
+    keyBadgeRect = null;
+    const rowGap = Math.max(1, Math.min(3, headerRect.h * 0.04));
+    const rowH = Math.max(1, (headerRect.h - rowGap) / 2);
+    titleX = headerRect.x;
+    titleRect = { x: titleX, y: headerRect.y, w: headerRect.w, h: rowH };
+    riskSealRect = {
+      x: headerRect.x,
+      y: headerRect.y + rowH + rowGap,
+      w: headerRect.w,
+      h: rowH,
+    };
+  }
+  const quantizedBaseTitleSize = Math.max(16, Math.floor(baseTitleSize / 4) * 4);
+  const availableTitleSize = compactHeader
+    ? quantizedBaseTitleSize
+    : Math.floor(titleRect.w / (minimumTitleChars * 0.92 * 4)) * 4;
+  const titleSize = Math.max(16, Math.min(quantizedBaseTitleSize, availableTitleSize));
+  const infoTextTop = labelSize * 0.9 + 4 + labelSize * 0.72 + bodySize * 0.72;
+  const stackedInfoMinHeight = infoTextTop + bodySize * 0.5 + 2;
+  const twoLineBottom = infoTextTop + bodySize * 1.28 + bodySize * 0.5 + 2;
+  const maxLines = !ultraCompact && Math.min(ruleRect.h, counterRect.h) >= twoLineBottom ? 2 : 1;
+  const keyW = Math.max(50, bodySize * 4.4);
   const keyRect: Rect | null = narrow
     ? null
     : {
-        x: rect.x + rect.w - pad - keyW,
-        y: rewardY - bodySize * 0.82,
+        x: footerRect.x + footerRect.w - keyW,
+        y: footerRect.y + Math.max(0, (footerRect.h - bodySize * 1.8) / 2),
         w: keyW,
-        h: bodySize * 1.64,
+        h: Math.min(footerRect.h, bodySize * 1.8),
       };
+  const rewardY = footerRect.y + footerRect.h / 2;
   return {
     narrow,
+    ultraCompact,
     compactHeader,
     pad,
     titleSize,
     bodySize,
-    textTop,
-    lineH,
-    sectionGap,
+    labelSize,
     maxLines,
-    contentBottomY,
-    footerLineY,
+    headerRect,
+    riskRect,
+    ruleRect,
+    counterRect,
+    footerRect,
+    keyBadgeRect,
+    titleRect,
+    riskSealRect,
+    contentBottomY: counterRect.y + counterRect.h,
+    footerLineY: footerRect.y,
     rewardY,
     rewardMaxWidth: narrow
-      ? rect.w - pad * 2 - bodySize * 1.35
-      : rect.w - pad * 2 - bodySize * 5.2,
+      ? footerRect.w
+      : Math.max(48, keyRect!.x - footerRect.x - 8),
+    stackedInfoMinHeight,
     keyRect,
   };
 }
@@ -3497,6 +3669,220 @@ function drawActiveRaidContractChip(
   });
 }
 
+function raidContractRiskColor(risk: number): string {
+  return risk === 3 ? T.danger : risk === 2 ? T.gold : T.gather;
+}
+
+/** 위험은 색 하나가 아니라 발톱 수·3칸 트랙·텍스트를 같은 카드 안에서 반복한다. */
+function drawRaidRiskSeal(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  risk: RaidContract["risk"],
+  bodySize: number,
+): void {
+  const color = raidContractRiskColor(risk);
+  roundRect(ctx, rect, Math.max(4, rect.h * 0.22));
+  ctx.fillStyle = hexA(color, 0.09);
+  ctx.fill();
+  ctx.strokeStyle = hexA(color, 0.55);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  if (rect.h < Math.max(28, bodySize * 2)) {
+    const claw = Math.max(4, Math.min(bodySize * 0.52, rect.h * 0.28, rect.w / 12));
+    const clawW = claw * 1.94;
+    const startX = rect.x + 5;
+    drawRiskClaws(ctx, startX, rect.y + rect.h / 2, risk, claw, color);
+    uiText(ctx, raidRiskLabel(risk), startX + clawW + 5, rect.y + rect.h / 2, Math.max(10, bodySize * 0.72), color, {
+      align: "left",
+      weight: 800,
+      maxWidth: Math.max(1, rect.w - clawW - 15),
+    });
+    return;
+  }
+
+  const claw = Math.max(5, Math.min(bodySize * 0.68, rect.w / 3.15, rect.h * 0.24));
+  drawRiskClaws(ctx, rect.x + rect.w / 2 - claw * 0.98, rect.y + rect.h * 0.42, risk, claw, color);
+  uiText(ctx, raidRiskLabel(risk), rect.x + rect.w / 2, rect.y + rect.h * 0.76, Math.max(10, bodySize * 0.72), color, {
+    align: "center",
+    weight: 800,
+    maxWidth: rect.w - 8,
+  });
+}
+
+function drawRaidRiskTrack(ctx: CanvasRenderingContext2D, rect: Rect, risk: RaidContract["risk"], bodySize: number): void {
+  const color = raidContractRiskColor(risk);
+  const labelW = Math.min(rect.w * 0.3, bodySize * 3.8);
+  uiText(ctx, "위험 부담", rect.x, rect.y + rect.h / 2, Math.max(10, bodySize * 0.7), T.paperDim, {
+    weight: 700,
+    maxWidth: labelW,
+  });
+  const trackX = rect.x + labelW + 6;
+  const gap = 4;
+  const segmentW = Math.max(2, (rect.x + rect.w - trackX - gap * 2) / 3);
+  const segmentH = Math.max(5, Math.min(9, rect.h * 0.52));
+  for (let i = 0; i < 3; i++) {
+    const segment = {
+      x: trackX + i * (segmentW + gap),
+      y: rect.y + (rect.h - segmentH) / 2,
+      w: segmentW,
+      h: segmentH,
+    };
+    roundRect(ctx, segment, segmentH / 2);
+    ctx.fillStyle = i < risk ? hexA(color, 0.72) : "rgba(239,224,198,0.08)";
+    ctx.fill();
+    ctx.strokeStyle = i < risk ? color : "rgba(239,224,198,0.18)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+function drawRaidContractInfoBand(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  label: string,
+  text: string,
+  card: RaidContractCardGeometry,
+  accent: string,
+  strong: boolean,
+): void {
+  roundRect(ctx, rect, Math.max(3, Math.min(8, rect.h * 0.18)));
+  ctx.fillStyle = strong ? hexA(accent, 0.075) : "rgba(239,224,198,0.035)";
+  ctx.fill();
+  ctx.strokeStyle = strong ? hexA(accent, 0.22) : "rgba(239,224,198,0.1)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const sidePad = card.ultraCompact ? 5 : Math.max(7, card.pad * 0.65);
+  const contentW = Math.max(1, rect.w - sidePad * 2);
+  if (card.ultraCompact || rect.h < card.stackedInfoMinHeight) {
+    // `uiText(maxWidth)`에 긴 원문을 바로 넘기면 8px 하한까지 줄인 뒤에도 폭이
+    // 모자란 초소형 카드에서 옆 카드로 샌다. 12px에서 먼저 한 줄 말줄임을
+    // 확정하면 글자 크기와 카드 경계를 둘 다 지킬 수 있다.
+    const line = wrapLines(ctx, `${label} · ${text}`, card.bodySize, strong ? 800 : 600, contentW, 1)[0] ?? label;
+    uiText(ctx, line, rect.x + sidePad, rect.y + rect.h / 2, card.bodySize, strong ? accent : T.paperDim, {
+      weight: strong ? 800 : 600,
+      maxWidth: contentW,
+    });
+    return;
+  }
+
+  const labelY = rect.y + card.labelSize * 0.9 + 4;
+  uiText(ctx, label, rect.x + sidePad, labelY, card.labelSize, strong ? accent : T.muted, {
+    weight: 800,
+    maxWidth: contentW,
+  });
+  const lineH = card.bodySize * 1.28;
+  const textTop = labelY + card.labelSize * 0.72 + card.bodySize * 0.72;
+  const lines = wrapLines(ctx, text, card.bodySize, strong ? 800 : 600, contentW, card.maxLines);
+  lines.forEach((line, lineIndex) => {
+    uiText(ctx, line, rect.x + sidePad, textTop + lineIndex * lineH, card.bodySize, strong ? accent : T.paperDim, {
+      weight: strong ? 800 : 600,
+      maxWidth: contentW,
+    });
+  });
+}
+
+function drawRaidContractCard(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  rect: Rect,
+  contract: RaidContract,
+  index: number,
+  hot: boolean,
+): void {
+  const compact = L.h < 380 || rect.h <= 168 || rect.w <= 280;
+  const card = raidContractCardGeometry(rect, compact);
+  const face = hot ? "rgba(62,39,29,0.99)" : "rgba(35,24,19,0.99)";
+  bevelPanel(ctx, rect, Math.max(8, L.scale * 10), face, "rgba(0,0,0,0.72)", hot ? 6 : 3);
+  roundRect(ctx, rect, Math.max(8, L.scale * 10));
+  ctx.strokeStyle = hot ? T.action : contract.risk === 3 ? hexA(T.enemy, 0.72) : "rgba(239,224,198,0.38)";
+  ctx.lineWidth = hot ? 3 : 1.5;
+  ctx.stroke();
+
+  // 위험색은 카드 전체를 덮지 않고 왼쪽 rail과 봉인에만 쓴다. 전장 신호 3색의
+  // 채도 독점을 계약 UI가 빼앗지 않게 하는 경계다.
+  roundRect(ctx, { x: rect.x + 3, y: rect.y + 8, w: Math.max(2, L.scale * 3), h: rect.h - 16 }, 2);
+  ctx.fillStyle = hexA(raidContractRiskColor(contract.risk), hot ? 0.9 : 0.55);
+  ctx.fill();
+
+  if (card.keyBadgeRect) {
+    ctx.beginPath();
+    ctx.arc(
+      card.keyBadgeRect.x + card.keyBadgeRect.w / 2,
+      card.keyBadgeRect.y + card.keyBadgeRect.h / 2,
+      card.keyBadgeRect.w / 2,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fillStyle = hot ? T.action : "rgba(245,160,60,0.12)";
+    ctx.fill();
+    ctx.strokeStyle = hot ? T.action : "rgba(245,160,60,0.55)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    uiText(ctx, `${index + 1}`, card.keyBadgeRect.x + card.keyBadgeRect.w / 2, card.keyBadgeRect.y + card.keyBadgeRect.h / 2, card.bodySize, hot ? T.actionInk : T.action, {
+      align: "center",
+      weight: 900,
+    });
+  }
+  const rawTitle = card.narrow
+    ? `${index + 1}`
+    : card.keyBadgeRect
+      ? contract.name
+      : `${index + 1} ${contract.name}`;
+  const titleLine = wrapLines(ctx, rawTitle, card.titleSize, 900, card.titleRect.w, 1)[0] ?? rawTitle;
+  uiText(
+    ctx,
+    titleLine,
+    card.titleRect.x,
+    card.titleRect.y + card.titleRect.h / 2,
+    card.titleSize,
+    T.paper,
+    { weight: 900, maxWidth: card.titleRect.w },
+  );
+  drawRaidRiskSeal(ctx, card.riskSealRect, contract.risk, card.bodySize);
+  if (card.riskRect) drawRaidRiskTrack(ctx, card.riskRect, contract.risk, card.bodySize);
+
+  drawRaidContractInfoBand(ctx, card.ruleRect, "보스 변화", contract.rule, card, T.paperDim, false);
+  drawRaidContractInfoBand(ctx, card.counterRect, "내 대응", contract.counter, card, T.gather, true);
+
+  drawPanelDivider(ctx, card.footerRect.x, card.footerLineY, card.footerRect.w);
+  const footer = card.footerRect;
+  const fishSize = Math.max(13, Math.min(24, footer.h * 0.46));
+  const fishX = footer.x + fishSize * 0.55;
+  drawFish(ctx, fishX, card.rewardY, fishSize, T.fish);
+  const rewardX = fishX + fishSize * 0.8;
+  if (!card.ultraCompact && footer.h >= 38) {
+    uiText(ctx, "승리 시", rewardX, footer.y + footer.h * 0.34, Math.max(10, card.labelSize), T.paperDim, {
+      weight: 700,
+      maxWidth: card.rewardMaxWidth - fishSize,
+    });
+    uiText(ctx, `+${contract.rewardFish} 생선`, rewardX, footer.y + footer.h * 0.7, Math.max(15, card.bodySize * 1.25), T.fish, {
+      weight: 900,
+      maxWidth: card.rewardMaxWidth - fishSize,
+    });
+  } else {
+    uiText(ctx, `+${contract.rewardFish}`, rewardX, card.rewardY, Math.max(14, card.bodySize * 1.12), T.fish, {
+      weight: 900,
+      maxWidth: card.rewardMaxWidth - fishSize,
+    });
+  }
+
+  if (card.keyRect) {
+    roundRect(ctx, card.keyRect, Math.max(4, card.keyRect.h * 0.24));
+    ctx.fillStyle = hot ? T.action : "rgba(239,224,198,0.06)";
+    ctx.fill();
+    ctx.strokeStyle = hot ? T.action : "rgba(239,224,198,0.28)";
+    ctx.lineWidth = hot ? 2 : 1;
+    ctx.stroke();
+    uiText(ctx, `선택 ${index + 1}`, card.keyRect.x + card.keyRect.w / 2, card.keyRect.y + card.keyRect.h / 2, Math.max(11, card.bodySize * 0.82), hot ? T.actionInk : T.paperDim, {
+      align: "center",
+      weight: 900,
+      maxWidth: card.keyRect.w - 6,
+    });
+  }
+}
+
 function drawRaidContractOverlay(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -3521,7 +3907,7 @@ function drawRaidContractOverlay(
   if (!compact) {
     uiText(
       ctx,
-      `${target.name}의 규칙과 추가 보상을 하나 고르세요`,
+      `${target.name}의 변화 · 내 대응 · 보상을 비교하세요`,
       L.w / 2,
       L.notice.y + L.notice.h + Math.max(42, L.scale * 44),
       Math.max(12, L.scale * 13),
@@ -3531,122 +3917,153 @@ function drawRaidContractOverlay(
   }
 
   let hovered = -1;
-  rects.forEach((rect, i) => {
+  rects.forEach((rect, index) => {
     if (
       drag.hoverX >= rect.x &&
       drag.hoverX <= rect.x + rect.w &&
       drag.hoverY >= rect.y &&
       drag.hoverY <= rect.y + rect.h
-    ) {
-      hovered = i;
-    }
+    ) hovered = index;
   });
   ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
 
-  rects.forEach((rect, i) => {
-    const contract = s.raidOffers[i];
+  rects.forEach((rect, index) => {
+    const contract = s.raidOffers[index];
     if (!contract) return;
-    const hot = hovered === i;
-    const card = raidContractCardGeometry(rect, compact || rect.h < 140 || rect.w < 160);
-    const {
-      compactHeader,
-      pad,
-      titleSize,
-      bodySize,
-      textTop,
-      lineH,
-      sectionGap,
-      maxLines,
-      rewardY,
-      footerLineY,
-      rewardMaxWidth,
-      keyRect,
-    } = card;
-    const face = hot ? "rgba(62,39,29,0.98)" : "rgba(35,24,19,0.98)";
-    bevelPanel(ctx, rect, Math.max(8, L.scale * 10), face, "rgba(0,0,0,0.72)", hot ? 5 : 3);
+    const hot = hovered === index;
     ctx.save();
-    roundRect(ctx, rect, Math.max(8, L.scale * 10));
-    ctx.strokeStyle = hot ? T.action : contract.risk === 3 ? T.enemy : "rgba(239,224,198,0.38)";
-    ctx.lineWidth = hot ? 3 : 1.5;
-    ctx.stroke();
+    if (hot && !reducedMotion()) ctx.translate(0, -4);
+    drawRaidContractCard(ctx, L, rect, contract, index, hot);
     ctx.restore();
-
-    const riskColor = contract.risk === 3 ? T.danger : contract.risk === 2 ? T.gold : T.gather;
-    if (compactHeader) {
-      uiText(ctx, `${i + 1} ${contract.name}`, rect.x + rect.w / 2, rect.y + pad + titleSize * 0.35, titleSize, T.paper, {
-        align: "center",
-        weight: 800,
-        maxWidth: rect.w - pad * 2,
-      });
-      uiText(ctx, `위험 ${raidRiskLabel(contract.risk)}`, rect.x + rect.w / 2, rect.y + pad + titleSize * 1.28, bodySize, riskColor, {
-        align: "center",
-        weight: 800,
-        maxWidth: rect.w - pad * 2,
-      });
-    } else {
-      uiText(ctx, `${i + 1}`, rect.x + pad, rect.y + pad + titleSize * 0.35, bodySize, T.action, {
-        weight: 800,
-      });
-      uiText(ctx, contract.name, rect.x + rect.w / 2, rect.y + pad + titleSize * 0.35, titleSize, T.paper, {
-        align: "center",
-        weight: 800,
-        maxWidth: rect.w - pad * 4,
-      });
-      drawRiskClaws(
-        ctx,
-        rect.x + rect.w - pad - bodySize * 5.1,
-        rect.y + pad + titleSize * 0.42,
-        contract.risk,
-        bodySize * 0.78,
-        riskColor,
-      );
-      uiText(
-        ctx,
-        `위험 ${raidRiskLabel(contract.risk)}`,
-        rect.x + rect.w - pad,
-        rect.y + pad + titleSize * 0.35,
-        bodySize,
-        riskColor,
-        { align: "right", weight: 800, maxWidth: rect.w * 0.42 },
-      );
-    }
-
-    const contentW = rect.w - pad * 2;
-    const rule = wrapLines(ctx, `규칙 · ${contract.rule}`, bodySize, 400, contentW, maxLines);
-    rule.forEach((line, lineIdx) => {
-      uiText(ctx, line, rect.x + pad, textTop + lineIdx * lineH, bodySize, T.paperDim, {
-        maxWidth: contentW,
-      });
-    });
-    const counterY = textTop + Math.max(1, rule.length) * lineH + sectionGap;
-    const counter = wrapLines(ctx, `대응 · ${contract.counter}`, bodySize, 800, contentW, maxLines);
-    counter.forEach((line, lineIdx) => {
-      uiText(ctx, line, rect.x + pad, counterY + lineIdx * lineH, bodySize, T.gather, {
-        weight: 800,
-        maxWidth: contentW,
-      });
-    });
-
-    drawPanelDivider(ctx, rect.x + pad, footerLineY, rect.w - pad * 2);
-    drawFish(ctx, rect.x + pad + bodySize * 0.5, rewardY, bodySize * 1.1, T.fish);
-    uiText(ctx, keyRect ? `승리 시 생선 +${contract.rewardFish}` : `생선 +${contract.rewardFish}`, rect.x + pad + bodySize * 1.35, rewardY, bodySize, T.fish, {
-      weight: 800,
-      maxWidth: rewardMaxWidth,
-    });
-    if (keyRect) {
-      const keyLabel = `${i + 1} 선택`;
-      roundRect(ctx, keyRect, keyRect.h * 0.28);
-      ctx.fillStyle = hot ? "rgba(245,160,60,0.16)" : "rgba(239,224,198,0.06)";
-      ctx.fill();
-      ctx.strokeStyle = hot ? T.action : "rgba(239,224,198,0.24)";
-      ctx.lineWidth = hot ? 2 : 1;
-      ctx.stroke();
-      uiText(ctx, keyLabel, keyRect.x + keyRect.w / 2, keyRect.y + keyRect.h / 2, bodySize * 0.82, hot ? T.action : T.paperDim, {
-        align: "center",
-        weight: 800,
-      });
-    }
   });
+}
+
+interface RaidContractChoiceFx {
+  offers: readonly RaidContract[];
+  chosenIndex: number;
+  startedAt: number;
+}
+
+let previousRaidOffers: RaidContract[] = [];
+let raidContractChoiceFx: RaidContractChoiceFx | null = null;
+
+/** RunState를 바꾸지 않고 제안 3장→선택 완료 전이만 관찰해 봉인 snapshot을 남긴다. */
+function watchRaidContractChoice(s: RunState): void {
+  const current = s.phase === "map" ? s.raidOffers : [];
+  if (previousRaidOffers.length > 0 && current.length === 0 && s.raidContract) {
+    const chosenIndex = previousRaidOffers.findIndex((contract) => contract.id === s.raidContract?.id);
+    if (chosenIndex >= 0) {
+      raidContractChoiceFx = {
+        offers: [...previousRaidOffers],
+        chosenIndex,
+        startedAt: performance.now(),
+      };
+      playUiCue("contract");
+    }
+  }
+  previousRaidOffers = current.length > 0 ? [...current] : [];
+}
+
+function drawRaidContractSealStamp(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  contract: RaidContract,
+  progress: number,
+  reduce: boolean,
+): void {
+  const fade = progress > 0.86 ? 1 - (progress - 0.86) / 0.14 : 1;
+  const arrive = easeOutCubic(Math.min(1, progress / 0.58));
+  const radius = Math.max(34, Math.min(58, Math.min(rect.w, rect.h) * 0.18));
+  const scale = reduce ? 1 : 1.42 - arrive * 0.42;
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h * 0.54;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, fade) * Math.min(1, progress * 4);
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(123,45,42,0.92)";
+  ctx.fill();
+  ctx.strokeStyle = T.gold;
+  ctx.lineWidth = Math.max(2, radius * 0.07);
+  ctx.stroke();
+  drawRiskClaws(ctx, -radius * 0.44, -radius * 0.04, contract.risk, radius * 0.34, T.paper);
+  ctx.restore();
+
+  if (!reduce) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, fade) * (1 - arrive * 0.55);
+    ctx.fillStyle = T.paperDim;
+    for (let i = 0; i < 6; i++) {
+      const angle = -Math.PI / 2 + (Math.PI * 2 * i) / 6;
+      const travel = radius * (0.85 + arrive * (0.7 + (i % 2) * 0.25));
+      const px = cx + Math.cos(angle) * travel;
+      const py = cy + Math.sin(angle) * travel + arrive * 12;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(angle + arrive * (i % 2 ? 1.2 : -1.1));
+      ctx.fillRect(-3, -2, 6, 4);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  const labelY = cy + radius + 22;
+  uiText(ctx, "계약 체결", cx, labelY, Math.max(14, Math.min(18, rect.w * 0.05)), T.gold, {
+    align: "center",
+    weight: 900,
+    outline: true,
+  });
+  uiText(ctx, `${contract.name} · 승리 생선 +${contract.rewardFish}`, cx, labelY + 22, Math.max(12, Math.min(15, rect.w * 0.042)), T.paper, {
+    align: "center",
+    weight: 800,
+    outline: true,
+    maxWidth: rect.w * 0.9,
+  });
+}
+
+function drawRaidContractChoiceFeedback(ctx: CanvasRenderingContext2D, L: Layout): void {
+  const fx = raidContractChoiceFx;
+  if (!fx) return;
+  const reduce = reducedMotion();
+  const duration = reduce ? 160 : 360;
+  const progress = (performance.now() - fx.startedAt) / duration;
+  if (progress >= 1) {
+    raidContractChoiceFx = null;
+    return;
+  }
+  const rects = raidContractRects(L, fx.offers.length);
+  const chosenRect = rects[fx.chosenIndex];
+  const chosen = fx.offers[fx.chosenIndex];
+  if (!chosenRect || !chosen) return;
+
+  // 상태는 이미 지도 선택으로 넘어갔다. 이전 카드 세 장을 그대로 남기면 화면은
+  // 계약 선택처럼 보이는데 입력은 지도에 들어가는 거짓 UI가 된다. 카드 자리에는
+  // 클릭 대상이 아닌 국소 outline·봉인만 남겨 지도와 입력을 즉시 일치시킨다.
+  const fade = progress > 0.78 ? 1 - (progress - 0.78) / 0.22 : 1;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, fade);
+  roundRect(ctx, chosenRect, Math.max(8, L.scale * 10));
+  ctx.strokeStyle = T.gold;
+  ctx.lineWidth = Math.max(2, (reduce ? 3 : 5 - progress * 3));
+  ctx.stroke();
+  if (!reduce) {
+    const halo = ctx.createRadialGradient(
+      chosenRect.x + chosenRect.w / 2,
+      chosenRect.y + chosenRect.h * 0.54,
+      0,
+      chosenRect.x + chosenRect.w / 2,
+      chosenRect.y + chosenRect.h * 0.54,
+      Math.min(chosenRect.w, chosenRect.h) * 0.42,
+    );
+    halo.addColorStop(0, `rgba(240,186,74,${0.16 * (1 - progress)})`);
+    halo.addColorStop(1, "rgba(240,186,74,0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(chosenRect.x, chosenRect.y, chosenRect.w, chosenRect.h);
+  }
+  ctx.restore();
+  drawRaidContractSealStamp(ctx, chosenRect, chosen, reduce ? 0.7 : progress, reduce);
 }
 
 /** 봉우리 셋 달린 왕관. 지도의 스테이지 우두머리 칸에만 씌운다. */
@@ -4008,6 +4425,32 @@ function drawButton(
   s: RunState,
 ): void {
   const openBoss = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+
+  if (s.phase === "map" && s.raidOffers.length > 0) {
+    // 계약 카드는 누르는 물건인데 아래에 비활성 대형 버튼을 한 번 더 그리면
+    // 사용자는 먼저 그 버튼을 살리려 한다. 같은 기하 예산에는 입력 안내만 남긴다.
+    const guide = raidContractGuideGeometry(L, s.raidOffers.length);
+    const keySize = guide.keys[0]?.w ?? 24;
+    drawPanelDivider(ctx, L.button.x, guide.dividerY, L.button.w);
+    uiText(ctx, "카드를 누르거나", guide.labelRightX, guide.cy, Math.max(12, keySize * 0.44), T.paperDim, {
+      align: "right",
+      weight: 700,
+      maxWidth: Math.max(80, L.button.w * 0.38),
+    });
+    guide.keys.forEach((keyRect, i) => {
+      roundRect(ctx, keyRect, keySize * 0.22);
+      ctx.fillStyle = "rgba(239,224,198,0.06)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(239,224,198,0.28)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      uiText(ctx, `${i + 1}`, keyRect.x + keyRect.w / 2, keyRect.y + keyRect.h / 2, Math.max(12, keySize * 0.46), T.action, {
+        align: "center",
+        weight: 900,
+      });
+    });
+    return;
+  }
 
   // 보드·정보 띠와 행동 구역의 경계. 실제 버튼 기하는 바꾸지 않아 히트테스트와 같다.
   drawPanelDivider(ctx, L.button.x, L.button.y - L.actionGap / 2, L.button.w);
@@ -4970,6 +5413,7 @@ export function render(
   drag: DragState,
   hoverCell: number,
 ): void {
+  watchRaidContractChoice(s);
   drawBackground(ctx, L, s);
   drawArena(ctx, L);
   drawHud(ctx, L, s);
@@ -5001,6 +5445,7 @@ export function render(
     drawMap(ctx, L, s, drag);
     drawNotice(ctx, L, s);
     drawButton(ctx, L, s);
+    drawRaidContractChoiceFeedback(ctx, L);
     watchTransitions(s);
     drawCurtain(ctx, L);
     return;
@@ -5093,6 +5538,7 @@ export function render(
   // 덮어서, 유일하게 누를 수 있는 물건이 비활성처럼 보였다.
   drawGameOver(ctx, L, s);
   drawButton(ctx, L, s);
+  drawRaidContractChoiceFeedback(ctx, L);
   // 막은 맨 위다. 아래에 무엇이 있든 전환이 전환으로 읽혀야 한다.
   watchTransitions(s);
   drawCurtain(ctx, L);

@@ -32,6 +32,7 @@ import {
   nearestMapNode,
   openMapNodeRects,
   raidContractCardGeometry,
+  raidContractGuideGeometry,
   raidContractRects,
   raidContractChipGeometry,
   splitButton,
@@ -51,6 +52,7 @@ const DEVICES = [
   ["iPad 세로", 768, 1024],
   ["데스크톱", 1440, 800],
   ["데스크톱 와이드", 1920, 1080],
+  ["사용자 캡처", 1901, 891],
   ["극단 세로", 320, 900],
   ["극단 가로", 1200, 300],
   ["599px 계약 경계", 599, 359],
@@ -252,66 +254,131 @@ function inspectContractLayout(w, h) {
     : card.x - (cards[i].x + cards[i].w));
   const rhythm = cardGaps.every((gap) => gap + 0.5 >= (stacked || L.w < 600 ? 12 : 20));
   const compactHeight = !stacked || cards.every((card) => card.h >= 112);
-  const bounded = stacked || cards.every((card) => card.w <= 420.5 && card.h <= 440.5);
+  const bounded = cards.every((card) => card.w <= 420.5 && card.h <= 360.5);
   const header = cards.every((card) => {
-    const g = raidContractCardGeometry(card, L.h < 380 || card.h < 140 || card.w < 160);
-    if (g.compactHeader) return true;
-    const maxTitleW = Math.max(...RAID_CONTRACT_POOL.map((contract) => [...contract.name].length)) * g.titleSize * 0.92;
-    const numberRight = card.x + g.pad + g.bodySize * 0.92;
-    const titleLeft = card.x + card.w / 2 - maxTitleW / 2;
-    const titleRight = card.x + card.w / 2 + maxTitleW / 2;
-    const riskLeft = card.x + card.w - g.pad - Math.max(g.bodySize * 5.1, g.bodySize * 0.92 * 5);
-    return titleLeft + 0.5 >= numberRight + 8 && titleRight + 8 <= riskLeft + 0.5;
+    const compactCard = L.h < 380 || card.h <= 168 || card.w <= 280;
+    const g = raidContractCardGeometry(card, compactCard);
+    const regionsInside = [g.titleRect, g.riskSealRect, ...(g.keyBadgeRect ? [g.keyBadgeRect] : [])].every((region) =>
+      region.x >= g.headerRect.x - 0.5 &&
+      region.y >= g.headerRect.y - 0.5 &&
+      region.x + region.w <= g.headerRect.x + g.headerRect.w + 0.5 &&
+      region.y + region.h <= g.headerRect.y + g.headerRect.h + 0.5,
+    );
+    const compactRows = g.compactHeader && g.keyBadgeRect === null &&
+      g.titleRect.y + g.titleRect.h <= g.riskSealRect.y + 0.5;
+    const titleEndsBeforeSeal = g.titleRect.x + g.titleRect.w + 12 <= g.riskSealRect.x + 0.5;
+    const titleStartsAfterKey = g.keyBadgeRect === null || g.titleRect.x >= g.keyBadgeRect.x + g.keyBadgeRect.w + 12 - 0.5;
+    const wideRow = !g.compactHeader && titleEndsBeforeSeal && titleStartsAfterKey;
+    const titlesFit = RAID_CONTRACT_POOL.every((contract, index) => {
+      const rawTitle = g.narrow ? `${index + 1}` : g.keyBadgeRect ? contract.name : `${index + 1} ${contract.name}`;
+      const line = wrapLines(contractCtx, rawTitle, g.titleSize, 900, g.titleRect.w, 1)[0] ?? rawTitle;
+      const fits = contractCtx.measureText(line).width <= g.titleRect.w + 0.5;
+      return fits && (g.compactHeader || !line.endsWith("…"));
+    });
+    return g.titleSize >= 16 && regionsInside && (compactRows || wideRow) && titlesFit;
+  });
+  const bands = cards.every((card) => {
+    const compactCard = L.h < 380 || card.h <= 168 || card.w <= 280;
+    const g = raidContractCardGeometry(card, compactCard);
+    const regions = [g.headerRect, ...(g.riskRect ? [g.riskRect] : []), g.ruleRect, g.counterRect, g.footerRect];
+    const regionInside = regions.every((region) =>
+      region.x >= card.x + g.pad - 0.5 &&
+      region.y >= card.y + g.pad - 0.5 &&
+      region.x + region.w <= card.x + card.w - g.pad + 0.5 &&
+      region.y + region.h <= card.y + card.h - g.pad + 0.5 &&
+      region.w > 0 && region.h > 0,
+    );
+    const ordered = regions.slice(1).every((region, index) => region.y >= regions[index].y + regions[index].h - 0.5);
+    const gaps = regions.slice(1).map((region, index) => region.y - (regions[index].y + regions[index].h));
+    const biggestGap = Math.max(0, ...gaps);
+    const usedH = regions.reduce((sum, region) => sum + region.h, 0);
+    const innerH = card.h - g.pad * 2;
+    return regionInside && ordered && biggestGap <= 24 && usedH / innerH >= 0.75 && g.bodySize >= 12;
   });
   const footer = cards.every((card) => {
-    const g = raidContractCardGeometry(card, L.h < 380 || card.h < 140 || card.w < 160);
+    const g = raidContractCardGeometry(card, L.h < 380 || card.h <= 168 || card.w <= 280);
     const keyInside = g.keyRect === null || (
       g.keyRect.x >= card.x && g.keyRect.y >= card.y &&
       g.keyRect.x + g.keyRect.w <= card.x + card.w + 0.5 &&
       g.keyRect.y + g.keyRect.h <= card.y + card.h + 0.5
     );
-    return g.contentBottomY + 8 <= g.footerLineY && keyInside && g.rewardMaxWidth >= (g.keyRect === null ? 52 : 60);
+    return g.contentBottomY <= g.footerLineY + 0.5 && keyInside && g.rewardMaxWidth >= (g.keyRect === null ? 52 : 48);
   });
   const copyVisible = cards.every((card) => RAID_CONTRACT_POOL.every((contract) => {
-    const compactCard = L.h < 380 || card.h < 140 || card.w < 160;
+    const compactCard = L.h < 380 || card.h <= 168 || card.w <= 280;
     const g = raidContractCardGeometry(card, compactCard);
-    const contentW = card.w - g.pad * 2;
-    const lines = [
-      ...wrapLines(contractCtx, `규칙 · ${contract.rule}`, g.bodySize, 400, contentW, g.maxLines),
-      ...wrapLines(contractCtx, `대응 · ${contract.counter}`, g.bodySize, 800, contentW, g.maxLines),
-    ];
-    const mayEllipsize = L.h < 380 || card.w < 160;
-    return mayEllipsize || lines.every((line) => !line.endsWith("…"));
+    const sidePad = g.ultraCompact ? 5 : Math.max(7, g.pad * 0.65);
+    const ruleW = g.ruleRect.w - sidePad * 2;
+    const counterW = g.counterRect.w - sidePad * 2;
+    const inlineRule = g.ultraCompact || g.ruleRect.h < g.stackedInfoMinHeight;
+    const inlineCounter = g.ultraCompact || g.counterRect.h < g.stackedInfoMinHeight;
+    const ruleLines = wrapLines(contractCtx, inlineRule ? `보스 변화 · ${contract.rule}` : contract.rule, g.bodySize, 600, ruleW, inlineRule ? 1 : g.maxLines);
+    const ruleWidths = ruleLines.map((line) => contractCtx.measureText(line).width);
+    const counterLines = wrapLines(contractCtx, inlineCounter ? `내 대응 · ${contract.counter}` : contract.counter, g.bodySize, 800, counterW, inlineCounter ? 1 : g.maxLines);
+    const counterWidths = counterLines.map((line) => contractCtx.measureText(line).width);
+    const fitsAtTwelve = ruleWidths.every((width) => width <= ruleW + 0.5) &&
+      counterWidths.every((width) => width <= counterW + 0.5);
+    const verticalFit = [
+      [g.ruleRect, inlineRule, ruleLines.length],
+      [g.counterRect, inlineCounter, counterLines.length],
+    ].every(([rect, inline, lineCount]) => {
+      if (inline) return g.bodySize <= rect.h + 0.5;
+      const labelY = g.labelSize * 0.9 + 4;
+      const textTop = labelY + g.labelSize * 0.72 + g.bodySize * 0.72;
+      const textBottom = textTop + Math.max(0, lineCount - 1) * g.bodySize * 1.28 + g.bodySize * 0.5;
+      return labelY + g.labelSize * 0.5 <= rect.h + 0.5 && textBottom <= rect.h + 0.5;
+    });
+    const mayEllipsize = compactCard || inlineRule || inlineCounter;
+    const fullCopy = [...ruleLines, ...counterLines].every((line) => !line.endsWith("…"));
+    return fitsAtTwelve && verticalFit && (mayEllipsize || fullCopy);
   }));
-  const ok = cards.length === 3 && inside && finger && separate && rhythm && compactHeight && bounded && header && footer && copyVisible;
-  return { L, cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, footer, copyVisible, ok };
+  const guide = raidContractGuideGeometry(L, 3);
+  const cardBottom = Math.max(...cards.map((card) => card.y + card.h));
+  const guideClear = guide.dividerY >= cardBottom + 8 - 0.5 && guide.keys.every((key) =>
+    key.x >= 0 && key.y >= cardBottom && key.x + key.w <= w + 0.5 && key.y + key.h <= h + 0.5,
+  );
+  const ok = cards.length === 3 && inside && finger && separate && rhythm && compactHeight && bounded && header && bands && footer && copyVisible && guideClear;
+  return { L, cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, bands, footer, copyVisible, guideClear, ok };
 }
 
 console.log("\n첫 화면 악몽 계약 카드");
 console.log("기기               카드 w×h   배치   화면/버튼/겹침  판정");
 for (const [name, w, h] of DEVICES) {
   const result = inspectContractLayout(w, h);
-  const { cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, footer, copyVisible, ok } = result;
+  const { cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, bands, footer, copyVisible, guideClear, ok } = result;
   if (!ok) contractFailed++;
   const first = cards[0];
   console.log(
     `${name.padEnd(18)} ${String(Math.round(first.w)).padStart(4)}×${String(Math.round(first.h)).padEnd(4)} ` +
       `${(stacked ? "1열" : "3열").padEnd(4)}   ` +
-      `${inside && finger && separate && rhythm && compactHeight && bounded && header && footer && copyVisible ? "OK" : "실패"}              ${ok ? "OK" : "실패"}`,
+      `${inside && finger && separate && rhythm && compactHeight && bounded && header && bands && footer && copyVisible && guideClear ? "OK" : "실패"}              ${ok ? "OK" : "실패"}`,
   );
+  if (!ok) {
+    console.log(`  ↳ inside=${inside} finger=${finger} separate=${separate} rhythm=${rhythm} compactHeight=${compactHeight} bounded=${bounded} header=${header} bands=${bands} footer=${footer} copy=${copyVisible} guide=${guideClear}`);
+  }
 }
 
 let sweepCases = 0;
 let sweepFailed = 0;
+const sweepReasons = { inside: 0, finger: 0, separate: 0, rhythm: 0, compactHeight: 0, bounded: 0, header: 0, bands: 0, footer: 0, copyVisible: 0, guideClear: 0 };
 for (let w = 320; w <= 900; w += 20) {
   for (let h = 275; h <= 900; h += 20) {
     sweepCases++;
-    if (!inspectContractLayout(w, h).ok) sweepFailed++;
+    const result = inspectContractLayout(w, h);
+    if (!result.ok) {
+      sweepFailed++;
+      for (const key of Object.keys(sweepReasons)) if (!result[key]) sweepReasons[key]++;
+      if (sweepFailed <= 12) {
+        const first = result.cards[0];
+        console.log(`  sweep ${w}×${h} card=${Math.round(first.w)}×${Math.round(first.h)} header=${result.header} copy=${result.copyVisible}`);
+      }
+    }
   }
 }
 contractFailed += sweepFailed;
 if (sweepFailed > 0) {
   console.log(`실패 반응형 경계 sweep ${sweepFailed}/${sweepCases}건`);
+  console.log(`실패 원인 ${Object.entries(sweepReasons).filter(([, count]) => count > 0).map(([key, count]) => `${key}=${count}`).join(" · ")}`);
 }
 
 const cp = (text) => [...text].length;

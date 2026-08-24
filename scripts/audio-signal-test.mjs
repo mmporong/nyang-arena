@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { BOSS_SIGNAL_CONTRACT, createBossSignalObserver } from "../src/game/audio.ts";
+import { BOSS_SIGNAL_CONTRACT, UI_CUE_CONTRACT, createBossSignalObserver } from "../src/game/audio.ts";
 
 function zone(mode, extra = {}) {
   return { mode, ...extra };
@@ -27,6 +27,52 @@ for (let i = 0; i < names.length; i += 1) {
     assert.ok(distinctAxes >= 2, `${names[i]}와 ${names[j]}는 최소 두 축에서 달라야 한다`);
   }
 }
+
+assert.deepEqual(
+  Object.fromEntries(
+    Object.entries(UI_CUE_CONTRACT).map(([kind, spec]) => [
+      kind,
+      {
+        motif: spec.motif,
+        durationSec: spec.durationSec,
+        frequenciesHz: spec.voices.map((voice) => voice.frequencyHz),
+        offsetsSec: spec.voices.map((voice) => voice.offsetSec),
+      },
+    ]),
+  ),
+  {
+    contract: {
+      motif: "snap-stamp-approve",
+      durationSec: 0.34,
+      frequenciesHz: [1640, 110, 660, 990],
+      offsetsSec: [0, 0.045, 0.14, 0.22],
+    },
+    purchase: {
+      motif: "two-note",
+      durationSec: 0.18,
+      frequenciesHz: [660, 990],
+      offsetsSec: [0, 0.07],
+    },
+    upgrade: {
+      motif: "rising-three-note",
+      durationSec: 0.25,
+      frequenciesHz: [523, 659, 784],
+      offsetsSec: [0, 0.065, 0.13],
+    },
+  },
+  "계약·구매·강화 큐는 서로 다른 소리 문법을 유지해야 한다",
+);
+for (const [kind, spec] of Object.entries(UI_CUE_CONTRACT)) {
+  assert.ok(spec.durationSec <= 0.36, `${kind}: 선택 피드백 전체 길이는 360ms 이내`);
+  const lastVoiceEnd = Math.max(...spec.voices.map((voice) => voice.offsetSec + voice.lengthSec));
+  assert.ok(Math.abs(lastVoiceEnd - spec.durationSec) < 1e-9, `${kind}: 선언 길이와 실제 마지막 음 끝이 일치`);
+}
+assert.ok(
+  UI_CUE_CONTRACT.upgrade.voices.every(
+    (voice, index, voices) => index === 0 || voice.frequencyHz > voices[index - 1].frequencyHz,
+  ),
+  "강화 큐는 상승 3음이어야 한다",
+);
 
 const emitted = [];
 const observe = createBossSignalObserver((signal) => emitted.push(signal));

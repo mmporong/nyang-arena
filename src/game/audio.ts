@@ -66,6 +66,58 @@ const BASE_URL = import.meta.env?.BASE_URL ?? "/";
 
 export type BossSignal = "avoid" | "gather" | "vulnerable";
 
+export type UiCue = "contract" | "purchase" | "upgrade";
+
+interface UiCueVoice {
+  frequencyHz: number;
+  type: OscillatorType;
+  offsetSec: number;
+  lengthSec: number;
+  peak: number;
+  attackSec: number;
+}
+
+interface UiCueSpec {
+  /** DESIGN.md의 소리 문법을 테스트가 고정할 수 있는 짧은 식별자. */
+  motif: "snap-stamp-approve" | "two-note" | "rising-three-note";
+  durationSec: number;
+  voices: readonly UiCueVoice[];
+}
+
+/**
+ * 선택·구매 성공 피드백의 구분 계약. 모두 360ms 안에 끝나고 파일 요청을 만들지 않는다.
+ * 오프셋과 음높이를 데이터로 드러내 정적 테스트가 세 큐의 문법을 잠근다.
+ */
+export const UI_CUE_CONTRACT = {
+  contract: {
+    motif: "snap-stamp-approve",
+    durationSec: 0.34,
+    voices: [
+      { frequencyHz: 1640, type: "square", offsetSec: 0, lengthSec: 0.035, peak: 0.075, attackSec: 0 },
+      { frequencyHz: 110, type: "triangle", offsetSec: 0.045, lengthSec: 0.15, peak: 0.16, attackSec: 0.008 },
+      { frequencyHz: 660, type: "sine", offsetSec: 0.14, lengthSec: 0.12, peak: 0.1, attackSec: 0.006 },
+      { frequencyHz: 990, type: "sine", offsetSec: 0.22, lengthSec: 0.12, peak: 0.09, attackSec: 0.006 },
+    ],
+  },
+  purchase: {
+    motif: "two-note",
+    durationSec: 0.18,
+    voices: [
+      { frequencyHz: 660, type: "triangle", offsetSec: 0, lengthSec: 0.1, peak: 0.11, attackSec: 0.004 },
+      { frequencyHz: 990, type: "sine", offsetSec: 0.07, lengthSec: 0.11, peak: 0.1, attackSec: 0.004 },
+    ],
+  },
+  upgrade: {
+    motif: "rising-three-note",
+    durationSec: 0.25,
+    voices: [
+      { frequencyHz: 523, type: "triangle", offsetSec: 0, lengthSec: 0.12, peak: 0.095, attackSec: 0.004 },
+      { frequencyHz: 659, type: "triangle", offsetSec: 0.065, lengthSec: 0.12, peak: 0.1, attackSec: 0.004 },
+      { frequencyHz: 784, type: "sine", offsetSec: 0.13, lengthSec: 0.12, peak: 0.105, attackSec: 0.004 },
+    ],
+  },
+} as const satisfies Record<UiCue, UiCueSpec>;
+
 /**
  * 시제품을 분석해 얻은 구분 계약. `targetBrightnessHz`는 시제품 합성 결과의
  * 스펙트럼 중심 측정값이며 아래 오실레이터 하나의 주파수가 아니다. 현재 구현은
@@ -483,6 +535,68 @@ export function playBossSignal(signal: BossSignal): void {
     gains.push(gain);
     osc.start(voiceStart);
     osc.stop(voiceEnd);
+  }
+}
+
+/**
+ * 파일 요청 없이 합성하는 선택·구매 성공음. 실패 전이는 이 함수를 부르지 않는다.
+ * 잠금 전·음소거·숨은 탭에서는 그래프를 만들지 않으며 마지막 발진기가 끝나면
+ * 이 큐가 만든 모든 노드를 해제한다.
+ */
+export function playUiCue(kind: UiCue): void {
+  if (!ac || !master || muted || (typeof document !== "undefined" && document.hidden)) return;
+
+  const spec = UI_CUE_CONTRACT[kind];
+  const start = ac.currentTime;
+  const bus = ac.createGain();
+  bus.gain.value = 0.5;
+  bus.connect(master);
+
+  const oscillators: OscillatorNode[] = [];
+  const gains: GainNode[] = [];
+  let remaining = spec.voices.length;
+  const release = () => {
+    remaining -= 1;
+    if (remaining > 0) return;
+    for (const oscillator of oscillators) {
+      try {
+        oscillator.disconnect();
+      } catch {
+        // 이미 떼였다
+      }
+    }
+    for (const gain of gains) {
+      try {
+        gain.disconnect();
+      } catch {
+        // 이미 떼였다
+      }
+    }
+    try {
+      bus.disconnect();
+    } catch {
+      // 이미 떼였다
+    }
+  };
+
+  for (const voice of spec.voices) {
+    const oscillator = ac.createOscillator();
+    const gain = ac.createGain();
+    const voiceStart = start + voice.offsetSec;
+    const voiceEnd = voiceStart + voice.lengthSec;
+    oscillator.type = voice.type;
+    oscillator.frequency.value = voice.frequencyHz;
+    gain.gain.setValueAtTime(0.0001, voiceStart);
+    if (voice.attackSec === 0) gain.gain.setValueAtTime(voice.peak, voiceStart);
+    else gain.gain.linearRampToValueAtTime(voice.peak, voiceStart + voice.attackSec);
+    gain.gain.exponentialRampToValueAtTime(0.0001, voiceEnd);
+    oscillator.connect(gain);
+    gain.connect(bus);
+    oscillator.onended = release;
+    oscillators.push(oscillator);
+    gains.push(gain);
+    oscillator.start(voiceStart);
+    oscillator.stop(voiceEnd);
   }
 }
 

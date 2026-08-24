@@ -166,7 +166,41 @@ function assertSignalGraph(audio, context, signal, expected) {
   assert.equal(bus.disconnectCount, 1, `${signal}: bus 해제`);
 }
 
+function assertUiCueGraph(audio, context, kind, expected) {
+  const gainOffset = context.gains.length;
+  const oscillatorOffset = context.oscillators.length;
+  audio.playUiCue(kind);
+
+  const createdGains = context.gains.slice(gainOffset);
+  const bus = createdGains[0];
+  const voiceGains = createdGains.slice(1);
+  const oscillators = context.oscillators.slice(oscillatorOffset);
+
+  assert.equal(oscillators.length, expected.frequenciesHz.length, `${kind}: oscillator 수`);
+  assert.equal(voiceGains.length, expected.frequenciesHz.length, `${kind}: voice gain 수`);
+  assert.deepEqual(bus.connections, [context.gains[0]], `${kind}: bus는 master에 연결`);
+  assert.deepEqual(
+    oscillators.map((oscillator) => oscillator.frequency.value),
+    expected.frequenciesHz,
+    `${kind}: 구분 음높이`,
+  );
+
+  const firstStart = Math.min(...oscillators.flatMap((oscillator) => oscillator.starts));
+  const lastStop = Math.max(...oscillators.flatMap((oscillator) => oscillator.stops));
+  assert.ok(Math.abs(lastStop - firstStart - expected.durationSec) < 1e-9, `${kind}: 전체 길이`);
+  for (let i = 0; i < oscillators.length; i += 1) {
+    assert.deepEqual(oscillators[i].connections, [voiceGains[i]], `${kind}: oscillator는 voice gain에 연결`);
+    assert.deepEqual(voiceGains[i].connections, [bus], `${kind}: voice gain은 bus에 연결`);
+  }
+
+  for (const oscillator of oscillators) oscillator.onended();
+  for (const oscillator of oscillators) assert.equal(oscillator.disconnectCount, 1, `${kind}: oscillator 해제`);
+  for (const gain of voiceGains) assert.equal(gain.disconnectCount, 1, `${kind}: voice gain 해제`);
+  assert.equal(bus.disconnectCount, 1, `${kind}: bus 해제`);
+}
+
 globalThis.document = {
+  hidden: false,
   createElement(name) {
     assert.equal(name, "audio");
     return { canPlayType: () => "probably" };
@@ -199,6 +233,9 @@ try {
   audio.playBossSignal("gather");
   audio.playBossSignal("vulnerable");
   audio.setAudioVisibility(true);
+  audio.playUiCue("contract");
+  audio.playUiCue("purchase");
+  audio.playUiCue("upgrade");
   assert.equal(FakeAudioContext.instances.length, 0, "잠금 전에는 AudioContext를 만들지 않는다");
 
   audio.unlockAudio();
@@ -211,12 +248,29 @@ try {
   assertSignalGraph(audio, context, "avoid", { voices: 2, durationSec: 0.3, attackMs: 0 });
   assertSignalGraph(audio, context, "gather", { voices: 2, durationSec: 0.6, attackMs: 246 });
   assertSignalGraph(audio, context, "vulnerable", { voices: 4, durationSec: 0.9, attackMs: 3 });
+  assertUiCueGraph(audio, context, "contract", {
+    frequenciesHz: [1640, 110, 660, 990],
+    durationSec: 0.34,
+  });
+  assertUiCueGraph(audio, context, "purchase", { frequenciesHz: [660, 990], durationSec: 0.18 });
+  assertUiCueGraph(audio, context, "upgrade", { frequenciesHz: [523, 659, 784], durationSec: 0.25 });
+
+  globalThis.document.hidden = true;
+  const hiddenNodeCount = nodeCount(context);
+  audio.playUiCue("contract");
+  audio.playUiCue("purchase");
+  audio.playUiCue("upgrade");
+  assert.equal(nodeCount(context), hiddenNodeCount, "숨은 탭에서는 UI 큐 노드를 만들지 않는다");
+  globalThis.document.hidden = false;
 
   assert.equal(audio.toggleMute(), true, "toggleMute로 음소거한다");
   const mutedNodeCount = nodeCount(context);
   audio.playBossSignal("avoid");
   audio.playBossSignal("gather");
   audio.playBossSignal("vulnerable");
+  audio.playUiCue("contract");
+  audio.playUiCue("purchase");
+  audio.playUiCue("upgrade");
   assert.equal(nodeCount(context), mutedNodeCount, "음소거 중에는 신호 노드를 만들지 않는다");
 
   context.suspendBehavior = "reject";
