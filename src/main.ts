@@ -5,6 +5,7 @@ import {
   gameoverGeometry,
   mapNodeRects,
   offerRects,
+  raidContractRects,
   render,
   rerollRect,
   spawnBuyTween,
@@ -14,6 +15,8 @@ import {
 import {
   buyOffer,
   chooseNode,
+  chooseRaidContract,
+  chooseSharedRaidContract,
   leaveShop,
   mapStep,
   moveCat,
@@ -25,6 +28,8 @@ import {
   type NextChoice,
   type RunState,
 } from "./game/run.ts";
+import { parseRaidSeed, parseRaidShareCode, raidRiskLabel, raidShareCode } from "./game/raid.ts";
+import { RAID_CONTRACT_POOL_STATUS } from "./validate/raid-contract-schema.ts";
 import { openLanes } from "./game/map.ts";
 import { cellToField, type Intervention } from "./game/types.ts";
 import { loadSprites } from "./game/sprites.ts";
@@ -46,10 +51,61 @@ if (!app) throw new Error("#app를 찾을 수 없습니다");
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 if (!ctx) throw new Error("2D 캔버스를 만들 수 없습니다");
+canvas.tabIndex = 0;
+canvas.setAttribute("role", "application");
+canvas.setAttribute("aria-label", "냥 아레나 게임 화면");
 app.appendChild(canvas);
 
+// 계약은 Canvas에 그리지만 의미 구조까지 픽셀에 가두지 않는다. Tab으로 들어오면
+// 같은 세 선택지가 실제 버튼으로 나타나고, 스크린리더도 규칙·대응·보상을 읽는다.
+const raidA11yControls = document.createElement("section");
+raidA11yControls.className = "raid-a11y-controls";
+raidA11yControls.hidden = true;
+raidA11yControls.setAttribute("aria-label", "악몽 계약 선택");
+const raidA11yLead = document.createElement("p");
+raidA11yLead.setAttribute("aria-live", "polite");
+raidA11yLead.setAttribute("aria-atomic", "true");
+raidA11yControls.appendChild(raidA11yLead);
+const raidA11yButtons = Array.from({ length: 3 }, (_, index) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute("aria-keyshortcuts", String(index + 1));
+  button.addEventListener("click", () => {
+    selectRaidContract(index);
+    canvas.focus();
+  });
+  raidA11yControls.appendChild(button);
+  return button;
+});
+app.appendChild(raidA11yControls);
+
+if (RAID_CONTRACT_POOL_STATUS.usingFallback) {
+  console.warn("악몽 계약 출고 풀 거절 — 안전 계약 세 장으로 폴백", RAID_CONTRACT_POOL_STATUS);
+}
+
 let layout: Layout = computeLayout(800, 600);
-let state: RunState = newRun();
+const initialUrl = new URL(location.href);
+const initialRaidRaw = initialUrl.searchParams.get("raid");
+const initialSeedRaw = initialUrl.searchParams.get("seed");
+const initialRaid = parseRaidShareCode(initialRaidRaw);
+const initialSeed = initialRaid?.seed ?? parseRaidSeed(initialSeedRaw);
+let state: RunState = newRun(initialSeed ?? undefined);
+if (initialRaid) {
+  chooseSharedRaidContract(state, initialRaid.contractId);
+  // 공유 주소가 우선한다. 두 시드 표현을 남겨 모순된 링크를 만들지 않는다.
+  if (initialSeedRaw) {
+    initialUrl.searchParams.delete("seed");
+    history.replaceState(null, "", initialUrl);
+  }
+} else if (initialRaidRaw) {
+  // 잘못된 공유 코드는 새 런으로 안전하게 폴백하고 주소에서도 걷어 낸다.
+  initialUrl.searchParams.delete("raid");
+  history.replaceState(null, "", initialUrl);
+}
+if (initialSeedRaw && parseRaidSeed(initialSeedRaw) === null) {
+  initialUrl.searchParams.delete("seed");
+  history.replaceState(null, "", initialUrl);
+}
 const drag: DragState = { active: false, fromCell: -1, x: 0, y: 0, pointerId: -1, hoverX: -1, hoverY: -1 };
 let hoverCell = -1;
 
@@ -91,6 +147,8 @@ interface Telemetry {
   firstBossAt: number | null;
   /** 첫 개입(회피·모임·약점)까지. 이게 곧 "게임이 시작된 순간"이다. */
   firstInterventionAt: number | null;
+  /** 첫 화면의 계약을 고르기까지 걸린 시간. 5초 비교 목표의 실제 플레이 근거. */
+  firstContractAt: number | null;
   /** 국면별 누적 시간(ms). 어디에 시간을 쓰는지가 여기서 드러난다. */
   phaseMs: Record<string, number>;
 }
@@ -106,6 +164,7 @@ function freshTelemetry(): Telemetry {
     wave: 1,
     firstBossAt: null,
     firstInterventionAt: null,
+    firstContractAt: null,
     phaseMs: { prepare: 0, battle: 0, reward: 0, map: 0, gameover: 0 },
   };
 }
@@ -120,6 +179,50 @@ function markIntervention(): void {
   if (telem.firstInterventionAt === null) {
     telem.firstInterventionAt = Math.round(performance.now() - telem.startedAt);
   }
+}
+
+function syncRaidUrl(): void {
+  // 공유 코드는 첫 보스 계약을 재현하는 NA1 포맷이다. 이후 보스 계약으로
+  // 주소를 덮어쓰면 새 탭에서 그 계약이 첫 보스에 적용되어 의미가 달라진다.
+  if (!state.raidContract || state.raidTargetBossIndex !== 0) return;
+  const url = new URL(location.href);
+  url.searchParams.delete("seed");
+  url.searchParams.set("raid", raidShareCode(state.seed, state.raidContract.id));
+  history.replaceState(null, "", url);
+}
+
+function selectRaidContract(idx: number): boolean {
+  if (!chooseRaidContract(state, idx)) return false;
+  if (telem.firstContractAt === null) {
+    telem.firstContractAt = Math.round(performance.now() - telem.startedAt);
+  }
+  syncRaidUrl();
+  return true;
+}
+
+let raidA11ySignature = "";
+function syncRaidAccessibility(): void {
+  const offers = state.phase === "map" ? state.raidOffers : [];
+  const signature = offers.map((contract) => contract.id).join("|");
+  if (signature === raidA11ySignature) return;
+  raidA11ySignature = signature;
+
+  if (offers.length === 0) {
+    if (raidA11yControls.contains(document.activeElement)) canvas.focus();
+    raidA11yControls.hidden = true;
+    canvas.setAttribute("aria-label", "냥 아레나 게임 화면");
+    return;
+  }
+
+  raidA11yControls.hidden = false;
+  raidA11yLead.textContent = "다음 보스의 악몽 계약 하나를 고르세요. 숫자 1, 2, 3도 사용할 수 있습니다.";
+  canvas.setAttribute("aria-label", "악몽 계약 선택 화면. Tab 키로 계약 세 개를 비교할 수 있습니다.");
+  raidA11yButtons.forEach((button, index) => {
+    const contract = offers[index];
+    button.hidden = !contract;
+    if (!contract) return;
+    button.textContent = `${index + 1}. ${contract.name} · 위험 ${raidRiskLabel(contract.risk)} · 규칙 ${contract.rule} · 대응 ${contract.counter} · 승리 보상 생선 +${contract.rewardFish}`;
+  });
 }
 
 Object.defineProperty(window, "nyangTelemetry", {
@@ -239,6 +342,9 @@ function onPrimaryAction(): void {
 function startNextRun(choice: NextChoice): void {
   clearBattleFx();
   state = nextRunFrom(state, choice);
+  const url = new URL(location.href);
+  url.searchParams.delete("raid");
+  history.replaceState(null, "", url);
   playSting("title");
 }
 
@@ -376,6 +482,17 @@ canvas.addEventListener("pointerdown", (e) => {
   }
 
   if (state.phase === "map") {
+    if (state.raidOffers.length > 0) {
+      const cards = raidContractRects(layout, state.raidOffers.length);
+      for (let i = 0; i < cards.length; i++) {
+        const card = cards[i];
+        if (card && rectHas(card, x, y)) {
+          selectRaidContract(i);
+          return;
+        }
+      }
+      return;
+    }
     for (const n of mapNodeRects(layout, state)) {
       if (n.step !== mapStep(state)) continue;
       // 원 안쪽만 받는다. 사각 판정으로 두면 붙어 있는 칸끼리 모서리가 겹친다.
@@ -585,6 +702,10 @@ window.addEventListener("keydown", (e) => {
         return;
       }
       if (state.phase === "map") {
+        if (state.raidOffers.length > 0) {
+          selectRaidContract(slot);
+          return;
+        }
         // 지도에서는 고를 수 있는 칸만 순서대로 센다. 갈 수 없는 칸을 세면
         // 번호가 화면과 어긍난다.
         const step = mapStep(state);
@@ -622,7 +743,22 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       stage: state.map.stage,
       lanes: (state.map.steps[state.step] ?? []).map((n) => n.kind),
       nodeKind: state.nodeKind,
+      raidOffers: state.raidOffers.map((contract) => ({
+        id: contract.id,
+        name: contract.name,
+        risk: contract.risk,
+        rewardFish: contract.rewardFish,
+      })),
+      raidContract: state.raidContract
+        ? {
+            id: state.raidContract.id,
+            name: state.raidContract.name,
+            share: raidShareCode(state.seed, state.raidContract.id),
+          }
+        : null,
+      raidContractPool: RAID_CONTRACT_POOL_STATUS,
       offers: state.offers.map((o) => (o ? { label: o.label, cost: o.cost } : null)),
+      relicDraft: { pending: state.relicDraftPending, active: state.relicDraftActive },
       // 유물은 측정에서 가장 깊은 축이라 밖에서 상태를 볼 수 있어야 한다.
       // 제출용 스크린샷을 "유물을 든 상태"로 잡는 데도 이게 필요했다.
       relics: state.relics.map((r) => r.name),
@@ -685,6 +821,7 @@ function frame(now: number): void {
     bosses: state.enemy,
   });
   setBed(musicFor(state));
+  syncRaidAccessibility();
   render(ctx!, layout, state, drag, hoverCell);
   /**
    * 탭이 숨겨지면 루프를 세운다. 브라우저는 숨은 탭의 rAF를 1fps 안팎으로 줄이는데, 그 틈에

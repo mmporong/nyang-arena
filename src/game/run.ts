@@ -4,6 +4,7 @@ import {
   BOSSES_PER_STAGE,
   bossOrdinalInStage,
   isBossStep,
+  isRaidPrepStep,
   makeStage,
   openLanes,
   STAGE_STEPS,
@@ -13,6 +14,8 @@ import {
 import { mixSeed, seedRng, shuffle } from "./rng.ts";
 import { BREEDS, NIGHTMARE_BREEDS, breedById } from "./breeds.ts";
 import { BOSS_BREEDS, BOSS_RADIUS, bossForIndex, bossKit, SNIPER_BREED, SNIPER_RADIUS } from "./bosses.ts";
+import { raidContractById, raidContractOffers, raidPrepRoute } from "./raid.ts";
+import type { RaidContract } from "../validate/raid-contract-schema.ts";
 import {
   type Intervention,
   BOARD_COLS,
@@ -123,6 +126,10 @@ export interface RunState {
   actCooldown: number;
   /** 이번 런에서 모은 유물. 조건을 채운 것만 보너스가 붙고 대가는 항상 붙는다. */
   relics: Relic[];
+  /** 보스를 이겨 다음 보상 화면에서 전용 유물 드래프트를 먼저 열어야 하는가. */
+  relicDraftPending: boolean;
+  /** 현재 보상 카드 세 장이 일반 상점이 아니라 유물 택1 묶음인가. */
+  relicDraftActive: boolean;
   /**
    * 이번 전투에만 존재하는 소환수. 전투가 끝나면 통째로 비운다.
    *
@@ -184,26 +191,30 @@ export interface RunState {
    */
   finalPhaseUsed: boolean;
 
-  /**
-   * 여정 지도.
-   *
-   * 걸음 번호를 따로 두지 않는다 — `wave`에서 뽑는다. 둘을 각각 들고 있으면
-   * 언젠가 어긋나고, 어긋나면 보스가 지도에 없는 자리에서 튀어나온다.
-   * 그래서 걸음 = (wave-1) % STAGE_STEPS, 스테이지 = floor((wave-1)/6)+1이다.
-   */
+  /** 현재 여정 지도. stage·step·wave의 정합은 invariants가 매 전이에서 검사한다. */
   map: StageMap;
   /**
    * 지도에서 몇 번째 걸음인가(0..STAGE_STEPS-1).
    *
-   * `wave`에서 뽑던 것을 갈라냈다. **wave는 싸운 횟수**(난이도 시계이자 점수)고
-   * **step은 지도 위의 위치**다. 상점 칸은 걸음만 먹고 웨이브는 안 먹는다 —
-   * 붙여 두면 상점이 위험 없이 점수를 올려서 언제나 최선이 된다(측정에서
-   * 상점 몰빵이 전투만보다 1.3웨이브 앞섰다. 그건 선택이 아니라 정답이다).
+   * `wave`에서 뽑던 것을 갈라냈다. **wave는 난이도 시계이자 점수**고
+   * **step은 지도 위의 위치**다. 전투는 승리할 때, 정찰은 선택 즉시 wave를
+   * 하나 넘긴다. 둘을 따로 둬야 지도 위치와 난이도 시계가 각자의 이유로 움직인다.
    */
   step: number;
   /** 이번 걸음에 고른 칸의 성격. 적 편성과 회피 횟수가 이걸 본다. */
   nodeKind: NodeKind | null;
   nodeWave: WaveKind | null;
+  /** 첫 화면과 보스 처치 직후에 고를, 다음 보스의 검증된 계약 세 장. */
+  raidOffers: readonly RaidContract[];
+  /** 다음 보스에 적용할 계약. 일반전 사이에도 유지되어 구매·배치의 근거가 된다. */
+  raidContract: RaidContract | null;
+  /** 계약을 선택할 때 고정한 대상 보스 인덱스. 다른 보스에 잘못 적용되지 않게 한다. */
+  raidTargetBossIndex: number;
+  /** 가장 최근에 끝난 보스 계약. 승리 뒤 계약을 비워도 부검·기록에 남긴다. */
+  lastRaidContract: RaidContract | null;
+  /** 이번 런에서 계약 보스를 이긴 횟수와 그로 얻은 추가 생선. */
+  raidContractsWon: number;
+  raidBonusFish: number;
   /** 상점 노드가 주는 무료 재추첨. 생선을 안 쓰고 카드를 더 본다. */
   freeRerolls: number;
   /**
@@ -215,8 +226,6 @@ export interface RunState {
    * 판단이 된다.
    */
   bonusDodge: number;
-  /** 다음 카드 묶음에 유물을 반드시 한 장 섞는다. 정예 보상. */
-  forceRelic: boolean;
   /** 마지막에 나를 막은 것. 보스면 이름과 남은 체력이 함께 뜬다. */
   killer: { name: string; hpFrac: number; boss: boolean } | null;
   /**
@@ -379,8 +388,8 @@ export function mapStep(state: RunState): number {
  *
  * 보스 자리는 걸음이 정하고(세 걸음마다), 나머지 걸음의 성격은 고른 칸에서 온다.
  *
- * **웨이브 번호는 여기에 못 들어온다.** 상점 칸이 걸음만 먹고 웨이브는 안 먹으므로
- * 둘은 반드시 갈라지고, 갈라지면 보스가 지도에 없는 자리에서 튀어나온다.
+ * **웨이브 번호는 여기에 못 들어온다.** 정찰도 난이도 시계를 넘기므로 현재는
+ * step과 함께 움직이지만, 전투 성격의 출처는 플레이어가 고른 지도 칸이어야 한다.
  * 이 게임에서 "지금 무엇과 싸우는가"의 유일한 답이 이 함수다.
  */
 export function currentKind(state: RunState): WaveKind {
@@ -399,6 +408,94 @@ export function currentKind(state: RunState): WaveKind {
  */
 export function bossIndexAt(state: RunState, step: number = state.step): number {
   return (state.map.stage - 1) * BOSSES_PER_STAGE + Math.max(0, bossOrdinalInStage(step));
+}
+
+export interface RaidBossTarget {
+  stage: number;
+  step: number;
+  index: number;
+  name: string;
+}
+
+/** 지금 위치에서 다음으로 만날 보스. 스테이지 경계도 넘겨 계산한다. */
+export function nextRaidBossTarget(state: Pick<RunState, "map" | "step">): RaidBossTarget {
+  let stage = state.map.stage;
+  let step = state.step;
+  while (step < STAGE_STEPS && !isBossStep(step)) step += 1;
+  if (step >= STAGE_STEPS) {
+    stage += 1;
+    step = 0;
+    while (!isBossStep(step)) step += 1;
+  }
+  const index = (stage - 1) * BOSSES_PER_STAGE + bossOrdinalInStage(step);
+  return { stage, step, index, name: bossForIndex(index).name };
+}
+
+/** 다음 보스의 세 계약을 열되, 이미 선택했거나 열려 있으면 난수를 다시 굴리지 않는다. */
+export function openNextRaidContracts(state: RunState): void {
+  if (state.raidContract || state.raidOffers.length > 0) return;
+  const target = nextRaidBossTarget(state);
+  state.raidTargetBossIndex = target.index;
+  state.raidOffers = raidContractOffers(state.seed, target.index);
+}
+
+/** 화면과 헤드리스가 함께 쓰는 계약 선택 전이. */
+export function chooseRaidContract(state: RunState, idx: number): boolean {
+  if (state.phase !== "map") return false;
+  const contract = state.raidOffers[idx];
+  if (!contract) return false;
+  state.raidContract = contract;
+  state.raidTargetBossIndex = nextRaidBossTarget(state).index;
+  state.raidOffers = [];
+  setNotice(state, `${contract.name} — ${nextRaidBossTarget(state).name}에게 추가 생선 +${contract.rewardFish}`);
+  return true;
+}
+
+/** 공유 URL이 가리킨 첫 계약. 출고 풀의 id만 허용하고 첫 보스에 고정한다. */
+export function chooseSharedRaidContract(state: RunState, id: string): boolean {
+  if (state.phase !== "map") return false;
+  const contract = raidContractById(id);
+  if (!contract) return false;
+  state.raidContract = contract;
+  state.raidTargetBossIndex = nextRaidBossTarget(state).index;
+  state.raidOffers = [];
+  setNotice(state, `공유 악몽 ${contract.name} — 같은 규칙으로 도전합니다`);
+  return true;
+}
+
+/** 현재 전투 보스에 실제로 적용 가능한 계약만 돌려준다. */
+export function activeRaidContract(state: RunState): RaidContract | null {
+  if (state.nodeKind !== "boss" || !state.raidContract) return null;
+  return state.raidTargetBossIndex === bossIndexAt(state) ? state.raidContract : null;
+}
+
+/** 현재 계약 보스 두 걸음 전의 추천 경로를 실제로 밟았는가. */
+export function raidPrepMatched(state: RunState): boolean {
+  const contract = state.raidContract;
+  const prepStep = state.step - 2;
+  if (!contract || prepStep < 0 || !isRaidPrepStep(prepStep)) return false;
+  const picked = state.map.taken[prepStep];
+  if (picked === undefined || picked < 0) return false;
+  return state.map.steps[prepStep]?.[picked]?.kind === raidPrepRoute(contract);
+}
+
+/** 계약 위험과 준비 경로 일치 여부를 함께 반영한 보스 체력·광역 피해 배수. */
+export function raidBossPower(state: RunState, breedId: number): number {
+  const contract = activeRaidContract(state);
+  const power = bossKit(breedId, contract).power;
+  return contract && !raidPrepMatched(state) ? power * BALANCE.contractMismatchPower : power;
+}
+
+/**
+ * 정찰 칸이 다음 계약 보스에 가져갈 회피 횟수.
+ *
+ * 위험한 계약일수록 예고가 세고 길어지는데 모든 정찰이 회피를 주면, 계약을
+ * 읽든 말든 지도에서 할 일이 같았다. 그래서 카드가 숨 돌리기를 지시하는
+ * 고위험 계약에서만 기본 2 + 계약 대비 1, 합계 3회를 준다. 나머지는 0이다.
+ */
+export function scoutDodgeReward(state: RunState): number {
+  const matched = state.raidContract && raidPrepRoute(state.raidContract) === "shop";
+  return matched ? BALANCE.scoutDodgeBonus + BALANCE.contractPrepDodge : 0;
 }
 
 /** 이 런에서 지금까지 만난 보스 수. 난이도 램프가 이걸 본다. */
@@ -434,10 +531,21 @@ export function setNotice(state: RunState, text: string, kind: NoticeKind = "nor
  * 복리로 세지므로, 힘을 사는 동안 상대도 세진다.
  */
 export function chooseNode(state: RunState, idx: number): boolean {
+  // 계약 카드가 열려 있는 동안 지도 클릭은 뒤로 새지 않는다.
+  if (state.raidOffers.length > 0) return false;
   const step = mapStep(state);
   if (!openLanes(state.map, step).includes(idx)) return false;
   const node = state.map.steps[step]?.[idx];
   if (!node) return false;
+
+  // 저장 데이터나 테스트 픽스처에서 계약이 빠졌더라도 보스를 기본 규칙으로
+  // 조용히 시작하지 않는다. 검증된 세 장을 다시 열어 같은 전이를 복구한다.
+  if (node.kind === "boss" && (!state.raidContract || state.raidTargetBossIndex !== bossIndexAt(state))) {
+    state.raidContract = null;
+    state.raidOffers = [];
+    openNextRaidContracts(state);
+    return false;
+  }
 
   state.map.taken[step] = idx;
   state.nodeKind = node.kind;
@@ -448,14 +556,21 @@ export function chooseNode(state: RunState, idx: number): boolean {
     state.gold += BALANCE.shopNodeGold;
     state.freeRerolls += 1;
     // 환전되지 않는 자원. 이것 때문에 이 길을 고르는 것이지 생선 때문이 아니다.
-    state.bonusDodge += BALANCE.scoutDodgeBonus;
-    // 걸음만 먹고 웨이브는 그대로다. 보스는 같은 걸음에 오므로 **덜 싸운 팀으로**
-    // 보스를 만나게 된다 — 그게 안 싸우고 얻는 것의 대가다.
+    const dodgeReward = scoutDodgeReward(state);
+    // 여러 숨 돌리기를 밟아도 중첩하지 않는다. 다음 보스용 준비는 가장 좋은
+    // 하나만 남겨, 경로를 순회해 회피를 무한히 저축하는 전략을 막는다.
+    state.bonusDodge = Math.max(state.bonusDodge, dodgeReward);
+    // 싸우지 않아도 시간은 흐른다. 웨이브를 그대로 두면 적 성장도 멈춰 정찰이
+    // 생선·재추첨·회피를 공짜로 얻는 고정 정답이 된다. 한 웨이브를 넘겨 다음
+    // 적을 강하게 만드는 것이 전투를 피한 대가다.
+    state.wave += 1;
     state.step += 1;
     syncStage(state);
     rollOffers(state);
     state.phase = "reward";
-    setNotice(state, "쉬어 가는 길이에요 — 생선과 다시 뽑기를 챙겼어요");
+    setNotice(state, dodgeReward > 0
+      ? `계약 정찰 완료 — 생선·다시 뽑기 · 다음 보스 회피 +${dodgeReward}`
+      : "정찰 완료 — 생선과 다시 뽑기로 한 걸음 대비했어요");
     return true;
   }
 
@@ -472,7 +587,15 @@ export function chooseNode(state: RunState, idx: number): boolean {
   state.phase = "reward";
   // 길목은 안내를 비운다. 매 걸음 같은 말이 뜨면 글자가 배경이 되고,
   // 그러면 정작 알려야 할 때(정예·경고) 아무도 안 읽는다.
-  setNotice(state, node.kind === "elite" ? "만만치 않아요. 이기면 유물을 남기고 가요" : "");
+  const unpreparedBoss = node.kind === "boss" && activeRaidContract(state) && !raidPrepMatched(state);
+  setNotice(
+    state,
+    unpreparedBoss
+      ? `계약 대비가 어긋났어요 · 이번 보스 강도 +${Math.round((BALANCE.contractMismatchPower - 1) * 100)}%`
+      : node.kind === "elite"
+        ? "만만치 않아요. 이기면 유물을 남기고 가요"
+        : "",
+  );
   return true;
 }
 
@@ -486,8 +609,16 @@ export function chooseNode(state: RunState, idx: number): boolean {
  */
 export function leaveShop(state: RunState): void {
   if (state.phase !== "reward") return;
+  if (state.relicDraftActive) {
+    // 건너뛰어도 원래 상점은 사라지지 않는다. 택1 묶음만 닫고 같은 화면에
+    // 일반 영입·강화 카드를 연 뒤, 다음 입력에서 기존 경로 전이를 수행한다.
+    state.relicDraftActive = false;
+    rollOffers(state);
+    setNotice(state, "유물은 건너뛰었어요 · 일반 준비를 이어갑니다");
+    return;
+  }
   if (state.nodeKind === "shop") {
-    // 정찰은 걸음만 먹었다(chooseNode에서 이미 step을 넘겼다). 다음 갈림길로.
+    // 정찰은 전투 없이 걸음과 난이도 시계를 함께 넘겼다. 다음 갈림길로.
     state.phase = "map";
     setNotice(state, "");
     return;
@@ -854,6 +985,10 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /** 기기 시간 기준 오늘(YYYY-MM-DD). 오늘의 시드 키이자 표시 문구다. */
 export function dailyKeyToday(now: Date = new Date()): string {
   const y = now.getFullYear();
@@ -876,23 +1011,27 @@ export function dailySeed(key: string): number {
 }
 
 export function loadDailyBest(key: string): number {
-  const v = loadJson<Record<string, number>>(DAILY_KEY, {})[key];
+  const all = loadJson<unknown>(DAILY_KEY, {});
+  const v = isRecord(all) ? all[key] : undefined;
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
 }
 
 function saveDailyBest(key: string, v: number): void {
-  const all = loadJson<Record<string, number>>(DAILY_KEY, {});
+  const loaded = loadJson<unknown>(DAILY_KEY, {});
+  const all: Record<string, unknown> = isRecord(loaded) ? loaded : {};
   all[key] = v;
   storageSet(DAILY_KEY, JSON.stringify(all));
 }
 
 export function loadChallengeBest(level: number): number {
-  const v = loadJson<Record<string, number>>(CHALLENGE_KEY, {})[String(level)];
+  const all = loadJson<unknown>(CHALLENGE_KEY, {});
+  const v = isRecord(all) ? all[String(level)] : undefined;
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0;
 }
 
 function saveChallengeBest(level: number, v: number): void {
-  const all = loadJson<Record<string, number>>(CHALLENGE_KEY, {});
+  const loaded = loadJson<unknown>(CHALLENGE_KEY, {});
+  const all: Record<string, unknown> = isRecord(loaded) ? loaded : {};
   all[String(level)] = v;
   storageSet(CHALLENGE_KEY, JSON.stringify(all));
 }
@@ -912,7 +1051,8 @@ export const CODEX_TOTALS = {
 } as const;
 
 export function loadCodex(): Codex {
-  const c = loadJson<Partial<Codex>>(CODEX_KEY, {});
+  const loaded = loadJson<unknown>(CODEX_KEY, {});
+  const c = isRecord(loaded) ? loaded : {};
   return {
     breeds: Array.isArray(c.breeds) ? c.breeds.filter((v): v is number => typeof v === "number") : [],
     relics: Array.isArray(c.relics) ? c.relics.filter((v): v is string => typeof v === "string") : [],
@@ -1061,9 +1201,14 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
     step: 0,
     nodeKind: null,
     nodeWave: null,
+    raidOffers: [],
+    raidContract: null,
+    raidTargetBossIndex: -1,
+    lastRaidContract: null,
+    raidContractsWon: 0,
+    raidBonusFish: 0,
     freeRerolls: 0,
     bonusDodge: 0,
-    forceRelic: false,
     killer: null,
     kind,
     challenge,
@@ -1080,6 +1225,8 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
     dodgeCharges: 0,
     actCooldown: 0,
     relics: [],
+    relicDraftPending: false,
+    relicDraftActive: false,
     summons: [],
   };
 
@@ -1108,6 +1255,10 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
     const cell = startCells[i] ?? 3 + i;
     state.ally[cell] = makeCat(b, "ally", cell);
   });
+
+  // 제출 버전의 차별점은 첫 화면에서 보인다. 첫 보스까지 기다리지 않고 지금
+  // 계약을 고르게 하되, 실제 적용은 targetBossIndex가 같은 보스에서만 한다.
+  openNextRaidContracts(state);
 
   // 적도 카드도 여기서 만들지 않는다. `chooseNode`가 길을 고른 뒤에 만든다 —
   // 시작 화면이 지도이므로 그 전에 만들어 두면 고르기 전에 정해진 상대가 된다.
@@ -1294,7 +1445,9 @@ function buildBossWave(state: RunState, wave: number, scale: number): void {
   boss.stageBoss = bossOrdinalInStage(state.step) > 0;
   // 첫 보스는 얇게, 후반으로 갈수록 두껍게. 고정 배수는 5웨이브를 벽으로 만든다.
   const ramp = bossRampFor(state);
-  const hpMul = (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp) * bossKit(breed.id).power;
+  const hpMul =
+    (BALANCE.bossHpMulFirst + (BALANCE.bossHpMul - BALANCE.bossHpMulFirst) * ramp) *
+    raidBossPower(state, breed.id);
   boss.maxHp = Math.round(boss.maxHp * scale * hpMul);
   boss.hp = boss.maxHp;
   // 평타도 체력과 같은 램프를 탄다. 고정값이면 첫 보스가 벽이 되고, 그러면
@@ -1496,6 +1649,27 @@ export function applySynergies(state: RunState): void {
 export const OFFER_SLOTS = 3;
 
 export function rollOffers(state: RunState): void {
+  if (state.relicDraftPending) {
+    state.relicDraftPending = false;
+    const ownedRelics = new Set(state.relics.map((relic) => relic.id));
+    const picks = shuffle(RELICS.filter((relic) => !ownedRelics.has(relic.id))).slice(0, OFFER_SLOTS);
+    if (picks.length === OFFER_SLOTS) {
+      // 보스 직후의 유물 선택을 지도 칸의 종류나 wave 증가 순서에 기대면
+      // 일반/정예에는 뜨고 정찰에는 안 뜨는 식으로 갈라진다. pending 사건을
+      // 첫 보상 화면이 소비하게 해 세 경로가 정확히 같은 선택권을 받는다.
+      state.relicDraftActive = true;
+      state.offers = picks.map((relic) => ({
+        kind: "relic",
+        cost: relic.cost,
+        relic,
+        label: relic.name,
+        sublabel: relic.want,
+      }));
+      return;
+    }
+  }
+
+  state.relicDraftActive = false;
   const offers: Offer[] = [];
   const owned = state.ally.filter((c): c is Cat => c !== null);
   // 빈 칸이 아니라 보유 한도로 판단한다. 5x5에는 칸이 늘 남아 있다.
@@ -1561,27 +1735,6 @@ export function rollOffers(state: RunState): void {
     });
   }
 
-  // 유물을 한 장 섞는다.
-  //
-  // 웨이브 3부터, 그리고 **세 웨이브에 한 번만** 나온다. 매 웨이브 내면 슬롯
-  // 하나를 상시로 먹어 정상 구매를 밀어낸다 — 측정에서 유물을 안 사는 봇의
-  // 평균이 12.9에서 8.6으로 떨어졌다. 유물은 가끔 오는 큰 결정이어야 한다.
-  // 정예를 넘었으면 주기와 무관하게 한 장 낸다. 그게 정예를 고르는 이유다.
-  if (state.forceRelic || (state.wave >= 3 && state.wave % 3 === 0)) {
-    state.forceRelic = false;
-    const owned = new Set(state.relics.map((r) => r.id));
-    const pick = shuffle(RELICS.filter((r) => !owned.has(r.id)))[0];
-    if (pick) {
-      offers.splice(Math.min(offers.length, 1), 0, {
-        kind: "relic",
-        cost: pick.cost,
-        relic: pick,
-        label: pick.name,
-        sublabel: pick.want,
-      });
-    }
-  }
-
   // 슬롯은 늘 세 칸. 모자라면 빈 칸으로 채운다.
   state.offers = Array.from({ length: OFFER_SLOTS }, (_, i) => offers[i] ?? null);
 }
@@ -1623,8 +1776,19 @@ export function buyOffer(state: RunState, offer: Offer): boolean {
   }
 
   state.gold -= offer.cost;
-  state.offers = state.offers.map((o) => (o === offer ? null : o));
+  const completedRelicDraft = state.relicDraftActive && offer.kind === "relic";
+  // 유물 세 장은 드래프트다. 하나를 고른 뒤 다른 유물까지 연달아 사면
+  // "택1"이 아니라 할인 상점이 되므로 같은 묶음의 유물 카드를 모두 닫는다.
+  state.offers = state.offers.map((o) =>
+    o === offer || (offer.kind === "relic" && o?.kind === "relic") ? null : o,
+  );
   applySynergies(state);
+  if (completedRelicDraft) {
+    // 택1을 끝낸 즉시 같은 보상 화면에 원래 영입·강화 세 장을 연다. 유물
+    // 드래프트가 보스 전후의 일반 구매 기회를 빼앗지 않게 하는 핵심 전이다.
+    state.relicDraftActive = false;
+    rollOffers(state);
+  }
   return true;
 }
 
@@ -1642,6 +1806,10 @@ export function resetPositions(state: RunState): void {
 
 /** 카드를 다시 뽑는다. 생선이 모자라면 아무 일도 없다. */
 export function rerollOffers(state: RunState): boolean {
+  if (state.relicDraftActive) {
+    setNotice(state, "유물은 하나를 고르거나 건너뛰세요");
+    return false;
+  }
   // 상점 칸이 준 무료 횟수를 먼저 쓴다. 생선을 아끼는 게 아니라 카드를 더
   // 보라고 준 것이므로, 있을 때 안 쓰면 그 보상이 사라진 것과 같다.
   if (state.freeRerolls > 0) {
@@ -1661,6 +1829,10 @@ export function rerollOffers(state: RunState): boolean {
 }
 
 export function startBattle(state: RunState): void {
+  // 전투는 준비 국면에서만 시작한다. 보상 화면의 유물 드래프트를 건너뛸 때
+  // `leaveShop`은 일반 카드 세 장을 열고 reward에 남는데, 같은 버튼 호출이
+  // 이어서 여기까지 들어오더라도 준비 구매를 통째로 건너뛰면 안 된다.
+  if (state.phase !== "prepare") return;
   if (livingCats(state.ally).length === 0) {
     setNotice(state, "한 마리는 세워주세요");
     return;
@@ -1728,7 +1900,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
       ? { name: worst.breed.name, hpFrac: worst.hp / worst.maxHp, boss: worst.radius > 0 }
       : null;
     recordOutcome(state);
-    setNotice(state, `${state.wave}웨이브 도달`);
+    setNotice(state, `악몽 깊이 ${state.wave} 도달`);
     return;
   }
 
@@ -1766,6 +1938,7 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   // 걸음 서수가 위상을 가른다 — 0이면 중간보스, 그 뒤는 스테이지 우두머리.
   // step은 아래에서 +1 되기 전이므로 아직 이 보스전의 걸음이다.
   const stageBoss = kind === "boss" && bossOrdinalInStage(state.step) > 0;
+  const finishedContract = kind === "boss" ? activeRaidContract(state) : null;
   const bossBonus = kind === "boss"
     ? Math.round(
         (BALANCE.goldBase + state.wave * BALANCE.goldPerWave) *
@@ -1773,12 +1946,28 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
       )
     : 0;
   if (bossBonus > 0) state.gold += bossBonus;
+  const contractBonus = finishedContract?.rewardFish ?? 0;
+  if (contractBonus > 0) {
+    state.gold += contractBonus;
+    state.raidBonusFish += contractBonus;
+    state.raidContractsWon += 1;
+    state.lastRaidContract = finishedContract;
+  }
   state.wave += 1;
   state.step += 1;
   // 걸음이 한 바퀴 돌았으면 새 지도를 만든다.
   syncStage(state);
   state.nodeKind = null;
   state.nodeWave = null;
+  if (kind === "boss") {
+    state.raidContract = null;
+    state.raidTargetBossIndex = -1;
+    // 다음에 어떤 지도 칸을 골라도 첫 보상 화면이 같은 유물 택1을 연다.
+    // `wave % 3` 같은 시간 조건은 정찰이 wave를 먼저 올리는 탓에 경로별로
+    // 드래프트가 사라졌으므로, 보스 승리라는 사건 자체를 상태로 넘긴다.
+    state.relicDraftPending = true;
+    state.relicDraftActive = false;
+  }
   // 죽은 고양이도 포함해 전원 완전 회복시킨다.
   // 사망에 영구 손실을 붙이면 한 번 밀린 판이 회복 불가능해져 재도전 동기가 죽는다.
   // 난이도는 적 성장 곡선으로만 조절한다. 이 전제로 밸런스를 측정했으므로
@@ -1816,12 +2005,17 @@ export function finishWave(state: RunState, won: boolean, reason: "wipe" | "time
   // 산 것을 배치한다.
   applySynergies(state);
   state.phase = "map";
+  if (kind === "boss") openNextRaidContracts(state);
   // 보스 처치가 가장 큰 사건이므로 목표 갱신 안내보다 우선한다. 그 무게는
   // 문구가 아니라 noticeKind로 전달한다 — render.ts가 "boss"만 금색으로 키워 그린다.
   if (bossBonus > 0) {
     // HUD의 "+N" 팝업은 웨이브 수입까지 합친 값이라 이 알림과 수가 다르다.
     // "보너스"를 박아 서로 다른 것을 세고 있음을 문구가 직접 말하게 한다.
-    setNotice(state, `${stageBoss ? "우두머리 격파" : "보스 처치"}! 보너스 +${bossBonus}`, "boss");
+    setNotice(
+      state,
+      `${stageBoss ? "우두머리 격파" : "보스 처치"}! 보너스 +${bossBonus}${contractBonus > 0 ? ` · 계약 +${contractBonus}` : ""}`,
+      "boss",
+    );
   } else if (refreshed) {
     setNotice(state, "새 목표가 생겼어요");
   } else {

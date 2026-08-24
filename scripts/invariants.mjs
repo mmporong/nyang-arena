@@ -157,11 +157,29 @@ function check(s, where) {
 
   const ids = s.relics.map((r) => r.id);
   if (new Set(ids).size !== ids.length) fail("유물이 중복된다", `${where} ${ids.join(",")}`);
+  if (s.relicDraftPending && s.relicDraftActive) {
+    fail("유물 드래프트가 예약과 진행 중을 동시에 가진다", where);
+  }
+  if (s.relicDraftActive) {
+    const draft = s.offers.filter(Boolean);
+    if (s.phase !== "reward") fail("유물 드래프트가 보상 화면 밖에 열렸다", `${where} ${s.phase}`);
+    if (draft.length !== 3 || draft.some((offer) => offer.kind !== "relic")) {
+      fail("유물 드래프트가 유물 세 장이 아니다", `${where} ${draft.map((offer) => offer.kind).join(",")}`);
+    }
+    const draftIds = draft.map((offer) => offer.relic?.id);
+    if (new Set(draftIds).size !== draftIds.length) {
+      fail("유물 드래프트 카드가 중복된다", `${where} ${draftIds.join(",")}`);
+    }
+  }
 
   const owned = s.ally.filter(Boolean).length;
   if (owned > unitCap(s.wave)) fail("보유 한도를 넘었다", `${where} ${owned}/${unitCap(s.wave)} (웨이브 ${s.wave})`);
 
   if (s.step < 0 || s.step >= STAGE_STEPS) fail("걸음이 범위를 벗어난다", `${where} step=${s.step}`);
+  const expectedWave = (s.map.stage - 1) * STAGE_STEPS + s.step + 1;
+  if (s.wave !== expectedWave) {
+    fail("난이도 시계와 지도 걸음이 어긋난다", `${where} wave=${s.wave} expected=${expectedWave}`);
+  }
 
   // 보스는 지도가 정한 자리에만 선다. 어긋나면 "지도에 없는 보스"가 나온다.
   if (s.phase === "battle") {

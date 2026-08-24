@@ -1,0 +1,83 @@
+[
+  {
+    "id": "forbidden_token",
+    "name": "금지된 밤",
+    "rule": "존재하지 않는 패턴을 실행합니다.",
+    "counter": "실행할 수 없습니다.",
+    "risk": 2,
+    "rewardFish": 4,
+    "patterns": ["circle", "laser_beam", "line"],
+    "proofCode": "HOSTILE-01"
+  },
+  {
+    "id": "duplicate_contract",
+    "name": "첫 계약",
+    "rule": "첫 번째 계약입니다.",
+    "counter": "원을 피하세요.",
+    "risk": 1,
+    "rewardFish": 2,
+    "patterns": ["circle", "line", "gather"],
+    "proofCode": "HOSTILE-02"
+  },
+  {
+    "id": "duplicate_contract",
+    "name": "중복 계약",
+    "rule": "같은 식별자를 다시 씁니다.",
+    "counter": "선을 피하세요.",
+    "risk": 2,
+    "rewardFish": 3,
+    "patterns": ["line", "cone", "circle"],
+    "proofCode": "HOSTILE-03"
+  },
+  {
+    "id": "clamped_numbers",
+    "name": "넘치는 보상",
+    "rule": "수치 경계를 시험합니다.",
+    "counter": "검증된 경계를 확인하세요.",
+    "risk": 9.8,
+    "rewardFish": 99,
+    "patterns": ["cone", "gather", "line"],
+    "proofCode": "HOSTILE-04"
+  },
+  {
+    "id": "empty_patterns",
+    "name": "빈 악몽",
+    "rule": "실행할 패턴이 없습니다.",
+    "counter": "거절되어야 합니다.",
+    "risk": 1,
+    "rewardFish": 2,
+    "patterns": [],
+    "proofCode": "HOSTILE-05"
+  },
+  {
+    "id": "bad_phase_token",
+    "name": "깨진 후반",
+    "rule": "후반에 금지된 패턴을 씁니다.",
+    "counter": "계약 전체를 거절하세요.",
+    "risk": 2,
+    "rewardFish": 4,
+    "patterns": ["circle", "line", "gather"],
+    "phase2Patterns": ["circle", "delete_board", "line"],
+    "proofCode": "HOSTILE-06"
+  },
+  {
+    "id": "empty_copy",
+    "name": "<>",
+    "rule": "정상 규칙",
+    "counter": "정상 대응",
+    "risk": 1,
+    "rewardFish": 2,
+    "patterns": ["circle", "line", "gather"],
+    "proofCode": "HOSTILE-07"
+  },
+  {
+    "id": "raw_half",
+    "name": "반쪽 오용",
+    "rule": "극성 전용 도형을 직접 실행합니다.",
+    "counter": "안전한 합성 패턴만 허용하세요.",
+    "risk": 2,
+    "rewardFish": 4,
+    "patterns": ["circle", "half", "line"],
+    "proofCode": "HOSTILE-08"
+  }
+]

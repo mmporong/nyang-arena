@@ -17,7 +17,19 @@ import { EFFECT_RANGE, validateAll } from "../src/validate/synergy-schema.ts";
 import { BOSSES_PER_STAGE, checkStage, isBossStep, makeStage, STAGE_STEPS } from "../src/game/map.ts";
 import { BOSS_BREEDS, bossForIndex } from "../src/game/bosses.ts";
 import { BREEDS, NIGHTMARE_BREEDS } from "../src/game/breeds.ts";
-import { bossIndexAt, WAVE_STRIDE, UNIT_STRIDE, WARRIOR_IDS, MELEE_IDS, RANGED_IDS } from "../src/game/run.ts";
+import {
+  bossIndexAt,
+  buyOffer,
+  chooseNode,
+  leaveShop,
+  newRun,
+  rollOffers,
+  WAVE_STRIDE,
+  UNIT_STRIDE,
+  WARRIOR_IDS,
+  MELEE_IDS,
+  RANGED_IDS,
+} from "../src/game/run.ts";
 import { seedRng } from "../src/game/rng.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -89,6 +101,47 @@ if (relicProblems.length === 0) {
   for (const p of relicProblems) console.log(`  실패 ${p}`);
   process.exit(1);
 }
+
+const relicDraft = newRun(6060);
+relicDraft.gold = 999;
+relicDraft.relicDraftPending = true;
+rollOffers(relicDraft);
+const relicCards = relicDraft.offers.filter((offer) => offer?.kind === "relic");
+if (!relicDraft.relicDraftActive || relicDraft.relicDraftPending || relicCards.length !== 3 || new Set(relicCards.map((offer) => offer.relic?.id)).size !== 3) {
+  console.log("  실패 유물 드래프트가 서로 다른 세 장이 아니다");
+  process.exit(1);
+}
+if (!buyOffer(relicDraft, relicCards[0])) {
+  console.log("  실패 유물 드래프트 첫 장을 살 수 없다");
+  process.exit(1);
+}
+if (relicDraft.relics.length !== 1 || relicDraft.relicDraftActive || relicDraft.offers.some((offer) => offer?.kind === "relic")) {
+  console.log("  실패 유물 택1 뒤 일반 상점으로 이어지지 않았다");
+  process.exit(1);
+}
+const skippedDraft = newRun(6061);
+skippedDraft.phase = "reward";
+skippedDraft.nodeKind = "battle";
+skippedDraft.relicDraftPending = true;
+rollOffers(skippedDraft);
+leaveShop(skippedDraft);
+if (skippedDraft.phase !== "reward" || skippedDraft.relicDraftActive || skippedDraft.offers.some((offer) => offer?.kind === "relic")) {
+  console.log("  실패 유물 건너뛰기가 일반 상점을 함께 건너뛰었다");
+  process.exit(1);
+}
+console.log("  OK   보스 뒤 유물 3장 택1은 선택·건너뛰기 뒤 일반 상점으로 이어진다");
+
+for (const kind of ["battle", "elite", "shop"]) {
+  const routeDraft = newRun(6100 + kind.length);
+  routeDraft.raidOffers = [];
+  routeDraft.relicDraftPending = true;
+  const idx = routeDraft.map.steps[routeDraft.step].findIndex((node) => node.kind === kind);
+  if (idx < 0 || !chooseNode(routeDraft, idx) || !routeDraft.relicDraftActive) {
+    console.log(`  실패 ${kind} 경로에서 보스 뒤 유물 드래프트가 열리지 않았다`);
+    process.exit(1);
+  }
+}
+console.log("  OK   battle·elite·shop 어느 준비 경로도 같은 보스 뒤 드래프트를 연다");
 
 /* ------------------------------------------------------------------ */
 /* 지도 계약                                                            */
@@ -366,12 +419,29 @@ if (mirrorFailures.length === 0) {
     clear: () => mem.clear(),
   };
   try {
-    // 2) 오늘의 시드: 같은 날 같은 값, 다른 날 다른 값, 키 형식
+    // 2) 손상·오염 저장소: 문법 오류와 객체가 아닌 유효 JSON 모두 빈 값으로 복구
+    mem.set("nyang-arena.best", "not-a-number");
+    mem.set("nyang-arena.daily", "null");
+    mem.set("nyang-arena.challenge", "[]");
+    mem.set("nyang-arena.codex", "42");
+    if (run.loadBest() !== 0 || run.loadDailyBest("2026-08-23") !== 0 || run.loadChallengeBest(1) !== 0)
+      failures.push("손상된 숫자/기록 저장소가 0으로 안전하게 폴백하지 않았다");
+    const corruptCodex = run.loadCodex();
+    if (corruptCodex.breeds.length || corruptCodex.relics.length || corruptCodex.bosses.length)
+      failures.push("객체가 아닌 도감 JSON이 빈 도감으로 폴백하지 않았다");
+    mem.set("nyang-arena.daily", "{");
+    mem.set("nyang-arena.challenge", "not-json");
+    mem.set("nyang-arena.codex", "null");
+    if (run.loadDailyBest("2026-08-23") !== 0 || run.loadChallengeBest(1) !== 0 || run.loadCodex().breeds.length)
+      failures.push("파싱 실패 저장소가 빈 상태로 폴백하지 않았다");
+    mem.clear();
+
+    // 3) 오늘의 시드: 같은 날 같은 값, 다른 날 다른 값, 키 형식
     if (run.dailySeed("2026-08-23") !== run.dailySeed("2026-08-23")) failures.push("dailySeed가 결정적이지 않다");
     if (run.dailySeed("2026-08-23") === run.dailySeed("2026-08-24")) failures.push("dailySeed가 날짜를 가르지 못한다");
     if (run.dailyKeyToday(new Date(2026, 7, 23)) !== "2026-08-23") failures.push("dailyKeyToday 형식이 YYYY-MM-DD가 아니다");
 
-    // 3) 도전 배수: 같은 시드·같은 길에서 적 체력 합이 (1 + step×단계)배, 적 구성은 그대로
+    // 4) 도전 배수: 같은 시드·같은 길에서 적 체력 합이 (1 + step×단계)배, 적 구성은 그대로
     const a = run.newRun(11);
     const b = run.newRun(11, { kind: "challenge", challenge: 2 });
     const lane = openLanes(a.map, 0)[0];
@@ -384,7 +454,7 @@ if (mirrorFailures.length === 0) {
     const got = hp(b) / hp(a);
     if (Math.abs(got - want) > 0.03) failures.push(`도전 2단계 적 체력 배수 ${got.toFixed(3)} (기대 ${want.toFixed(2)})`);
 
-    // 4) 기록: 도전은 전체 최고를 안 건드리고 단계별로, 오늘의 시드는 그날+전체, 기본은 전체
+    // 5) 기록: 도전은 전체 최고를 안 건드리고 단계별로, 오늘의 시드는 그날+전체, 기본은 전체
     const c = run.newRun(3, { kind: "challenge", challenge: 1 });
     c.wave = 9;
     run.finishWave(c, false);
@@ -401,7 +471,7 @@ if (mirrorFailures.length === 0) {
     const codex = run.loadCodex();
     if (codex.breeds.length < 3) failures.push("도감이 쌓이지 않았다");
 
-    // 5) 다음 판 갈래: 종류와 시드가 약속대로
+    // 6) 다음 판 갈래: 종류와 시드가 약속대로
     const r1 = run.nextRunFrom(c, "retry");
     if (r1.kind !== "challenge" || r1.challenge !== 1 || r1.seed !== 3) failures.push("도전 판 같은 시드가 종류·단계·시드를 잃었다");
     const r2 = run.nextRunFrom(d, "retry");
@@ -422,7 +492,7 @@ if (mirrorFailures.length === 0) {
 
   console.log("\n재진입 고리 계약 (기록은 종류별로, 0단계는 하네스와 같다)");
   if (failures.length === 0) {
-    console.log(`  OK   도전 배수 ${(1 + BALANCE.challengeStep * 2).toFixed(2)}배 · 오늘의 시드 결정적 · 기록이 종류별로 갈린다 · 같은 시드가 종류를 지킨다`);
+    console.log(`  OK   손상 저장 복구 · 도전 배수 ${(1 + BALANCE.challengeStep * 2).toFixed(2)}배 · 오늘의 시드 결정적 · 기록이 종류별로 갈린다 · 같은 시드가 종류를 지킨다`);
   } else {
     for (const f of failures) console.log(`  실패 ${f}`);
     process.exit(1);

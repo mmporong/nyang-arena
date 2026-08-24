@@ -13,7 +13,8 @@
  * 실행: npm run metrics
  */
 import { execSync } from "node:child_process";
-import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stepBattle } from "../src/game/battle.ts";
 import { BALANCE } from "../src/game/balance.ts";
@@ -24,8 +25,9 @@ import {
   startBattle,
 } from "../src/game/run.ts";
 import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
+import { evidenceSource, verifyEvidenceSeal } from "./evidence-source.mjs";
 
-const SCHEMA = 1;
+const SCHEMA = 2;
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
 const mapPick = MAP_POLICIES["무작위"];
@@ -119,6 +121,44 @@ const git = (cmd) => {
   }
 };
 
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function readAxisManifest() {
+  const path = ".omx/evidence/verify-6axis/manifest.tsv";
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => {
+      const [axis, status, exitCode, command, seeds, head, tree, dirty, node, sha256] = line.split("\t");
+      const logPath = join(".omx/evidence/verify-6axis", `${axis}.log`);
+      const logSha256 = existsSync(logPath)
+        ? createHash("sha256").update(readFileSync(logPath)).digest("hex")
+        : null;
+      return {
+        axis,
+        status,
+        exitCode: Number(exitCode),
+        command,
+        seeds,
+        head,
+        tree,
+        dirty: dirty === "true",
+        node,
+        sha256,
+        logShaMatches: logSha256 === sha256,
+      };
+    })
+    .filter((row) => row.axis && row.status && row.sha256);
+}
+
 /**
  * 작업 트리가 더러우면 이 산출물은 **어느 커밋으로도 재현되지 않는다.**
  *
@@ -137,14 +177,96 @@ if (dirty) {
   console.warn("경고: 작업 트리에 변경이 있다. 이 산출물은 어느 커밋으로도 재현되지 않는다.");
   console.warn("      커밋할 값을 뽑으려면 먼저 커밋하고 다시 돌릴 것.");
 }
+const sixAxis = readAxisManifest();
+const contractEvidence = readJson(".omx/evidence/contract-space.json");
+const mapPrepEvidence = readJson(".omx/evidence/map-prep.json");
+const mapSpaceEvidence = readJson(".omx/evidence/map-space.json");
+const currentSource = evidenceSource("npm run metrics", { from: 1, to: RUNS, runs: RUNS }, 0);
+const sourceMatches = (source) =>
+  currentSource.dirty === false &&
+  source?.dirty === false &&
+  source?.exitCode === 0 &&
+  source?.head === currentSource.head &&
+  source?.tree === currentSource.tree &&
+  source?.node === currentSource.node;
+const allGatesPass = (evidence) => {
+  const gates = evidence?.gates;
+  return gates && Object.keys(gates).length > 0 && Object.values(gates).every((value) => value === true);
+};
+const EXPECTED_AXIS_SOURCE = Object.freeze({
+  sim: { command: "npm run --silent sim", seeds: "1..300" },
+  decisions: { command: "npm run --silent decisions", seeds: "1..300" },
+  placement: { command: "npm run --silent placement", seeds: "1..1200" },
+  intervention: { command: "npm run --silent intervention", seeds: "1..300" },
+  map: { command: "npm run --silent map", seeds: "prep:1..300;policy-space:1..1500" },
+  relics: { command: "npm run --silent relics", seeds: "1..2000" },
+});
+const sealedPassingEvidence = (evidence, shapeMatches) =>
+  sourceMatches(evidence?.source) &&
+  shapeMatches(evidence) &&
+  allGatesPass(evidence) &&
+  verifyEvidenceSeal(evidence);
+const contractEvidenceMatches = (evidence) =>
+  evidence?.runs === 1800 &&
+  evidence?.seeds?.from === 10001 &&
+  evidence?.seeds?.to === 11800 &&
+  evidence?.source?.command === "node --experimental-strip-types scripts/contract-space.mjs" &&
+  evidence?.source?.seeds?.from === 10001 &&
+  evidence?.source?.seeds?.to === 11800 &&
+  evidence?.source?.seeds?.runs === 1800;
+const mapPrepEvidenceMatches = (evidence) => {
+  const routeRuns = evidence?.source?.seeds?.routeRuns;
+  return evidence?.runs === 300 &&
+    evidence?.source?.command === "node --experimental-strip-types scripts/map-prep-space.mjs" &&
+    Array.isArray(routeRuns) &&
+    routeRuns.length === 3 &&
+    routeRuns.every((row, index) => {
+      const risk = index + 1;
+      return row?.risk === risk &&
+        row?.from === risk * 100000 + 1 &&
+        row?.to === risk * 100000 + 300 &&
+        row?.runs === 300;
+    }) &&
+    evidence?.source?.seeds?.outcome?.from === 300001 &&
+    evidence?.source?.seeds?.outcome?.to === 300300 &&
+    evidence?.source?.seeds?.outcome?.runs === 300;
+};
+const mapSpaceEvidenceMatches = (evidence) =>
+  evidence?.source?.command === "node --experimental-strip-types scripts/map-space.mjs" &&
+  evidence?.source?.seeds?.from === 1 &&
+  evidence?.source?.seeds?.to === 1500 &&
+  evidence?.source?.seeds?.runs === 1500;
+const axisProvenanceMatches =
+  sixAxis.length === 6 &&
+  new Set(sixAxis.map((row) => row.axis)).size === 6 &&
+  sixAxis.every((row) => {
+    const expected = EXPECTED_AXIS_SOURCE[row.axis];
+    return expected !== undefined &&
+    row.exitCode === 0 &&
+    row.status === "PASS" &&
+    row.dirty === false &&
+    row.node === currentSource.node &&
+    row.head === currentSource.head &&
+    row.tree === currentSource.tree &&
+    row.command === expected.command &&
+    row.seeds === expected.seeds &&
+    row.logShaMatches === true;
+  });
+const evidenceProvenanceMatches =
+  axisProvenanceMatches &&
+  sealedPassingEvidence(contractEvidence, contractEvidenceMatches) &&
+  sealedPassingEvidence(mapPrepEvidence, mapPrepEvidenceMatches) &&
+  sealedPassingEvidence(mapSpaceEvidence, mapSpaceEvidenceMatches);
 
 const metrics = {
   schema: SCHEMA,
   generatedFrom: {
     commit: git("git rev-parse --short HEAD"),
+    head: currentSource.head,
+    tree: currentSource.tree,
     dirty,
     /** 이 값이 false면 표의 숫자를 공개 문서에 인용하면 안 된다. */
-    reproducible: !dirty,
+    reproducible: !dirty && evidenceProvenanceMatches,
     node: process.version,
     seeds: { from: 1, to: RUNS },
     runs: RUNS,
@@ -192,45 +314,17 @@ const metrics = {
     dodgeCharges: BALANCE.dodgeCharges,
   },
   build: { bundleBytes: bundleBytes() },
-  /**
-   * 미해결 축. **관문이 빨간불인 이유를 산출물이 스스로 말해야 한다.**
-   *
-   * 실패하는 시험을 관문에서 빼면 녹색이 되지만 그건 거짓말이다. 넣어 두고
-   * 빨간불인 채로 두되, 왜 빨간지가 이 파일에 적혀 있어야 읽는 사람이
-   * "고장인가 미완인가"를 구분할 수 있다.
-   */
+  verification: {
+    sixAxis,
+    provenanceMatches: evidenceProvenanceMatches,
+    allSixPassed:
+      evidenceProvenanceMatches && sixAxis.every((row) => row.status === "PASS" && row.exitCode === 0),
+    raidContracts: contractEvidence,
+    mapPreparation: mapPrepEvidence,
+    mapSpace: mapSpaceEvidence,
+  },
+  /** 합격 관문과 별개로 과장하지 않고 남겨 둘 제품 한계. */
   openIssues: [
-    {
-      id: "buy-depth-below-bar",
-      what: "구매 깊이가 기준 아래로 내려갔다",
-      measured: "깊이 1.3웨이브 (기준 1.5) · 몰빵 피벗이 무작위 구매를 이기는 시드 54%",
-      diagnosis:
-        "한 걸음의 순서를 map → reward → prepare로 바꾸면서 rollOffers가 전투 직후에서 길을 고른 뒤로 옮겨 갔다. 같은 시드가 다른 카드를 내므로 이건 같은 것을 다시 잰 값이 아니라 다른 표본이다. 그래도 기준을 못 넘은 것은 사실이고, 54%는 짝비교로도 동전 던지기에 가깝다",
-      history: "순서를 바꾸기 전 2.5 (같은 스크립트·같은 시드 범위)",
-      consequence:
-        "제출 문서가 내세우던 '깊은 축 셋(구매·유물·개입)'은 이 수치로는 둘이다. 되돌릴지 다시 튜닝할지는 측정으로 정한다",
-      gate: "npm run decisions가 판정만 찍고 막지 않는다 (exit 0)",
-    },
-    {
-      id: "placement-no-depth",
-      what: "배치에 깊이가 없다 — 드래그가 장식이다",
-      measured: "폭 3.1웨이브(고의적 최악 대비) / 깊이 0.2웨이브(자동 배치 대비)",
-      diagnosis:
-        "자동 배치(bestFreeCell)가 이미 최선에 가깝다. 관문은 폭으로 잡고 있어 통과하지만, 그 관문은 '배치를 망칠 수 있는가'를 재는 회귀 감시지 '배치가 결정인가'의 증명이 아니다",
-      /**
-       * 보스전 밸런스를 재설계해 배치를 살리려 했고, 손잡이 셋을 전부 재고
-       * 전부 기각했다. 다시 시도하는 사람이 같은 길을 또 걷지 않도록 남긴다.
-       */
-      tried: [
-        "보스 평타 램프(bossAtkMulFirst 신설) — 탱킹이 없던 문제. 깊이 0.2→0.7, 중앙값 11. 단독으로는 기준 미달",
-        "예고 고정 피해(telegraphFlatShare 신설) — 비율 피해라 전사 190과 마법사 94가 같은 횟수에 죽던 문제. 깊이 0.6, 중앙값 16",
-        "둘을 합침 — 깊이 0.2로 되돌아가고 중앙값 8. bot-policy.mjs에 적힌 '보스가 세지면 축이 압축된다'가 재현됐다",
-        "회피를 순간이동에서 고정거리 밀어내기로 — 배치 깊이 0.2→0.7이지만 구매 깊이가 2.5→1.2로 떨어져 순손실. 되돌렸다",
-      ],
-      diagnosisRoot:
-        "개입하면 예고를 70~100% 회피하고, 안 맞으면 위치가 결과에 안 닿는다. 통제 아레나(npm run formation)에서 회피 차지를 6에서 1로 줄여도 12칸이 전부 승률 100%였다",
-      gate: "npm run placement가 폭으로만 판정하고 깊이는 판정만 찍는다 (exit 0)",
-    },
     {
       id: "strike-not-a-choice",
       what: "취약 창 연타가 선택이 아니다",
@@ -238,14 +332,6 @@ const metrics = {
       diagnosis:
         "연타에 비용이 없고 창이 3초로 제한돼 있어 '열리면 무조건 누른다'가 유일한 답이다. 화면에서 가장 화려한 연출인데 결정으로서는 가장 작다",
       consequence: "강화하거나(비용·상충 부여), 결정이 아닌 보상 연출로 인정하고 그렇게 설명해야 한다",
-    },
-    {
-      id: "map-axis",
-      what: "지도(경로 선택)가 결정 기준을 못 넘는다",
-      measured: "격차 0.9웨이브 (기준 1.5)",
-      tried: ["정예 보상 강화", "노드를 성격으로 분화", "환전 불가 전술 슬롯(회피 +2/4/6)"],
-      diagnosis: "자원이 생선 하나뿐이라 모든 경로 선택이 '더 벌까 덜 쓸까'로 수렴한다",
-      gate: "npm run map이 exit 1을 내고 npm run verify가 그것 때문에 빨간불이다",
     },
     {
       id: "matchup-metric-noisy",
@@ -265,10 +351,18 @@ writeFileSync("docs/generated/metrics-current.json", JSON.stringify(metrics, nul
 
 const d = metrics.distribution;
 const wk = metrics.waveKinds;
+const axisTable = metrics.verification.sixAxis.length > 0
+  ? metrics.verification.sixAxis
+      .map((row) => `| ${row.axis} | ${row.status} | ${row.exitCode} | \`${row.command}\` | ${row.seeds} | \`${row.sha256.slice(0, 12)}…\` |`)
+      .join("\n")
+  : "| 증거 없음 | FAIL | - | `npm run verify` 필요 | - | - |";
+const raid = metrics.verification.raidContracts;
+const mapPrep = metrics.verification.mapPreparation;
+const mapSpace = metrics.verification.mapSpace;
 const md = `<!-- 이 파일은 npm run metrics가 생성한다. 손으로 고치지 말 것. -->
 # 기준 수치
 
-- 커밋 \`${metrics.generatedFrom.commit}\`${metrics.generatedFrom.dirty ? " — **작업 트리 변경 있음. 이 값은 어느 커밋으로도 재현되지 않으므로 인용하지 말 것**" : ""}
+- 커밋 \`${metrics.generatedFrom.commit}\` · 트리 \`${metrics.generatedFrom.tree?.slice(0, 12) ?? "없음"}…\`${metrics.generatedFrom.dirty ? " — **작업 트리 변경 있음. 이 값은 어느 커밋으로도 재현되지 않으므로 인용하지 말 것**" : ""}
 - 시드 ${metrics.generatedFrom.seeds.from}~${metrics.generatedFrom.seeds.to} · Node ${metrics.generatedFrom.node} · 스키마 v${SCHEMA}
 
 ## 구조
@@ -281,6 +375,28 @@ const md = `<!-- 이 파일은 npm run metrics가 생성한다. 손으로 고치
 | 최소 | p25 | 중앙값 | p75 | 최대 | 평균 | ${MAX_WAVE}웨이브 도달 |
 |---|---|---|---|---|---|---|
 | ${d.min} | ${d.p25} | **${d.median}** | ${d.p75} | ${d.max} | ${d.mean} | ${d.hitMaxWave}건 |
+
+## 검증 6축
+
+| 축 | 판정 | 종료 | 명령 | 시드 | 원시 출력 SHA-256 |
+|---|---|---:|---|---|---|
+${axisTable}
+
+전체 판정: **${metrics.verification.allSixPassed ? "PASS" : "FAIL"}** · provenance **${metrics.verification.provenanceMatches ? "MATCH" : "MISMATCH"}**
+
+## 악몽 계약
+
+${raid
+  ? `홀드아웃 ${raid.runs}런(시드 ${raid.seeds.from}~${raid.seeds.to}) · 계약-aware 중앙값 **${raid.contractAware.median}** · 첫 두 보스 통과율 **${(raid.contractAware.pass * 100).toFixed(1)}%** · 6계약 강제 평균 폭 **${raid.forcedContractHoldout?.meanSpread?.toFixed(2) ?? "없음"}웨이브** · 1위 95% 구간 분리 ${raid.forcedContractHoldout?.topClearlySeparated ? "YES" : "NO"}`
+  : "계약 홀드아웃 증거 없음 — `npm run contracts` 필요"}
+
+${mapPrep
+  ? `준비 경로 ${mapPrep.runs}시드 × 3위험 접근·보상 100% · 고위험 실제 경로 ${mapPrep.highRiskOutcome.unpreparedPassPct}% → **${mapPrep.highRiskOutcome.preparedPassPct}%** (${mapPrep.highRiskOutcome.gainPct >= 0 ? "+" : ""}${mapPrep.highRiskOutcome.gainPct}%p)`
+  : "맵 준비 통제 증거 없음 — `npm run map` 필요"}
+
+${mapSpace
+  ? `지도 1500런 · 정책 평균 격차 **${mapSpace.spread.toFixed(1)}웨이브** · 읽는 정책 ${mapSpace.readMean.toFixed(1)} · 무작위 ${mapSpace.randomMean.toFixed(1)} · 최선 격차 ${mapSpace.readGap.toFixed(1)}`
+  : "지도 정책 공간 증거 없음 — `npm run map` 필요"}
 
 ## 한 판 전투 시간 합계
 
@@ -308,6 +424,11 @@ ${["mixed", "rush", "snipe", "boss"]
 ${metrics.build.bundleBytes ? `번들 ${(metrics.build.bundleBytes / 1024).toFixed(1)} KB` : "빌드 산출물 없음 — npm run build 후 다시 생성할 것"}
 `;
 writeFileSync("docs/generated/metrics-current.md", md);
+
+if (!dirty && !evidenceProvenanceMatches) {
+  console.error("metrics provenance 불일치 — 현재 HEAD/tree에서 contracts, map, 6축을 다시 실행해야 한다");
+  process.exitCode = 1;
+}
 
 console.log("docs/generated/metrics-current.json");
 console.log("docs/generated/metrics-current.md");

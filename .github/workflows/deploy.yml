@@ -24,19 +24,22 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24.12.0
           cache: npm
       - run: npm ci
-      # 검증기·오디오 신호/런타임·에셋·레이아웃·회피·불변식은 배포 전에 반드시 통과해야 한다.
-      # (불변식은 300런 61만 스텝, 약 15초 — 가장 강한 검사인데 체인 밖에 있었다)
-      - run: npm test
-      - run: npm run audio:test
-      - run: npm run audio:runtime:test
-      - run: npm run asset:test
-      - run: npm run probe
-      - run: npm run dodge:test
-      - run: npm run invariants
-      - run: npm run build
+      # 로컬과 같은 단일 관문을 쓴다. 6축 중 하나라도 실패하면 Pages도 나가지 않는다.
+      - run: npm run verify
+      - name: 검증 원시·구조화 증거 보존
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-evidence
+          path: |
+            .omx/evidence/
+            docs/generated/metrics-current.json
+            docs/generated/metrics-current.md
+          include-hidden-files: true
+          if-no-files-found: warn
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist

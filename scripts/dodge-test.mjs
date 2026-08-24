@@ -61,6 +61,11 @@ function bossFightWithTelegraph(arrange, seed = 1, bossBreedId = null, want = ()
   s.step = bossStep;
   s.wave = bossStep + 1;
   walkMap(s);
+  // 이 파일은 개별 예고 기하의 회귀를 재는 테스트다. 계약이 보스 배열을
+  // 바꾸면 "무쇠발톱 첫 예고" 같은 픽스처가 더는 그 패턴을 뜻하지 않으므로,
+  // 노드 전이만 통과한 뒤 전투는 의도적으로 기본 킷으로 고정한다.
+  s.raidContract = null;
+  s.raidTargetBossIndex = -1;
   // 길을 고르면 상점이 열린다. 이 테스트는 사는 것을 재지 않으므로 그냥 나선다.
   leaveShop(s);
   if (currentKind(s) !== "boss") throw new Error("보스 걸음을 못 찾았다");
@@ -300,6 +305,10 @@ console.log("회피 동작 검사\n");
   s.wave = 4;
   s.nodeWave = "mixed";
   buildEnemyWave(s);
+  // 이 절은 지도·상점을 생략한 전투 단위 픽스처다. 실제 startBattle 계약과
+  // 같게 준비 국면을 명시해야 reward/map에서 전투를 시작하는 잘못된 호출을
+  // 허용하지 않으면서도 도약 자체를 검사할 수 있다.
+  s.phase = "prepare";
   startBattle(s);
 
   const rogues = [...s.ally, ...s.enemy].filter((c) => c?.alive && c.breed.cls === "rogue");
@@ -507,6 +516,8 @@ console.log("회피 동작 검사\n");
     s.step = bossStep;
     s.wave = bossStep + 1;
     walkMap(s);
+    s.raidContract = null;
+    s.raidTargetBossIndex = -1;
     leaveShop(s);
     if (currentKind(s) !== "boss") continue;
     s.ally = emptyBoard();
@@ -601,6 +612,8 @@ console.log("회피 동작 검사\n");
       s.step = bossStep;
       s.wave = bossStep + 1;
       walkMap(s);
+      s.raidContract = null;
+      s.raidTargetBossIndex = -1;
       leaveShop(s);
       if (currentKind(s) !== "boss") continue;
       s.ally = emptyBoard();

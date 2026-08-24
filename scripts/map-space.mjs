@@ -14,9 +14,18 @@
  * 실행: npm run map
  */
 import { stepBattle } from "../src/game/battle.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { runSharded } from "./parallel.mjs";
+import { evidenceSource, invokedNodeCommand, sealEvidence } from "./evidence-source.mjs";
 import { newRun, startBattle } from "../src/game/run.ts";
-import { makeBossBot, walkMap, leaveShop, shopStep, MAP_POLICIES } from "./bot-policy.mjs";
+import {
+  makeBossBot,
+  walkMap,
+  leaveShop,
+  shopStep,
+  MAP_POLICIES,
+  RAID_CONTRACT_POLICIES,
+} from "./bot-policy.mjs";
 
 const RUNS = Number(process.argv[2] ?? 1500);
 /**
@@ -45,7 +54,9 @@ function play(pick, seed) {
       continue;
     }
     if (s.phase === "map") {
-      walkMap(s, pick);
+      // 모든 지도 정책이 같은 계약 선택 정책 위에서 걷는다. 그래야 여기서
+      // 달라지는 것은 길 선택뿐이고, 위험도에 반응하는 정찰의 값도 실제로 잰다.
+      walkMap(s, pick, RAID_CONTRACT_POLICIES["팀 읽고 고름"]);
       // 무엇을 밟았는지는 고른 **직후**에 센다. 상점을 나선 뒤에는 nodeKind가
       // 다음 걸음의 것으로 바뀌어 있다.
       if (s.nodeKind) seen[s.nodeKind] += 1;
@@ -157,12 +168,39 @@ const topShare = Math.max(...Object.values(wins)) / RUNS;
  * 그건 이 파일이 유료 재추첨을 안 쓰는 봇으로 재고 있었기 때문이다(위 shopStep
  * 주석 참고). 상점 칸의 무료 재추첨이 과대평가돼 있었다.
  */
-const mapOk = spread >= 1.5;
-console.log(
-  mapOk
-    ? "판정: 지도가 길을 가른다"
-    : "판정: 지도가 결정이 아니다 — 어느 길로 가든 같은 곳에 도착한다",
+const readMean = means["읽고 고름"];
+const randomMean = means["무작위"];
+const bestMean = Math.max(...names.map((name) => means[name]));
+const readGap = bestMean - readMean;
+// 1500런 귀무 잡음 최대 0.4의 2.5배인 1.0을 최소 효과로 잡는다. 동시에 상태를
+// 읽는 정책이 무작위보다 낫고 고정 최선에서 0.5 안이어야, 일부러 나쁜 정책 하나를
+// 넣어 spread만 키우는 우회를 막을 수 있다.
+const effectPass = spread >= 1.0;
+const readPass = readMean >= randomMean && readGap <= 0.5;
+const mapOk = effectPass && readPass;
+const gates = { effect: effectPass, read: readPass };
+console.log(`\n지도 관문: 효과 ${spread.toFixed(1)} ≥ 1.0 · 읽는 정책 ${readMean.toFixed(1)} ≥ 무작위 ${randomMean.toFixed(1)} · 최선 격차 ${readGap.toFixed(1)} ≤ 0.5`);
+mkdirSync(".omx/evidence", { recursive: true });
+const evidence = sealEvidence({
+  source: evidenceSource(
+    invokedNodeCommand("scripts/map-space.mjs"),
+    { from: SEED0 + 1, to: SEED0 + RUNS, runs: RUNS },
+    mapOk ? 0 : 1,
+  ),
+  means,
+  spread,
+  readMean,
+  randomMean,
+  bestMean,
+  readGap,
+  gates,
+});
+writeFileSync(
+  ".omx/evidence/map-space.json",
+  JSON.stringify(evidence, null, 2) + "\n",
 );
-// 미달이면 실패로 끝낸다. 관측만 하고 0을 반환하면 CI가 관측과 합격을
-// 구분하지 못하고, 그러면 '측정으로 만든다'가 말뿐이 된다.
-if (!mapOk) process.exitCode = 1;
+if (!mapOk) {
+  console.error(`지도 판정 실패 — 효과 ${effectPass ? "PASS" : "FAIL"}, 읽는 정책 ${readPass ? "PASS" : "FAIL"}`);
+  process.exit(1);
+}
+console.log("지도 판정 PASS — 경로 효과가 잡음보다 크고 읽는 정책이 고정 정답에 뒤처지지 않는다");

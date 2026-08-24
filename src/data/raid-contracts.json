@@ -1,0 +1,116 @@
+[
+  {
+    "id": "split_night",
+    "name": "갈라진 밤",
+    "rule": "보스가 판을 양쪽 규칙으로 가르고 집결을 뒤섞습니다.",
+    "counter": "빛나는 쪽을 읽고 산개와 집결을 직접 고르세요.",
+    "risk": 2,
+    "rewardFish": 3,
+    "patterns": [
+      "polarity",
+      "gather",
+      "hearth"
+    ],
+    "proofCode": "CODEX-01",
+    "phase2Patterns": [
+      "polarity",
+      "sweep",
+      "line"
+    ]
+  },
+  {
+    "id": "spreading_dark",
+    "name": "번지는 어둠",
+    "rule": "보스가 자라는 장판과 표식으로 안전한 자리를 지웁니다.",
+    "counter": "장판을 일찍 비우고 표식냥을 아군 곁으로 구하세요.",
+    "risk": 3,
+    "rewardFish": 4,
+    "patterns": [
+      "creep",
+      "sweep",
+      "seize"
+    ],
+    "proofCode": "CODEX-02",
+    "phase2Patterns": [
+      "polarity",
+      "cone",
+      "seize"
+    ]
+  },
+  {
+    "id": "falling_floor",
+    "name": "무너지는 바닥",
+    "rule": "보스가 바닥을 차례로 훑고 발밑을 연달아 무너뜨립니다.",
+    "counter": "스윕 순서를 읽고 가장자리와 중앙을 번갈아 피하세요.",
+    "risk": 1,
+    "rewardFish": 2,
+    "patterns": [
+      "sweep",
+      "quake",
+      "stomp"
+    ],
+    "proofCode": "CODEX-03",
+    "phase2Patterns": [
+      "sweep",
+      "cone",
+      "quake"
+    ]
+  },
+  {
+    "id": "mirror_hunt",
+    "name": "거울 사냥",
+    "rule": "보스가 원형 장판과 극성을 번갈아 뒤집습니다.",
+    "counter": "극성 표시를 읽고 안전한 대형으로 바꾸세요.",
+    "risk": 2,
+    "rewardFish": 3,
+    "patterns": [
+      "polarity",
+      "hearth",
+      "seize"
+    ],
+    "proofCode": "CODEX-04",
+    "phase2Patterns": [
+      "polarity",
+      "cone",
+      "seize"
+    ]
+  },
+  {
+    "id": "last_rescue",
+    "name": "마지막 구조",
+    "rule": "보스가 표식냥을 고립시키고 구원로에 장판을 키웁니다.",
+    "counter": "표식냥에게 붙되 자라는 장판은 미리 벗어나세요.",
+    "risk": 3,
+    "rewardFish": 4,
+    "patterns": [
+      "seize",
+      "polarity",
+      "gather"
+    ],
+    "proofCode": "CODEX-05",
+    "phase2Patterns": [
+      "sweep",
+      "seize",
+      "line"
+    ]
+  },
+  {
+    "id": "iron_tremor",
+    "name": "쇠발 진동",
+    "rule": "보스가 발밑과 직선 바닥을 차례로 두드립니다.",
+    "counter": "보스와 거리를 벌리고 흔들린 줄을 연속해서 비우세요.",
+    "risk": 1,
+    "rewardFish": 2,
+    "patterns": [
+      "stomp",
+      "sweep",
+      "line"
+    ],
+    "proofCode": "CODEX-06",
+    "phase2Patterns": [
+      "quake",
+      "cone",
+      "line"
+    ]
+  }
+]

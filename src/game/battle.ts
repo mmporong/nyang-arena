@@ -54,12 +54,14 @@ import {
   type SkillResult,
 } from "./skills.ts";
 import {
+  activeRaidContract,
   bossRampFor,
   currentKind,
   finishWave,
   KITTEN,
   makeSummon,
   MIRROR_IMAGE,
+  raidBossPower,
   relicActive,
   type RunState,
   type SummonSpec,
@@ -418,6 +420,10 @@ function damage(target: Cat, amount: number, crit: boolean): void {
     target.alive = false;
     target.pose = "sleep";
     target.poseTimer = 0;
+    // 표식은 살아 있는 구조 대상에게만 의미가 있다. 다음 tickEffects까지
+    // 미루면 한 스텝 동안 `alive=false && seized=true`가 관측되어 렌더와
+    // 불변식이 갈리므로 사망 전이 안에서 원자적으로 끝낸다.
+    target.seized = false;
     // 죽으면 달리기도 끝난다. `tickDashes`는 살아 있는 것만 도는 탓에, 여기서
     // 안 지우면 목표가 시체에 붙어 다음 전투까지 따라간다.
     target.dash = null;
@@ -1720,7 +1726,7 @@ const POLARITY_GATHER_RADIUS = 1.3;
 
 function makeTelegraph(boss: Cat, foes: Cat[], idx: number, tally: RunState): MadeTelegraph | null {
   if (foes.length === 0) return null;
-  const kit = bossKit(boss.breed.id);
+  const kit = bossKit(boss.breed.id, activeRaidContract(tally));
   const patterns = boss.phase2 === true && kit.phase2Patterns !== undefined ? kit.phase2Patterns : kit.patterns;
   const pattern = patterns[idx % patterns.length]!;
 
@@ -2159,7 +2165,7 @@ function fireTelegraph(
   const ramp = bossRampFor(tally);
   const frac =
     (BALANCE.telegraphDmgFirst + (BALANCE.telegraphDmg - BALANCE.telegraphDmgFirst) * ramp) *
-    bossKit(boss.breed.id).power *
+    raidBossPower(tally, boss.breed.id) *
     dmgMul;
   const hue = t.mode === "gather" ? FX_GATHER : FX_DANGER;
 
@@ -2767,13 +2773,13 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
     // 막 도착했다 — 미뤄 둔 예고를 이제 이 자리에서 건다("연출이 끝난
     // 자리에서 예고"). thresholdIdx는 페이드를 시작할 때부터 그대로였으므로
     // 이 예고가 원래 걸렸어야 할 패턴과 정확히 같다.
-    updateBossPhase(boss, bossKit(boss.breed.id));
+    updateBossPhase(boss, bossKit(boss.breed.id, activeRaidContract(tally)));
     assignTelegraph(boss, makeTelegraph(boss, foes, boss.thresholdIdx, tally));
     boss.thresholdIdx += 1;
     return;
   }
 
-  const kit = bossKit(boss.breed.id);
+  const kit = bossKit(boss.breed.id, activeRaidContract(tally));
 
   if (boss.telegraph) {
     boss.telegraph.fuse -= dt;

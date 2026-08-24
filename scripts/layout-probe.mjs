@@ -21,9 +21,17 @@
  */
 import { cellRect, computeLayout, fieldToScreen } from "../src/game/layout.ts";
 import { wrapLines } from "../src/game/theme.ts";
-import { rerollRect, healthBarGeom, offerRects, gameoverGeometry } from "../src/game/render.ts";
+import {
+  rerollRect,
+  healthBarGeom,
+  offerRects,
+  gameoverGeometry,
+  raidContractRects,
+  raidContractChipGeometry,
+} from "../src/game/render.ts";
 import { BOARD_SIZE, BOARD_COLS, cellToField } from "../src/game/types.ts";
 import { BOSS_RADIUS, SNIPER_RADIUS } from "../src/game/bosses.ts";
+import { RAID_CONTRACT_POOL } from "../src/validate/raid-contract-schema.ts";
 
 const DEVICES = [
   ["iPhone SE 세로", 375, 553],
@@ -176,6 +184,68 @@ if (goFailed > 0) {
   process.exit(1);
 }
 console.log("전부 통과 — 세 갈래 버튼은 어느 기기에서도 손가락 크기이고 판 안에 있다");
+
+/* ---------------------------------------------------------------- */
+/* 첫 화면 악몽 계약                                                  */
+/* ---------------------------------------------------------------- */
+
+let contractFailed = 0;
+console.log("\n첫 화면 악몽 계약 카드");
+console.log("기기               카드 w×h   배치   화면/버튼/겹침  판정");
+for (const [name, w, h] of DEVICES) {
+  const L = computeLayout(w, h);
+  const cards = raidContractRects(L, 3);
+  const inside = cards.every(
+    (card) =>
+      card.x >= 0 &&
+      card.y >= L.notice.y + L.notice.h &&
+      card.x + card.w <= w + 0.5 &&
+      card.y + card.h <= L.button.y + 0.5,
+  );
+  const finger = cards.every((card) => card.w >= 44 && card.h >= 44);
+  const separate = cards.every((card, i) => cards.every((other, j) => i === j || overlapArea(card, other) === 0));
+  const ok = cards.length === 3 && inside && finger && separate;
+  if (!ok) contractFailed++;
+  const first = cards[0];
+  console.log(
+    `${name.padEnd(18)} ${String(Math.round(first.w)).padStart(4)}×${String(Math.round(first.h)).padEnd(4)} ` +
+      `${(L.portrait || L.w < 600 ? "1열" : "3열").padEnd(4)}   ` +
+      `${inside && finger && separate ? "OK" : "실패"}              ${ok ? "OK" : "실패"}`,
+  );
+}
+
+const cp = (text) => [...text].length;
+for (const contract of RAID_CONTRACT_POOL) {
+  if (cp(contract.name) > 7 || cp(contract.rule) > 34 || cp(contract.counter) > 34) {
+    contractFailed++;
+    console.log(
+      `실패 ${contract.id}: 카피 예산 이름 ${cp(contract.name)}/7 · 규칙 ${cp(contract.rule)}/34 · 대응 ${cp(contract.counter)}/34`,
+    );
+  }
+}
+for (const [name, w, h] of DEVICES) {
+  const L = computeLayout(w, h);
+  for (const contract of RAID_CONTRACT_POOL) {
+    for (const phase of ["map", "prepare", "reward"]) {
+      const g = raidContractChipGeometry(L, contract, phase);
+      const estimatedTextW = [...g.label].length * g.fontSize * 0.92;
+      const insideNotice =
+        g.chip.x >= L.notice.x &&
+        g.chip.y >= L.notice.y &&
+        g.chip.x + g.chip.w <= L.notice.x + L.notice.w + 0.5 &&
+        g.chip.y + g.chip.h <= L.notice.y + L.notice.h + 0.5;
+      if (!insideNotice || g.fontSize < 12 || estimatedTextW + 30 > g.chip.w + 0.5 || g.content.w < 80) {
+        contractFailed++;
+        console.log(`실패 ${name}/${contract.id}/${phase}: 활성 칩 폭·12px 하한·안내 영역 위반`);
+      }
+    }
+  }
+}
+if (contractFailed > 0) {
+  console.log(`\n${contractFailed}건 실패 — 계약 카드가 화면을 벗어나거나 카피 예산을 넘겼다`);
+  process.exit(1);
+}
+console.log(`전부 통과 — 10기기 카드 3장·활성 칩 12px·터치 영역·겹침 0, 출고 ${RAID_CONTRACT_POOL.length}종 카피 예산 준수`);
 
 
 /* ---------------------------------------------------------------- */

@@ -26,20 +26,23 @@ const RUNS = Number(process.argv[2] ?? 2000);
  * 그 폭보다 작은 차이는 근거로 쓰지 않는다.
  */
 const SEED0 = Number(process.argv[3] ?? 0);
-// 지도는 아무 길이나 간다. 이 스크립트가 재는 축이 아니므로 고정하지 않는다.
-const mapPick = MAP_POLICIES["무작위"];
+// 지도 축을 섞지 않는다. 무작위 경로는 정예의 보장 유물을 "유물 안 삼"에도
+// 주어 구매 정책 기준선을 오염시켰다. 지도 효과는 npm run map이 따로 재므로,
+// 여기서는 모두 일반 전투로 고정해 유물을 살지·어느 직업에 맞출지만 비교한다.
+const mapPick = MAP_POLICIES["전투만"];
 const MAX_WAVE = 60;
 
 /** 한 직업에 몰빵한다. 그 직업 유물이 나오면 최우선으로 산다. */
-const focus = (cls) => (offers) => {
-  const relic = offers.find(
+const focus = (cls, takeRelics = true) => (offers) => {
+  const pool = takeRelics ? offers : offers.filter((o) => o.kind !== "relic");
+  const relic = takeRelics && pool.find(
     (o) => o.kind === "relic" && o.relic?.condition.kind === "class_count" && o.relic.condition.cls === cls,
   );
   if (relic) return relic;
   return (
-    offers.find((o) => o.kind === "recruit" && o.breed?.cls === cls) ??
-    offers.find((o) => o.kind === "upgrade" && o.breed?.cls === cls) ??
-    offers.find((o) => o.kind !== "relic" && o.kind !== "replace") ??
+    pool.find((o) => o.kind === "recruit" && o.breed?.cls === cls) ??
+    pool.find((o) => o.kind === "upgrade" && o.breed?.cls === cls) ??
+    pool.find((o) => o.kind !== "relic" && o.kind !== "replace") ??
     null
   );
 };
@@ -83,13 +86,30 @@ const POLICIES = {
   "마법사 몰빵": focus("mage"),
   "소환사 몰빵": focus("summoner"),
 };
+const FOCUS_CLASS = {
+  "전사 몰빵": "warrior",
+  "도적 몰빵": "rogue",
+  "궁수 몰빵": "archer",
+  "마법사 몰빵": "mage",
+  "소환사 몰빵": "summoner",
+};
+const NO_RELIC_FOCUS = Object.fromEntries(
+  Object.entries(FOCUS_CLASS).map(([name, cls]) => [`${name}:무유물`, focus(cls, false)]),
+);
+const EXPERIMENTS = { ...POLICIES, ...NO_RELIC_FOCUS };
 
-function play(pick, seed) {
+function play(pick, seed, expectNoRelics = false) {
   const s = newRun(seed);
   const respond = makeBossBot();
   const shop = { rerolls: 0, lastWave: 0 };
+  const finish = (wave) => {
+    if (expectNoRelics && s.relics.length !== 0) {
+      throw new Error(`유물 안 삼 기준선이 유물 ${s.relics.length}개를 보유했다 (시드 ${seed})`);
+    }
+    return wave;
+  };
   for (let guard = 0; guard < MAX_WAVE * 4000; guard++) {
-    if (s.phase === "gameover") return s.wave;
+    if (s.phase === "gameover") return finish(s.wave);
     if (s.phase === "reward") {
       // 구매 정책은 bot-policy의 shopStep 한 곳에만 있다. 이 파일도 사본을
       // 갖고 있었고, 그 사본이 `rolls < 4 && s.gold >= 12`로 재추첨을 막아
@@ -105,19 +125,19 @@ function play(pick, seed) {
       continue;
     }
     if (s.phase === "prepare") {
-      if (s.wave > MAX_WAVE) return MAX_WAVE;
+      if (s.wave > MAX_WAVE) return finish(MAX_WAVE);
       // **유물을 읽고 배치를 고친다.** 자동 배치는 직업만 보므로 유물의 배치
       // 조건은 우연히만 맞는다. 이 한 줄이 없으면 조건이 결정이 아니라 운이고,
       // 그러면 여기서 재는 값이 사람이 겪는 것과 달라진다.
       arrangeForRelics(s);
       startBattle(s);
-      if (s.phase !== "battle") return s.wave;
+      if (s.phase !== "battle") return finish(s.wave);
       continue;
     }
     respond(s);
     stepBattle(s, 100);
   }
-  return s.wave;
+  return finish(s.wave);
 }
 
 const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
@@ -125,13 +145,15 @@ const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(a.length * p))];
 console.log(`런 ${RUNS}회 · 배치·개입 정책 고정 · 구매 전략만 변경 · 시드 ${SEED0 + 1}~${SEED0 + RUNS}\n`);
 console.log("전략                   최소  p10  p25  중앙값  p75  p90  최대   평균");
 const means = {};
-/** 시드 순서를 유지한 원본. 정렬본으로는 시드별 짝비교를 할 수 없다. */
-const bySeed = {};
 // 런은 워커에 나눠 돌리고(scripts/parallel.mjs) 원시 결과만 받는다. 집계는 아래 그대로다.
-const sharded = await runSharded(import.meta.url, Object.keys(POLICIES), (name, seed) => play(POLICIES[name], seed), { runs: RUNS, seed0: SEED0 });
+const sharded = await runSharded(
+  import.meta.url,
+  Object.keys(EXPERIMENTS),
+  (name, seed) => play(EXPERIMENTS[name], seed, name === "유물 안 삼" || name.endsWith(":무유물")),
+  { runs: RUNS, seed0: SEED0 },
+);
 for (const name of Object.keys(POLICIES)) {
   const raw = sharded[name].slice();
-  bySeed[name] = raw;
   const out = [...raw].sort((a, b) => a - b);
   const avg = out.reduce((x, y) => x + y, 0) / out.length;
   means[name] = avg;
@@ -143,22 +165,6 @@ for (const name of Object.keys(POLICIES)) {
   );
 }
 
-/**
- * **고정 지배인가, 상황 선택인가.**
- *
- * 평균표만 보면 "도적 몰빵 18.2가 최고"로 끝난다. 그러면 이 축은 전략적 깊이가
- * 아니라 **지식 시험**이다 — 정답을 한 번 배우면 매 판 같은 것을 고르면 된다.
- *
- * 그래서 시드마다 어느 전략이 이겼는지를 센다.
- *
- *   고정 최선 = 한 전략을 끝까지 밀었을 때의 평균 (위 표의 최고값)
- *   신탁     = 시드마다 그 판에서 가장 좋았던 전략을 골랐을 때의 평균
- *
- * 신탁이 고정 최선보다 크게 높으면 **판마다 정답이 다르다**는 뜻이고, 그때만
- * 이 축에 상황 판단이 있다. 다만 신탁은 결과를 미리 아는 상한이라 사람이 낼 수
- * 있는 값이 아니다 — 여기서 재는 것은 "고를 값이 있는가"이지 "얼마나 낼 수
- * 있는가"가 아니다.
- */
 /**
  * 몰빵 정책 이름. **`POLICIES`에서 뽑는다 — 손으로 적으면 안 된다.**
  *
@@ -172,73 +178,47 @@ for (const name of Object.keys(POLICIES)) {
  * 목록을 손으로 적지 않는 것이 유일한 방어다.
  */
 const focusNames = Object.keys(POLICIES).filter((n) => n.endsWith(" 몰빵"));
-const wins = new Map(focusNames.map((n) => [n, 0]));
-let oracleSum = 0;
-for (let i = 0; i < RUNS; i++) {
-  let bestName = null;
-  let bestVal = -1;
-  for (const n of focusNames) {
-    if (bySeed[n][i] > bestVal) {
-      bestVal = bySeed[n][i];
-      bestName = n;
-    }
-  }
-  wins.set(bestName, wins.get(bestName) + 1);
-  oracleSum += bestVal;
-}
-const oracle = oracleSum / RUNS;
-const fixedBest = Math.max(...focusNames.map((n) => means[n] ?? 0));
-const topName = focusNames.find((n) => means[n] === fixedBest);
-const topShare = (wins.get(topName) / RUNS) * 100;
-
-console.log("\n시드마다 어느 몰빵이 이겼나 (동점은 먼저 나온 쪽)");
-for (const n of focusNames) {
-  console.log(`  ${n.padEnd(10)} ${String(wins.get(n)).padStart(4)}판  ${((wins.get(n) / RUNS) * 100).toFixed(1)}%`);
-}
-console.log(`\n고정 최선(${topName}) ${fixedBest.toFixed(1)}  ·  신탁 ${oracle.toFixed(1)}  ·  차이 ${(oracle - fixedBest).toFixed(1)}웨이브`);
-console.log(
-  topShare >= 50
-    ? `판정: ${topName} 하나가 ${topShare.toFixed(0)}% 시드에서 최선이다 — 상황 판단보다 지식 시험에 가깝다`
-    : `판정: 최선이 판마다 갈린다 (최다 ${topName} ${topShare.toFixed(0)}%) — 상황 판단의 여지가 있다`,
-);
 
 const vals = Object.values(means);
 const spread = Math.max(...vals) - Math.min(...vals);
 const noRelic = means["유물 안 삼"] ?? 0;
-const bestFocus = Math.max(...focusNames.map((n) => means[n] ?? 0));
+const focusRanking = focusNames.map((name) => [name, means[name] ?? 0]).sort((a, b) => b[1] - a[1]);
+const [topName, bestFocus] = focusRanking[0];
+const [, runnerUpFocus] = focusRanking[1];
+const topGap = bestFocus - runnerUpFocus;
+const minFocusGain = Math.min(...focusRanking.map(([, mean]) => mean - noRelic));
+
+// 같은 직업 집중 정책에서 해당 유물을 살 수 있게/없게 한 실제 한계효과.
+// 전체 빌드 격차만 재면 로스터 집중 효과를 유물 효과로 잘못 부를 수 있다.
+const ABLATION_RUNS = RUNS;
+const marginal = Object.fromEntries(focusNames.map((name) => {
+  const mean = (rows) => rows.reduce((sum, wave) => sum + wave, 0) / rows.length;
+  return [name, mean(sharded[name]) - mean(sharded[`${name}:무유물`])];
+}));
+const focusAblationMeans = Object.fromEntries(focusNames.map((name) => {
+  const mean = (rows) => rows.reduce((sum, wave) => sum + wave, 0) / rows.length;
+  return [name, {
+    withRelic: mean(sharded[name]),
+    withoutRelic: mean(sharded[`${name}:무유물`]),
+  }];
+}));
+const marginalValues = Object.values(marginal);
+const averageMarginal = marginalValues.reduce((sum, value) => sum + value, 0) / marginalValues.length;
+const minMarginal = Math.min(...marginalValues);
+const materialClasses = marginalValues.filter((value) => value >= 0.5).length;
+const marginalPass = averageMarginal >= 0.5 && minMarginal >= -0.25 && materialClasses >= 3;
 console.log(`\n최선과 최악의 격차: ${spread.toFixed(1)}웨이브`);
 console.log(`유물을 안 사는 것(${noRelic.toFixed(1)}) 대비 최고 몰빵(${bestFocus.toFixed(1)}): ${(bestFocus - noRelic).toFixed(1)}웨이브`);
-// **잡음 바닥.** 같은 코드를 겹치지 않는 시드 블록 셋에 300판씩 돌린 결과다
-// (시드 1~300 · 301~600 · 601~900). 코드가 한 줄도 안 바뀌었는데 이만큼
-// 흔들린다 — 명단이나 유물 목록을 건드리면 오퍼 생성이 난수를 다르게 먹어
-// 같은 시드가 완전히 다른 판이 되기 때문이다.
-//
-//   고양이 8종:  3.3 / 3.0 / 3.5   (폭 0.5)
-//   고양이 12종: 2.5 / 3.4 / 2.8   (폭 0.9)
-//
-// 두 밴드가 크게 겹치므로 **8종에서 12종으로 늘린 것이 이 축을 바꿨다고 말할
-// 수 없다.** 평균은 3.3에서 2.9로 내려갔지만 그 차이가 폭 안이다.
-//
-// 이것이 과거 보너스 배율 스윕(1.15~1.45)이 3.2~4.0을 무작위로 오간 이유다.
-// 그 폭 전체가 잡음 안이었고, 거기서 고른 값에는 근거가 없었다.
-// **0.5웨이브 미만의 차이는 근거로 쓰지 말 것.** 그보다 작은 것을 보려면
-// 시드를 늘려서(`npm run relics 900`) 다시 잴 것.
-console.log(
-  "  (잡음 바닥: 2000판에서 폭 0.2 — 같은 코드·다른 시드 블록으로 2.7 / 2.9 / 2.9.\n" +
-    "   300판에서는 2.8 / 2.1 / 2.9로 폭 0.8이었다. 즉 이 축의 실제 값은 2.8쯤이고\n" +
-    "   기준 4.0에 확실히 못 미친다 — 예전 배율 스윕이 3.2~4.0을 오간 것은 전부\n" +
-    "   300판의 잡음이었다.\n" +
-    "\n" +
-    "   ** 이 문단은 2026-08-18 실측과 어긋난다.** 같은 2000판에서 4.9가 나왔고\n" +
-    "   관문도 통과했다. 소환사를 넣어 직업이 5종이 되면서 마법사 몰빵이 16.3까지\n" +
-    "   오른 것이 원인으로 보이지만, 블록 하나로는 못 뒤집는다 — 위의 2.7/2.9/2.9는\n" +
-    "   겹치지 않는 세 블록에서 나온 값이다. 셋을 다시 재기 전에는 어느 쪽도 인용하지 말 것)",
-);
+console.log(`빌드 다양성: 1위 ${topName}과 2위 격차 ${topGap.toFixed(1)} ≤ 1.5 · 모든 몰빵이 무유물보다 최소 ${minFocusGain.toFixed(1)} ≥ 1.0`);
+console.log(`유물 택1 한계효과 ${ABLATION_RUNS}런/직업: ${Object.entries(marginal).map(([name, value]) => `${name.replace(" 몰빵", "")} ${value >= 0 ? "+" : ""}${value.toFixed(2)}`).join(" · ")}`);
+console.log(`동일 빌드 on/off: ${Object.entries(focusAblationMeans).map(([name, value]) => `${name.replace(" 몰빵", "")} ${value.withRelic.toFixed(2)}/${value.withoutRelic.toFixed(2)}`).join(" · ")}`);
+console.log(`유물 한계효과 관문: 평균 ${averageMarginal.toFixed(2)} ≥ 0.50 · 최소 ${minMarginal.toFixed(2)} ≥ -0.25 · 0.5+ 직업 ${materialClasses}/5 ≥ 3`);
 /**
- * 기준 4.0웨이브. 개입 축을 재조정할 때 빌드가 살아 있는지 지키는 관문이다 —
- * 실행 실력이 빌드 결정을 덮으면 안 된다는 것이 이 숫자의 존재 이유다.
+ * 기준 4.0웨이브는 빌드가 결과를 가르는 최소 효과다. 동시에 1위와 2위가
+ * 1.5 안이고 모든 직업 몰빵이 무유물보다 1.0 이상 좋아야, 일부러 약한 기준선
+ * 하나와 압도적 정답 하나를 넣어 폭만 키우는 우회를 막는다.
  */
-const relicOk = bestFocus - noRelic >= 4.0;
+const relicOk = bestFocus - noRelic >= 4.0 && topGap <= 1.5 && minFocusGain >= 1.0 && marginalPass;
 console.log(
   relicOk
     ? "판정: 유물이 빌드를 가른다"

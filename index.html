@@ -51,6 +51,46 @@
         image-rendering: pixelated;
         cursor: default;
       }
+      .raid-a11y-controls {
+        position: fixed;
+        z-index: 10;
+        top: max(12px, env(safe-area-inset-top));
+        left: max(12px, env(safe-area-inset-left));
+        display: flex;
+        max-width: min(720px, calc(100vw - 24px));
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 12px;
+        color: #efe0c6;
+        background: #241a14;
+        border: 2px solid #9c8b76;
+        border-radius: 10px;
+      }
+      .raid-a11y-controls[hidden] {
+        display: none;
+      }
+      .raid-a11y-controls:not(:focus-within) {
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        padding: 0;
+        border: 0;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+      .raid-a11y-controls p {
+        flex-basis: 100%;
+      }
+      .raid-a11y-controls button {
+        min-height: 44px;
+        padding: 8px 12px;
+        color: #241a14;
+        background: #efe0c6;
+        border: 2px solid #f5a03c;
+        border-radius: 8px;
+        font: inherit;
+        cursor: pointer;
+      }
       #boot {
         position: fixed;
         inset: 0;

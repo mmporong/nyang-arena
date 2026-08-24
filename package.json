@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=22.6"
+    "node": "24.12.0"
   },
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,9 @@
     "slice": "python3 scripts/slice-sprites.py",
     "recolor": "python3 scripts/recolor-sprites.py",
     "gen:synergies": "node --experimental-strip-types scripts/gen-synergies.mjs",
+    "gen:contracts": "node --experimental-strip-types scripts/gen-raid-contracts.mjs",
+    "contract:test": "node --experimental-strip-types scripts/raid-contract-validator-test.mjs && node --experimental-strip-types scripts/raid-contract-flow-test.mjs",
+    "contracts": "node --experimental-strip-types scripts/contract-space.mjs",
     "sim": "node --experimental-strip-types scripts/balance-sim.mjs",
     "sweep": "node --experimental-strip-types scripts/balance-sweep.mjs",
     "test": "node --experimental-strip-types scripts/validator-test.mjs",
@@ -25,12 +28,15 @@
     "audio:test": "node --experimental-strip-types scripts/audio-signal-test.mjs",
     "audio:runtime:test": "node --experimental-strip-types scripts/audio-runtime-test.mjs",
     "asset:test": "node --experimental-strip-types scripts/asset-contract-test.mjs",
+    "submission:test": "node --experimental-strip-types scripts/submission-copy-test.mjs",
     "qa:manual": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/manual-qa.ps1",
     "trace": "node --experimental-strip-types scripts/run-trace.mjs",
     "relics": "node --experimental-strip-types scripts/relic-space.mjs",
-    "map": "node --experimental-strip-types scripts/map-space.mjs",
+    "map": "node --experimental-strip-types scripts/map-policy-test.mjs && node --experimental-strip-types scripts/map-prep-space.mjs && node --experimental-strip-types scripts/map-space.mjs",
+    "map:observe": "node --experimental-strip-types scripts/map-space.mjs",
     "gold": "node --experimental-strip-types scripts/gold-curve.mjs",
-    "verify": "npm run typecheck && npm test && npm run probe && npm run dodge:test && npm run audio:test && npm run audio:runtime:test && npm run asset:test && npm run invariants && vite build && bash scripts/measure-all.sh",
+    "measure:all": "node scripts/measure-all.mjs",
+    "verify": "npm run typecheck && npm test && npm run contract:test && npm run contracts && npm run submission:test && npm run probe && npm run dodge:test && npm run audio:test && npm run audio:runtime:test && npm run asset:test && npm run invariants && vite build && npm run measure:all",
     "typecheck": "tsc --noEmit",
     "metrics": "node --experimental-strip-types scripts/metrics-gen.mjs",
     "formation": "node --experimental-strip-types scripts/formation-space.mjs",
@@ -43,5 +49,5 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
   },
-  "description": "픽셀 고양이 오토배틀러 — 배치하고, 관전하고, 몇 웨이브까지 버티는지 겨룬다"
+  "description": "악몽 계약으로 다음 보스의 패턴·위험·보상을 고르는 픽셀 고양이 레이드 오토배틀러"
 }

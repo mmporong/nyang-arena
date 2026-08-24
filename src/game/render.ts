@@ -18,7 +18,7 @@ import {
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
-import { bossHint, bossOrdinalInStage, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
+import { bossHint, bossOrdinalInStage, isRaidPrepStep, nodeInfo, openLanes, STAGE_STEPS } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
@@ -34,6 +34,7 @@ import {
   mapStep,
   bossIndexAt,
   bossesSeen,
+  nextRaidBossTarget,
   sameClassNeighbors,
   relicActive,
   CODEX_TOTALS,
@@ -43,7 +44,9 @@ import {
   type RunState,
 } from "./run.ts";
 import { RELICS, type Relic } from "./relics.ts";
+import { raidPrepLabel, raidPrepRoute, raidRiskLabel, raidShareCode } from "./raid.ts";
 import { stageTheme, tintForEnemy } from "./stages.ts";
+import type { RaidContract } from "../validate/raid-contract-schema.ts";
 
 /** 유물 총 종류. 오른쪽 줄이 "몇 개 중 몇 개"를 말하고 칸 높이를 여기서 뽑는다. */
 const RELIC_TOTAL = RELICS.length;
@@ -718,7 +721,7 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   hudChip(
     ctx,
     { x: r.x, y: r.y, w: third, h: r.h },
-    "웨이브",
+    "깊이",
     String(s.wave),
     T.text,
     "left",
@@ -2383,7 +2386,7 @@ function drawRelicCard(
       weight: 800,
       maxWidth: relicTw,
     });
-    const brief = relic.gain ? `${relic.want} · ${relic.gain}` : `${relic.want} · ${relic.toll}`;
+    const brief = `${relic.want} · ${relic.gain}`;
     uiText(ctx, brief, cr.x + pad, cr.y + cr.h * 0.66, fsBody, afford ? T.fish : T.muted, {
       align: "left",
       weight: 600,
@@ -2409,7 +2412,7 @@ function drawRelicCard(
     ["원하는 것", relic.want, afford ? T.fish : T.muted],
   ];
   // 규칙 유물만 '얻는 것'을 적는다. 스탯 유물은 세진다는 게 자명하다.
-  if (relic.gain) rows.push(["얻는 것", relic.gain, afford ? T.ally : T.muted]);
+  rows.push(["얻는 것", relic.gain, afford ? T.ally : T.muted]);
   rows.push(["치르는 것", relic.toll, afford ? T.enemy : T.muted]);
   for (const [label, text, color] of rows) {
     uiText(ctx, label, cx, ty, fsBody * 0.85, "rgba(156,139,118,0.9)", { align: "center", weight: 600 });
@@ -2731,6 +2734,8 @@ function offerHeadline(s: RunState): string {
   const cap = unitCap(s.wave);
   const team = `우리 편 ${owned}/${cap}`;
 
+  if (s.relicDraftActive) return `유물 드래프트 · 셋 중 하나만 고르거나 건너뛰세요`;
+
   if (s.offers.every((o) => o === null)) {
     // 웨이브 1만 "가볼까요"(질문형)였고 나머지는 "다음 걸음으로"(명사형)였다.
     // 같은 행동을 웨이브 번호에 따라 다르게 부르면 그게 같은 버튼인지 헷갈린다.
@@ -2860,7 +2865,7 @@ function drawRerollButton(
   s: RunState,
   rr: Rect,
 ): void {
-  const canRoll = s.gold >= REROLL_COST;
+  const canRoll = !s.relicDraftActive && s.gold >= REROLL_COST;
   roundRect(ctx, rr, rr.h * 0.5);
   ctx.fillStyle = canRoll ? "rgba(111,182,220,0.14)" : "rgba(239,224,198,0.04)";
   ctx.fill();
@@ -2870,6 +2875,14 @@ function drawRerollButton(
   const rfs = Math.max(10, rr.h * 0.46);
   // 세로줄에서는 버튼이 줄 폭을 다 쓰므로 글자를 가운데로 몬다. 접힌 구성에서는
   // 오른쪽 끝에 붙은 작은 버튼이라 글자를 오른쪽으로 민다.
+  if (s.relicDraftActive) {
+    uiText(ctx, "택 1 · 다시 뽑기 없음", rr.x + rr.w / 2, rr.y + rr.h / 2, rfs, T.muted, {
+      align: "center",
+      weight: 700,
+      maxWidth: rr.w * 0.9,
+    });
+    return;
+  }
   const rollPx = Math.max(1, rr.h * 0.09);
   const rollRight = rr.x + rr.w - rr.w * (L.columns ? 0.06 : 0.12);
   const numW = numTextWidth(ctx, String(REROLL_COST), rollPx);
@@ -3193,6 +3206,235 @@ function mapBox(L: Layout): Rect {
   return { x: L.w / 2 - w / 2, y: top, w, h };
 }
 
+/** 첫 화면의 악몽 계약 카드. 렌더·히트테스트·레이아웃 검사가 같은 기하를 쓴다. */
+export function raidContractRects(L: Layout, count = 3): Rect[] {
+  const gap = Math.max(6, Math.min(18, L.scale * 14));
+  const top = L.notice.y + L.notice.h + (L.h < 360 ? 30 : Math.max(52, L.scale * 58));
+  const bottom = L.button.y - Math.max(8, L.scale * 10);
+  const availableH = Math.max(96, bottom - top);
+  const stacked = L.portrait || L.w < 600;
+  if (stacked) {
+    const w = Math.min(L.w - 24, Math.max(260, L.w * 0.88));
+    const h = (availableH - gap * (count - 1)) / count;
+    return Array.from({ length: count }, (_, i) => ({
+      x: L.w / 2 - w / 2,
+      y: top + i * (h + gap),
+      w,
+      h,
+    }));
+  }
+  const side = Math.max(12, Math.min(40, L.w * 0.035));
+  const w = (L.w - side * 2 - gap * (count - 1)) / count;
+  return Array.from({ length: count }, (_, i) => ({
+    x: side + i * (w + gap),
+    y: top,
+    w,
+    h: availableH,
+  }));
+}
+
+function drawRiskClaws(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  risk: number,
+  size: number,
+  color: string,
+): void {
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineWidth = Math.max(1.5, size * 0.16);
+  for (let i = 0; i < 3; i++) {
+    ctx.globalAlpha = i < risk ? 1 : 0.2;
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x + i * size * 0.72, y + size * 0.42);
+    ctx.quadraticCurveTo(x + i * size * 0.72 + size * 0.28, y - size * 0.3, x + i * size * 0.72 + size * 0.5, y - size * 0.48);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function activeContractLine(
+  contract: RaidContract,
+  seed: number,
+  mode: "map" | "prepare" | "battle" | "debrief",
+): string {
+  const code = raidShareCode(seed, contract.id);
+  if (mode === "map") return `${contract.name} · ${raidPrepLabel(raidPrepRoute(contract))}`;
+  if (mode === "battle") return `${contract.name} · ${contract.counter}`;
+  if (mode === "debrief") return `${contract.name} · ${contract.counter} · ${code}`;
+  return `${contract.name} · ${contract.counter}`;
+}
+
+export interface RaidContractChipGeometry {
+  chip: Rect;
+  content: Rect;
+  label: string;
+  fontSize: number;
+}
+
+/** 안내 문구와 독립된 활성 계약 칩. 작은 화면은 이름, 넓은 화면은 대응까지 보인다. */
+export function raidContractChipGeometry(
+  L: Layout,
+  contract: RaidContract,
+  phase: "map" | "prepare" | "reward",
+): RaidContractChipGeometry {
+  const r = L.notice;
+  const fontSize = Math.max(12, Math.min(15, r.h * 0.52));
+  const detailed = phase === "map"
+    ? `${contract.name} · ${raidPrepLabel(raidPrepRoute(contract))}`
+    : `${contract.name} · ${contract.counter}`;
+  const estimate = (text: string) => [...text].length * fontSize * 0.92 + 30;
+  const maxChipW = Math.max(104, Math.min(r.w * 0.56, r.w - 92));
+  const label = estimate(detailed) <= maxChipW ? detailed : contract.name;
+  const chipW = Math.min(maxChipW, Math.max(104, estimate(label)));
+  const gap = Math.max(5, L.scale * 5);
+  const chip: Rect = { x: r.x + 1, y: r.y + 1, w: chipW, h: Math.max(11, r.h - 2) };
+  const contentX = chip.x + chip.w + gap;
+  const content: Rect = {
+    x: contentX,
+    y: r.y,
+    w: Math.max(80, r.x + r.w - contentX),
+    h: r.h,
+  };
+  return { chip, content, label, fontSize };
+}
+
+function drawActiveRaidContractChip(
+  ctx: CanvasRenderingContext2D,
+  geometry: RaidContractChipGeometry,
+  risk: number,
+): void {
+  const { chip, label, fontSize } = geometry;
+  roundRect(ctx, chip, Math.max(3, chip.h * 0.22));
+  ctx.fillStyle = "rgba(15,10,8,0.90)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(239,224,198,0.28)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  const claw = Math.max(5, Math.min(8, chip.h * 0.28));
+  drawRiskClaws(ctx, chip.x + 6, chip.y + chip.h * 0.63, risk, claw, T.enemy);
+  uiText(ctx, label, chip.x + 6 + claw * 2.35, chip.y + chip.h / 2, fontSize, T.paper, {
+    align: "left",
+    weight: 800,
+  });
+}
+
+function drawRaidContractOverlay(
+  ctx: CanvasRenderingContext2D,
+  L: Layout,
+  s: RunState,
+  drag: DragState,
+): void {
+  const rects = raidContractRects(L, s.raidOffers.length);
+  const target = nextRaidBossTarget(s);
+  const compact = L.h < 380;
+  uiText(
+    ctx,
+    compact ? `악몽 계약 · ${target.name}` : "악몽과 계약할 시간",
+    L.w / 2,
+    L.notice.y + L.notice.h + (compact ? 13 : Math.max(20, L.scale * 22)),
+    compact ? 16 : Math.max(20, L.scale * 25),
+    T.paper,
+    { align: "center", weight: 800, outline: true },
+  );
+  if (!compact) {
+    uiText(
+      ctx,
+      `${target.name}의 규칙과 추가 보상을 하나 고르세요`,
+      L.w / 2,
+      L.notice.y + L.notice.h + Math.max(42, L.scale * 44),
+      Math.max(12, L.scale * 13),
+      T.paperDim,
+      { align: "center", maxWidth: L.w - 24 },
+    );
+  }
+
+  let hovered = -1;
+  rects.forEach((rect, i) => {
+    if (
+      drag.hoverX >= rect.x &&
+      drag.hoverX <= rect.x + rect.w &&
+      drag.hoverY >= rect.y &&
+      drag.hoverY <= rect.y + rect.h
+    ) {
+      hovered = i;
+    }
+  });
+  ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
+
+  rects.forEach((rect, i) => {
+    const contract = s.raidOffers[i];
+    if (!contract) return;
+    const hot = hovered === i;
+    const pad = Math.max(9, Math.min(18, rect.w * 0.055));
+    const titleSize = Math.max(14, Math.min(24, rect.h * (compact ? 0.12 : 0.09)));
+    const bodySize = Math.max(12, Math.min(16, rect.h * (compact ? 0.078 : 0.057)));
+    const face = hot ? "rgba(62,39,29,0.98)" : "rgba(35,24,19,0.98)";
+    bevelPanel(ctx, rect, Math.max(8, L.scale * 10), face, "rgba(0,0,0,0.72)", hot ? 5 : 3);
+    ctx.save();
+    roundRect(ctx, rect, Math.max(8, L.scale * 10));
+    ctx.strokeStyle = hot ? T.action : contract.risk === 3 ? T.enemy : "rgba(239,224,198,0.38)";
+    ctx.lineWidth = hot ? 3 : 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    uiText(ctx, `${i + 1}`, rect.x + pad, rect.y + pad + titleSize * 0.35, bodySize, T.action, {
+      weight: 800,
+    });
+    uiText(ctx, contract.name, rect.x + rect.w / 2, rect.y + pad + titleSize * 0.35, titleSize, T.paper, {
+      align: "center",
+      weight: 800,
+      maxWidth: rect.w - pad * 4,
+    });
+    const riskColor = contract.risk === 3 ? T.danger : contract.risk === 2 ? T.gold : T.gather;
+    drawRiskClaws(
+      ctx,
+      rect.x + rect.w - pad - bodySize * 5.1,
+      rect.y + pad + titleSize * 0.42,
+      contract.risk,
+      bodySize * 0.78,
+      riskColor,
+    );
+    uiText(
+      ctx,
+      `위험 ${raidRiskLabel(contract.risk)}`,
+      rect.x + rect.w - pad,
+      rect.y + pad + titleSize * 0.35,
+      bodySize,
+      riskColor,
+      { align: "right", weight: 800, maxWidth: rect.w * 0.42 },
+    );
+
+    const textTop = rect.y + pad + titleSize * 1.45;
+    const lineH = bodySize * 1.35;
+    const maxLines = compact ? 1 : rect.h > 190 ? 2 : 1;
+    const contentW = rect.w - pad * 2;
+    const rule = wrapLines(ctx, `규칙 · ${contract.rule}`, bodySize, 400, contentW, maxLines);
+    rule.forEach((line, lineIdx) => {
+      uiText(ctx, line, rect.x + pad, textTop + lineIdx * lineH, bodySize, T.paperDim, {
+        maxWidth: contentW,
+      });
+    });
+    const counterY = textTop + Math.max(1, rule.length) * lineH + bodySize * 0.45;
+    const counter = wrapLines(ctx, `대응 · ${contract.counter}`, bodySize, 800, contentW, maxLines);
+    counter.forEach((line, lineIdx) => {
+      uiText(ctx, line, rect.x + pad, counterY + lineIdx * lineH, bodySize, T.gather, {
+        weight: 800,
+        maxWidth: contentW,
+      });
+    });
+
+    const rewardY = rect.y + rect.h - pad - bodySize * 0.15;
+    drawFish(ctx, rect.x + pad + bodySize * 0.5, rewardY, bodySize * 1.1, T.fish);
+    uiText(ctx, `승리 시 생선 +${contract.rewardFish}`, rect.x + pad + bodySize * 1.35, rewardY, bodySize, T.fish, {
+      weight: 800,
+      maxWidth: rect.w - pad * 2 - bodySize,
+    });
+  });
+}
+
 /** 봉우리 셋 달린 왕관. 지도의 스테이지 우두머리 칸에만 씌운다. */
 function drawCrown(ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, color: string): void {
   const h = w * 0.62;
@@ -3225,8 +3467,15 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   ctx.globalAlpha = 1;
   ctx.fillStyle = "rgba(10,7,5,0.98)";
   ctx.fillRect(0, 0, L.w, L.h);
+  if (s.raidOffers.length > 0) {
+    drawRaidContractOverlay(ctx, L, s, drag);
+    return;
+  }
   const step = mapStep(s);
   const open = new Set(openLanes(s.map, step));
+  const prepRoute = s.raidContract && isRaidPrepStep(step)
+    ? raidPrepRoute(s.raidContract)
+    : null;
   const rects = mapNodeRects(L, s);
   const at = (st: number, i: number): Rect | undefined =>
     rects.find((x) => x.step === st && x.idx === i)?.rect;
@@ -3292,6 +3541,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     const pickable = here && open.has(idx);
     const done = st < step;
     const hot = here && idx === hovered;
+    const contractPrep = pickable && prepRoute === node.kind;
 
     const hue =
       node.kind === "boss" ? T.enemy
@@ -3312,9 +3562,18 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2 + grow, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(14,10,8,0.92)";
     ctx.fill();
-    ctx.strokeStyle = hot ? "#FFFFFF" : hue;
+    ctx.strokeStyle = hot ? "#FFFFFF" : contractPrep ? T.gold : hue;
     ctx.lineWidth = hot ? Math.max(3, L.scale * 3.4) : pickable ? Math.max(2, L.scale * 2.6) : Math.max(1, L.scale * 1.4);
     ctx.stroke();
+    // 카드가 지시한 계약 직후 준비 경로. 색만 바꾸지 않고 이중 고리로 표시해
+    // 색각과 작은 화면에서도 다른 종류임을 남긴다.
+    if (contractPrep) {
+      ctx.beginPath();
+      ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2 + grow + Math.max(4, L.scale * 5), 0, Math.PI * 2);
+      ctx.strokeStyle = T.gold;
+      ctx.lineWidth = Math.max(1.5, L.scale * 1.8);
+      ctx.stroke();
+    }
     // 보스 칸만 **이름**을 보여준다. 어떤 보스가 오는지가 곧 무엇을 준비할지를
     // 정하는데, 지금까지 그 정보가 화면에 없었다.
     //
@@ -3393,6 +3652,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
   // 안 하면 그림처럼 보인다.
   ctx.canvas.style.cursor = hovered >= 0 ? "pointer" : "default";
   const info = hotNode ? nodeInfo(hotNode.kind) : null;
+  const hotIsPrep = hotNode && prepRoute === hotNode.kind;
   // 스테이지 제목은 아무것도 안 올렸을 때의 기본 줄에만 붙는다 — 노드를
   // 올리면 그 칸의 설명이 더 급하므로 자리를 양보한다. backdropScene이 없는
   // 스테이지(2·3, 아직 미배선)는 이름을 안 붙여 기존 문구 그대로 나간다.
@@ -3403,7 +3663,9 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     bossLine
       ? bossLine
       : info
-      ? `${info.name} — ${info.hint}`
+      ? `${info.name} — ${info.hint}${hotIsPrep ? " · 이번 계약의 대응 경로" : ""}`
+      : prepRoute && s.raidContract
+      ? `${activeContractLine(s.raidContract, s.seed, "map")} · 이중 고리 밖은 보스 강도 +${Math.round((BALANCE.contractMismatchPower - 1) * 100)}%`
       : `${s.map.stage}번째 밤${stageTitle} · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,
     mapBox(L).y - L.scale * 6,
@@ -3463,10 +3725,11 @@ export function buttonText(s: RunState): string {
       return s.dodgeCharges > 0 ? `회피  ${s.dodgeCharges}` : "회피";
     }
     case "reward":
+      if (s.relicDraftActive) return "유물 건너뛰기";
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
       return s.nodeKind === "shop" ? "길 고르기" : "전투 시작";
     case "map":
-      return "길을 고르세요";
+      return s.raidOffers.length > 0 ? "계약 1 · 2 · 3 중 선택" : "길을 고르세요";
     case "gameover":
       return "다시 도전";
   }
@@ -3662,6 +3925,8 @@ function drawBossBanner(
   boss: Cat,
   stageBoss: boolean,
   stage: number,
+  contract: RaidContract | null,
+  seed: number,
 ): void {
   const r = L.notice;
   const sniper = boss.breed.id === SNIPER_BREED.id;
@@ -3690,14 +3955,15 @@ function drawBossBanner(
     // 페이즈 2 문구는 짧게 — 위계는 색이 말한다. 금색은 페이즈와 무관하게
     // 우두머리의 것이다: 가장 위험해지는 순간에 중간보스 색으로 강등되면
     // "격이 셋"이라는 위의 원칙이 스스로 깨진다(리뷰가 잡은 회귀).
-    sniper ? "설핏 든 것"
+    contract ? activeContractLine(contract, seed, "battle")
+      : sniper ? "설핏 든 것"
       : titled ? (stageBoss ? (boss.phase2 ? titled.bossPhase2 : titled.bossPhase1) : titled.mid)
       : stageBoss && boss.phase2 ? "사나워진 우두머리" : stageBoss ? "이 땅의 우두머리" : "되풀이되는 것",
     r.x + pad * 1.4,
     y + h * 0.72,
     nameSize * 0.72,
     stageBoss && !sniper ? T.gold : T.enemy,
-    { align: "left", weight: 700 },
+    { align: "left", weight: 700, maxWidth: Math.max(h * 3.2, r.w * 0.2) },
   );
 
   // 오른쪽 — 남은 페이즈. 숫자 하나로 "얼마나 남았나"가 잡힌다.
@@ -3793,12 +4059,26 @@ function drawNotice(
   // 보스가 살아 있으면 이 띠는 배너에 넘긴다. 안내는 배치 단계 것이라 겹치지 않는다.
   const boss = s.enemy.find((c) => c?.alive && c.radius > 0);
   if (s.phase === "battle" && boss) {
-    drawBossBanner(ctx, L, boss, boss.stageBoss === true, s.map.stage);
+    drawBossBanner(
+      ctx,
+      L,
+      boss,
+      boss.stageBoss === true,
+      s.map.stage,
+      s.nodeKind === "boss" ? s.raidContract : null,
+      s.seed,
+    );
     return;
   }
   const r = L.notice;
   const size = Math.max(11, r.h * 0.56);
   const cy = r.y + r.h / 2;
+  const chipGeometry = s.raidContract && (s.phase === "map" || s.phase === "prepare" || s.phase === "reward")
+    ? raidContractChipGeometry(L, s.raidContract, s.phase)
+    : null;
+  if (chipGeometry && s.raidContract) drawActiveRaidContractChip(ctx, chipGeometry, s.raidContract.risk);
+  const body = chipGeometry?.content ?? r;
+  const bodyCx = body.x + body.w / 2;
 
   /**
    * 이번에 싸울 상대의 성격을 알린다.
@@ -3819,6 +4099,14 @@ function drawNotice(
     // 쓰던 동안 상점을 밟은 판에서 배너가 실제 적과 다른 이름을 달고 있었다.
     const info = waveKindInfo(currentKind(s));
     const nameW = ctx.measureText(info.name).width;
+    if (chipGeometry) {
+      uiText(ctx, `${info.name} — ${info.hint}`, bodyCx, cy, size * 0.94, T.paperDim, {
+        align: "center",
+        weight: 600,
+        maxWidth: body.w * 0.94,
+      });
+      return;
+    }
     uiText(
       ctx,
       info.name,
@@ -3834,6 +4122,7 @@ function drawNotice(
     uiText(ctx, info.hint, L.w / 2 - nameW * 0.5, cy, size * 0.94, T.paperDim, {
       align: "left",
       weight: 600,
+      maxWidth: L.w / 2 + nameW * 0.5 - r.x - r.h,
     });
     return;
   }
@@ -3854,17 +4143,19 @@ function drawNotice(
     const since = trackNoticeChange(s.notice);
     const grow = reducedMotion() ? 1 : Math.min(1, (performance.now() - since) / 260);
     const scale = 0.82 + 0.18 * easeOutCubic(grow);
-    uiText(ctx, s.notice, L.w / 2, cy, size * 1.3 * scale, T.gold, {
+    uiText(ctx, s.notice, bodyCx, cy, size * 1.3 * scale, T.gold, {
       align: "center",
       weight: 800,
       outline: true,
+      maxWidth: body.w * 0.94,
     });
     return;
   }
 
-  uiText(ctx, s.notice, L.w / 2, cy, size, T.paperDim, {
+  uiText(ctx, s.notice, bodyCx, cy, size, T.paperDim, {
     align: "center",
     weight: 600,
+    maxWidth: body.w * 0.94,
   });
 }
 
@@ -3888,6 +4179,7 @@ export interface GameoverGeometry {
 export function gameoverGeometry(L: Layout, s: RunState): GameoverGeometry {
   const lines =
     (s.lossReason === "timeout" || s.killer ? 1 : 0) +
+    (s.raidContract || s.lastRaidContract ? 1 : 0) +
     (s.telegraphsSeen > 0 ? 1 : 0) +
     1 +
     (s.kind !== "free" ? 1 : 0) +
@@ -3980,12 +4272,12 @@ function drawGameOver(
   // 라벨과 숫자 사이 — 글자에 하한을 두었으므로 간격에도 하한을 둔다(폰에서 라벨이 숫자에 닿았다).
   const gap = Math.max(fontFloor > 0 ? 8 : 0, L.scale * 12);
 
-  uiText(ctx, "도달", L.w / 2, cy - numH / 2 - gap, font(15), T.muted, {
+  uiText(ctx, "악몽", L.w / 2, cy - numH / 2 - gap, font(15), T.muted, {
     align: "center",
     weight: 800,
   });
   numText(ctx, num, L.w / 2, cy, px, T.paper, "center", false);
-  uiText(ctx, "웨이브", L.w / 2, cy + numH / 2 + gap, font(16), T.muted, {
+  uiText(ctx, "깊이", L.w / 2, cy + numH / 2 + gap, font(16), T.muted, {
     align: "center",
     weight: 800,
   });
@@ -4015,6 +4307,19 @@ function drawGameOver(
       T.enemy,
       800,
     );
+  }
+
+  const debriefContract = s.nodeKind === "boss" ? s.raidContract : s.lastRaidContract;
+  if (debriefContract) {
+    line(
+      s.nodeKind === "boss"
+        ? `계약 ${activeContractLine(debriefContract, s.seed, "debrief")}`
+        : `계약 ${debriefContract.name} 완료 · 누적 생선 +${s.raidBonusFish}`,
+      T.gold,
+      800,
+    );
+  } else if (s.raidContract) {
+    line(`다음 계약 ${s.raidContract.name} · ${raidShareCode(s.seed, s.raidContract.id)}`, T.paperDim, 800);
   }
 
   // 예고 성적. 보스를 한 번도 안 만난 판에는 뜨지 않는다 — 없는 얘기를 하면
@@ -4073,7 +4378,7 @@ function drawGameOver(
 
   uiText(
     ctx,
-    s.recordBroken ? `${recordCaption(s)} 갱신` : `${recordCaption(s)} ${s.modeBest}웨이브`,
+    s.recordBroken ? `${recordCaption(s)} 갱신` : `${recordCaption(s)} 깊이 ${s.modeBest}`,
     L.w / 2,
     byy + bh + Math.max(fontFloor > 0 ? 12 : 0, L.scale * 14),
     font(14),
@@ -4159,7 +4464,7 @@ function watchTransitions(s: RunState): void {
   if (bosses > seenBosses) {
     seenBosses = bosses;
     seenStage = s.map.stage;
-    raise("악몽을 밀어냈어요", `${s.wave - 1}웨이브까지 잘 버텼어요`);
+    raise("악몽을 밀어냈어요", `악몽 깊이 ${s.wave - 1}까지 나아갔어요`);
     return;
   }
   if (s.map.stage !== seenStage) {
@@ -4246,6 +4551,7 @@ function bossArrival(s: RunState): BossArrival | null {
     arrivalFrameAt = 0;
     return null;
   }
+
   const now = performance.now();
   if (boss.uid !== arrivalBossUid) {
     arrivalBossUid = boss.uid;

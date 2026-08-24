@@ -9,12 +9,13 @@
  * 그래서 **모든 측정 봇이 같은 기준선 위에서** 보스를 넘고, 그 위에서 재려는
  * 축만 바꾼다.
  */
-import { bossIndexAt, buyOffer, chooseNode, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
-import { isBossStep, openLanes } from "../src/game/map.ts";
+import { bossIndexAt, buyOffer, chooseNode, chooseRaidContract, mapStep, moveCat, relicActive, rerollOffers, syncStage } from "../src/game/run.ts";
+import { isRaidPrepStep, openLanes } from "../src/game/map.ts";
 import { makeRng, mixSeed, rng } from "../src/game/rng.ts";
 import { BOARD_COLS, livingCats } from "../src/game/types.ts";
 import { bossForIndex } from "../src/game/bosses.ts";
 import { dodgeUsable, hazardsActive } from "../src/game/battle.ts";
+import { raidPrepRoute } from "../src/game/raid.ts";
 
 /**
  * 예고를 읽고 반응한다. 사람처럼 조금 늦고 가끔 놓친다 —
@@ -191,8 +192,21 @@ export function arrangeForRelics(s) {
  * `pick`은 고를 수 있는 칸들 중 하나를 고르는 함수다. 기본은 첫 칸(무작위에
  * 가깝지 않음)이 아니라 시드 난수 — 정책을 안 주면 아무 길이나 간다.
  */
-export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
+export function walkMap(
+  s,
+  pick = MAP_POLICIES["무작위"],
+  contractPick = RAID_CONTRACT_POLICIES["위험 낮은 계약"],
+) {
   syncStage(s);
+  if (s.raidOffers?.length > 0) {
+    const contractIdx = contractPick(s.raidOffers, s);
+    if (!Number.isInteger(contractIdx) || contractIdx < 0 || contractIdx >= s.raidOffers.length) {
+      throw new Error(`계약 정책이 유효하지 않은 인덱스를 냈다: ${String(contractIdx)}`);
+    }
+    if (!chooseRaidContract(s, contractIdx)) {
+      throw new Error(`계약 정책 선택 전이가 실패했다: ${contractIdx}`);
+    }
+  }
   const step = mapStep(s);
   const row = s.map.steps[step] ?? [];
   const open = openLanes(s.map, step);
@@ -205,8 +219,57 @@ export function walkMap(s, pick = MAP_POLICIES["무작위"]) {
   // 정책에 **판 상태도 넘긴다.** 안 넘기면 "늘 전투 / 늘 정찰" 같은 눈감은
   // 정책만 만들 수 있고, 그러면 상황을 읽는 결정을 애초에 잴 수 없다.
   const idx = pick(open, row, s) ?? open[0];
-  if (!chooseNode(s, idx)) chooseNode(s, open[0]);
+  if (!Number.isInteger(idx) || !open.includes(idx)) {
+    throw new Error(`지도 정책이 닫힌 칸을 골랐다: ${String(idx)}`);
+  }
+  if (!chooseNode(s, idx)) throw new Error(`지도 정책 선택 전이가 실패했다: ${idx}`);
 }
+
+/** 계약 선택 정책. 계약 공간 측정은 세 정책을 같은 시드로 짝비교한다. */
+export const RAID_CONTRACT_POLICIES = {
+  "첫 카드": () => 0,
+  "위험 낮은 계약": (offers) => {
+    let best = 0;
+    for (let i = 1; i < offers.length; i++) {
+      const a = offers[i];
+      const b = offers[best];
+      if (a.risk < b.risk || (a.risk === b.risk && a.rewardFish > b.rewardFish)) best = i;
+    }
+    return best;
+  },
+  "보상 큰 계약": (offers) => {
+    let best = 0;
+    for (let i = 1; i < offers.length; i++) {
+      const a = offers[i];
+      const b = offers[best];
+      if (a.rewardFish > b.rewardFish || (a.rewardFish === b.rewardFish && a.risk < b.risk)) best = i;
+    }
+    return best;
+  },
+  /**
+   * 현재 로스터를 읽는다. 근접이 많으면 집결·구조 계약, 원거리가 많으면
+   * 고정 바닥·산개 계약을 선호한다. 보상은 동률에서만 본다.
+   */
+  "팀 읽고 고름": (offers, state) => {
+    const cats = livingCats(state.ally);
+    const melee = cats.filter((cat) => cat.breed.kind === "melee").length;
+    const ranged = cats.length - melee;
+    const strength = cats.reduce((sum, cat) => sum + cat.level, 0) + state.relics.length * 1.5;
+    // 시작 3마리면 위험 1, 팀이 자라고 유물이 붙을수록 2·3을 감당한다.
+    const affordableRisk = strength >= 13 ? 3 : strength >= 7 ? 2 : 1;
+    const score = (contract) => {
+      const patterns = [...contract.patterns, ...(contract.phase2Patterns ?? [])];
+      const gatherish = patterns.filter((p) => p === "gather" || p === "hearth" || p === "seize").length;
+      const spreadish = patterns.filter((p) => p === "stomp" || p === "quake" || p === "sweep" || p === "circle").length;
+      const rosterFit = melee >= ranged ? gatherish : spreadish;
+      const overreach = Math.max(0, contract.risk - affordableRisk);
+      return rosterFit * 3 - overreach * 20 + contract.rewardFish * 0.25 - contract.risk * 0.4;
+    };
+    let best = 0;
+    for (let i = 1; i < offers.length; i++) if (score(offers[i]) > score(offers[best])) best = i;
+    return best;
+  },
+};
 
 /**
  * 상점을 나선다. 브라우저의 버튼과 **같은 함수**를 부른다.
@@ -240,12 +303,19 @@ export const MAP_POLICIES = {
    * - 그 밖에는 전투 — 정예는 판이 끝나는 이유의 31%라 이유 없이 갈 곳이 아니다
    */
   "읽고 고름": (open, row, s) => {
-    const next = mapStep(s) + 1;
+    const step = mapStep(s);
     const find = (k) => open.find((i) => row[i]?.kind === k);
-    if (isBossStep(next) && s.bonusDodge === 0) {
-      const shop = find("shop");
-      if (shop !== undefined) return shop;
+    // 계약 카드의 위험 한 칸을 실제 준비 경로로 번역한다. 낮음은 일반전,
+    // 중간은 정예, 높음은 정찰이다. 계약 직후 관문에는 세 경로가 모두 열린다.
+    if (isRaidPrepStep(step) && s.raidContract) {
+      const prepared = find(raidPrepRoute(s.raidContract));
+      if (prepared !== undefined) return prepared;
     }
+    // 일반 갈림길에서는 전투를 하나 덜 치르면서 생선·무료 재추첨을 얻는 정찰을
+    // 우선한다. 준비 관문의 계약별 대가를 지킨 뒤에는 이 게임의 현재 최선
+    // 장기 경로를 따르는 것이 "읽고 고름"의 기준선이다.
+    const scout = find("shop");
+    if (scout !== undefined) return scout;
     if (s.relics.length === 0) {
       const elite = find("elite");
       if (elite !== undefined) return elite;

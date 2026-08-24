@@ -9,6 +9,7 @@ $repoPath = Split-Path -Parent $PSScriptRoot
 $publicUrl = "https://mmporong.github.io/nyang-arena/"
 $qaPort = 4174
 $qaUrl = "http://127.0.0.1:$qaPort/qa.html"
+$gameQaUrl = "${publicUrl}?seed=424242"
 
 function Invoke-NpmCheck {
   param([Parameter(Mandatory = $true)][string]$Name)
@@ -29,7 +30,7 @@ function Test-Yes {
 Push-Location $repoPath
 try {
   if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
-    throw "npm.cmd was not found. Install Node.js 22.6 or newer."
+    throw "npm.cmd was not found. Install Node.js 24.12.0."
   }
   $viteEntry = Join-Path $repoPath "node_modules\vite\bin\vite.js"
   if (-not (Test-Path -LiteralPath $viteEntry)) {
@@ -122,15 +123,17 @@ try {
       throw "The local QA page was not ready within 15 seconds."
     }
 
+    Start-Process -FilePath $gameQaUrl
     Start-Process -FilePath $qaUrl
-    Write-Host "`nThe two-minute QA page is open in your browser." -ForegroundColor Yellow
-    Write-Host "Review the icon gallery and 900x320 deployment, then play the three-signal sequence once."
+    Write-Host "`nThe focused release QA pages are open in your browser." -ForegroundColor Yellow
+    Write-Host "Game: at ?seed=424242 choose by pointer and confirm ?raid=; reload that ?raid= and confirm the same contract auto-loads; reopen ?seed=424242 and choose slot 3 with Digit3; then follow the gold-ring route and confirm the contract boss/retry flow."
+    Write-Host "QA page: review 900x320, the three signals, and their audio once."
 
-    $visualAnswer = Read-Host "[1/2] Icons distinct and 900x320 view has no clipping/overlap (y/N)"
-    $audioAnswer = Read-Host "[2/2] Two chirps / low swell / bright bell are distinct (y/N)"
-    $visualPassed = Test-Yes $visualAnswer
-    $audioPassed = Test-Yes $audioAnswer
-    $manualPassed = $visualPassed -and $audioPassed
+    $flowAnswer = Read-Host "[1/2] Contract pointer+Digit3, ?raid URL, recommended route, contract boss, and retry all worked (y/N)"
+    $presentationAnswer = Read-Host "[2/2] Icons/900x320 have no clipping and danger/gather/weak signals plus audio are distinct (y/N)"
+    $flowPassed = Test-Yes $flowAnswer
+    $presentationPassed = Test-Yes $presentationAnswer
+    $manualPassed = $flowPassed -and $presentationPassed
 
     $evidenceDir = Join-Path $repoPath ".omx\evidence"
     [System.IO.Directory]::CreateDirectory($evidenceDir) | Out-Null
@@ -141,8 +144,8 @@ try {
     $lines = @(
       "# Nyang Arena manual QA",
       "",
-      "- Visual: $(if ($visualPassed) { 'PASS' } else { 'FAIL' })",
-      "- Audio: $(if ($audioPassed) { 'PASS' } else { 'FAIL' })",
+      "- Contract browser flow: $(if ($flowPassed) { 'PASS' } else { 'FAIL' })",
+      "- Presentation and signal/audio review: $(if ($presentationPassed) { 'PASS' } else { 'FAIL' })",
       "- Overall: $result",
       "- Commit: ``$head``",
       "- Deployment: $publicUrl",

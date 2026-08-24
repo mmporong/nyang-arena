@@ -62,10 +62,22 @@ const LANES = 4;
  * 슬더슬은 15층에 여섯을 긋는다. 여기는 여섯 걸음이라 다섯이면 밀도가 비슷하다.
  * 적으면 갈래가 안 생기고, 많으면 거의 모든 칸이 살아남아 격자가 된다.
  */
+/**
+ * 계약 보스 전 준비 경로가 실제로 열려 있어야 한다.
+ *
+ * 연결 밀도를 올린 7·9경로는 계약-aware 홀드아웃 중앙값을 모두 23까지 올려
+ * 상한 20을 넘겼다. 원래 다섯 경로를 유지하고, 닫힌 추천 경로는 정책이 열린
+ * 대체 경로로 내리도록 한다. 선택지를 억지로 늘려 밸런스를 무너뜨리지 않는다.
+ */
 const PATHS = 5;
 
 export function isBossStep(step: number): boolean {
   return BOSS_STEPS.has(step % STAGE_STEPS);
+}
+
+/** 계약을 고른 직후 세 준비 경로를 모두 여는 걸음(보스 두 걸음 전). */
+export function isRaidPrepStep(step: number): boolean {
+  return isBossStep(step + 2);
 }
 
 /** 한 여정에 보스가 몇인가. `BOSS_STEPS`에서 파생되므로 주기를 바꿔도 안 어긋난다. */
@@ -86,9 +98,15 @@ export function bossOrdinalInStage(step: number): number {
   return n;
 }
 
-/** 보스 걸음은 한 칸뿐이다 — 모든 길이 여기서 만난다. */
+/**
+ * 보스와 그 직전 확인 전투는 한 칸뿐이다.
+ *
+ * 계약 준비 세 갈래가 다시 갈라진 지도까지 결정하면, 고른 준비 보상이 아니라
+ * 이후 경로 운이 결과를 지배한다. 준비 관문 뒤 한 칸에서 합쳐 같은 확인 전투와
+ * 같은 보스를 만나게 해야 낮음/중간/높음의 대가만 비교할 수 있다.
+ */
 function laneCount(step: number): number {
-  return isBossStep(step) ? 1 : LANES;
+  return isBossStep(step) || isBossStep(step + 1) ? 1 : LANES;
 }
 
 /**
@@ -98,7 +116,7 @@ function laneCount(step: number): number {
  * 교차하지 않는다** — 슬더슬이 명시적으로 두는 규칙이고, 이유는 그리기다.
  * 선이 X자로 만나면 화면에서 어느 선이 내 선인지 따라갈 수가 없다.
  */
-function drawPath(startLane: number, edges: Set<string>[], rng: Rand): number[] {
+function drawPath(startLane: number, edges: Set<string>[], rng: Rand, pathIndex: number): number[] {
   const lanes: number[] = [];
   let cur = startLane;
   lanes.push(cur);
@@ -106,8 +124,10 @@ function drawPath(startLane: number, edges: Set<string>[], rng: Rand): number[] 
   for (let step = 0; step < STAGE_STEPS - 1; step++) {
     const width = laneCount(step + 1);
     const options: number[] = [];
-    for (let d = -1; d <= 1; d++) {
-      const to = cur + d;
+    const candidates = isBossStep(step)
+      ? Array.from({ length: width }, (_, i) => i)
+      : [-1, 0, 1].map((d) => cur + d);
+    for (const to of candidates) {
       if (to < 0 || to >= width) continue;
       // 교차 검사: 이 걸음에 이미 있는 선 (a → b)와 (cur → to)가 엇갈리는가.
       let crosses = false;
@@ -121,7 +141,10 @@ function drawPath(startLane: number, edges: Set<string>[], rng: Rand): number[] 
       if (!crosses) options.push(to);
     }
     // 갈 곳이 없으면 제자리로 간다. 폭이 좁아지는 보스 걸음에서 생길 수 있다.
-    const pick = options.length > 0
+    const forcedPrepLane = isBossStep(step) && pathIndex < Math.min(3, width) ? pathIndex : null;
+    const pick = forcedPrepLane !== null && options.includes(forcedPrepLane)
+      ? forcedPrepLane
+      : options.length > 0
       ? options[Math.floor(rng() * options.length)]!
       : Math.min(cur, width - 1);
     edges[step]!.add(`${cur}>${pick}`);
@@ -161,7 +184,8 @@ function battleWaves(count: number, hasElite: boolean, rng: Rand): WaveKind[] {
  * 살아남은 칸에 성격을 붙인다.
  *
  * 슬더슬의 배치 규칙을 이 게임 크기에 맞게 옮겼다.
- * - **첫 걸음은 전부 전투.** 시작하자마자 고민을 시키면 아직 아무 정보가 없다
+ * - **계약 직후 첫 걸음은 준비 3종.** 이미 카드에서 위험 정보를 받았으므로
+ *   일반전·정예·정찰을 모두 열어 그 정보를 즉시 행동으로 바꾼다
  * - **정예와 상점이 한 걸음을 통째로 덮지 않는다.** 슬더슬이 엘리트·상점·휴식을
  *   연속으로 두지 않는 것과 같은 이유다. 같은 성격이 붙으면 그 구간이 한 색이 된다
  * - **한 걸음에 상점 하나까지.** 둘이면 고르는 게 아니라 상점 구간이 된다
@@ -182,6 +206,13 @@ function assignKinds(steps: number[][], stage: number, rng: Rand): NodeKind[][] 
     const lanes = steps[step]!;
     if (isBossStep(step)) {
       out.push(lanes.map(() => "boss" as NodeKind));
+      continue;
+    }
+    if (isRaidPrepStep(step)) {
+      // 계약 선택 직후의 세 갈래는 확률에 맡기지 않는다. 낮음/중간/높음이
+      // 각각 요구하는 일반전/정예/정찰이 항상 한 번씩 있어야 카드가 행동이 된다.
+      const prepKinds: NodeKind[] = ["battle", "elite", "shop"];
+      out.push(lanes.map((_, i) => prepKinds[i] ?? "battle"));
       continue;
     }
     const prev = out[step - 1] ?? [];
@@ -252,10 +283,10 @@ export function makeStage(stage: number, runSeed = 0): StageMap {
   const paths: number[][] = [];
 
   for (let p = 0; p < PATHS; p++) {
-    let start = Math.floor(rng() * LANES);
-    // 처음 두 길은 서로 다른 줄에서 시작한다. 같으면 첫 걸음에 갈래가 없다.
-    if (p === 1 && start === paths[0]![0]) start = (start + 1 + Math.floor(rng() * (LANES - 1))) % LANES;
-    paths.push(drawPath(start, edges, rng));
+    // 첫 계약 준비 관문도 세 갈래가 모두 보여야 한다. 첫 세 경로는 서로 다른
+    // 줄에서 시작하고, 나머지만 시드 난수로 보탠다.
+    const start = p < Math.min(3, LANES) ? p : Math.floor(rng() * LANES);
+    paths.push(drawPath(start, edges, rng, p));
   }
 
   // 밟힌 줄만 살린다. 안 밟힌 칸은 그려 봐야 못 가는 곳이다.
@@ -359,7 +390,7 @@ export function nodeInfo(kind: NodeKind): { name: string; hint: string } {
       return { name: "가위눌림", hint: "무거워요. 밀어내면 뭔가 하나 떨어뜨리고 가요" };
     case "shop":
       // 종류 id는 shop이지만 하는 일은 정찰이다. 다음 보스를 대비하는 자리다.
-      return { name: "숨 돌리기", hint: "아무것도 안 와요. 생선과 다시 뽑기, 다음 악몽에 쓸 회피까지 챙겨요" };
+      return { name: "숨 돌리기", hint: "아무것도 안 와요. 생선과 다시 뽑기로 한 걸음 대비해요" };
     case "boss":
       return { name: "악몽", hint: "되풀이되는 거예요. 예고를 잘 보고 움직이세요" };
     // 보스별 안내는 bossHint가 따로 만든다 — 어느 보스가 오는지 알아야 해서다.
@@ -388,7 +419,11 @@ export function checkStage(map: StageMap): string[] {
     if (row.some((n) => n.kind === "boss")) problems.push(`${i}걸음에 보스가 섞였다`);
     if (!row.some((n) => n.kind === "battle")) problems.push(`${i}걸음에 전투가 없다`);
     if (row.filter((n) => n.kind === "shop").length > 1) problems.push(`${i}걸음에 상점이 둘`);
-    if (i === 0 && row.some((n) => n.kind !== "battle")) problems.push("첫 걸음이 전투가 아니다");
+    if (isRaidPrepStep(i)) {
+      for (const kind of ["battle", "elite", "shop"] as const) {
+        if (!row.some((n) => n.kind === kind)) problems.push(`${i}걸음 계약 준비에 ${kind}가 없다`);
+      }
+    }
     // 갈림길은 성격이 갈려야 한다. 전투 대 전투는 두 번 그린 같은 칸이다.
     if (i > 0 && row.length >= 2 && row.every((n) => n.kind === "battle")) {
       problems.push(`${i}걸음이 전부 전투다 — 고를 것이 없다`);

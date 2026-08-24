@@ -1,4 +1,5 @@
 import type { Breed, TelegraphShape } from "./types.ts";
+import type { RaidContract } from "../validate/raid-contract-schema.ts";
 
 /**
  * 보스.
@@ -228,9 +229,25 @@ export const BOSS_KITS: Record<number, BossKit> = {
   },
 };
 
-export function bossKit(breedId: number): BossKit {
+export function bossKit(breedId: number, contract: RaidContract | null = null): BossKit {
   if (breedId === 12) return SNIPER_KIT;
-  return BOSS_KITS[breedId] ?? BOSS_KITS[9]!;
+  const base = BOSS_KITS[breedId] ?? BOSS_KITS[9]!;
+  if (!contract) return base;
+  // 계약은 보스의 몸·순간이동·취약 창을 바꾸지 않는다. 실행이 검증된 패턴
+  // 배열만 교체해 원래 보스의 정체성과 밸런스 손잡이는 보존한다.
+  return {
+    ...base,
+    // 위험도는 카드의 장식이 아니다. 체력과 광역 피해를 함께 올려 보상과
+    // 맞바꾸는 실제 계약이다. 1단계는 원래 보스, 2·3단계만 더 세진다.
+    power: base.power * raidRiskPower(contract.risk),
+    patterns: contract.patterns,
+    phase2Patterns: contract.phase2Patterns ?? contract.patterns,
+  };
+}
+
+/** 카드 위험도와 실제 보스 체력·광역 피해를 잇는 단일 밸런스 계약. */
+export function raidRiskPower(risk: RaidContract["risk"]): number {
+  return [1, 1, 1.12, 1.5][risk] ?? 1;
 }
 
 export const BOSS_BREEDS: readonly Breed[] = [
