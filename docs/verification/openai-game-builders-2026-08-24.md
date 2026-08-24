@@ -12,6 +12,20 @@
 검증은 기능 커밋 직후 깨끗한 작업 트리에서 실행했다. 생성된 기준 파일은
 `docs/generated/metrics-current.json`과 `docs/generated/metrics-current.md`다.
 
+후속 릴리스에서 Windows PowerShell 5.1의 `Get-FileHash` 자동 로딩 충돌을 제거한
+수동 QA 호환성 수정 `c28493e`를 추가했다. 깨끗한 해당 커밋에서 전체 verify를 다시
+실행한 결과 분포·밸런스·번들 크기·아래 6축 로그 SHA는 기능 기준과 모두 같았고,
+`dirty:false`, `reproducible:true`, provenance `MATCH`를 유지했다. 그 결과는 증거
+커밋 `fe63458`에 기록했다.
+
+최종 GitHub Actions
+[32688784697](https://github.com/mmporong/nyang-arena/actions/runs/32688784697)은
+`fe63458f4c8be6d15e55484e60ce91b75d7f1d32`와 tree
+`93e289c46efcd057c63c19e2ca95f63d3bafdf22`에서 전체 verify·증거 artifact·Pages
+배포를 통과했다. 내려받은 artifact의 6개 원시 로그 SHA를 다시 계산한 값이
+manifest와 metrics에 6/6 일치했다. 최종 배포 뒤 `npm run qa:manual -- --AutomatedOnly`도
+통과했고, 로컬·공개 JavaScript 번들 SHA-256이 일치했다.
+
 ## 결정 축 6개
 
 | 축 | 시드 | 종료 | 원시 출력 SHA-256 |
@@ -62,9 +76,9 @@ manifest 여섯 행의 HEAD·tree·Node·dirty가 모두 대상과 같고, 저�
 ## 자동화 밖에 남은 항목
 
 - 인앱 브라우저 연결이 없어 실제 포인터·키보드·모바일·스피커 수동 QA는 미확인
-- 기존 썸네일은 형식 검증만 통과하며 새 악몽 계약 첫 화면을 보여 주지 않음
-- 새 핵심 루프를 담은 3분 이내 실플레이 영상 파일 없음
-- 기록 시점 공개 Pages는 아직 이전 커밋이며 push·CI·배포 확인 필요
-- 공식 폼의 현재 마감 표시와 기존 제출 수정 가능 여부는 로그인 세션에서 확인 필요
+- 기존 썸네일은 형식 검증만 통과하고 새 계약 첫 화면을 보여 주지 않으며,
+  새 핵심 루프를 담은 3분 이내 실플레이 영상 파일도 없음
+- 공식 페이지 원문은 08/26 일정·제출 버튼·완료 상태 마크업을 함께 포함하므로,
+  계정별 기존 제출 수정 가능 여부와 최종 영수증은 로그인 세션에서 확인 필요
 
 자동화가 증명하지 못한 위 항목을 완료로 표기하지 않는다.
