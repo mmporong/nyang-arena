@@ -1,9 +1,9 @@
 {
   "schema": 2,
   "generatedFrom": {
-    "commit": "5177602",
-    "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-    "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+    "commit": "ef2cdbe",
+    "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+    "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
     "dirty": false,
     "reproducible": true,
     "node": "v24.12.0",
@@ -85,11 +85,11 @@
         "exitCode": 0,
         "command": "npm run --silent sim",
         "seeds": "1..300",
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "node": "v24.12.0",
-        "sha256": "4b20e869c67fdef8ff74d96fb403fff897391b9445fead725937c52b56ddf867",
+        "sha256": "9923da2d285fca10375b29b1b28f3b0ae01128dc0183c1923809703df917c75a",
         "logShaMatches": true
       },
       {
@@ -98,8 +98,8 @@
         "exitCode": 0,
         "command": "npm run --silent decisions",
         "seeds": "1..300",
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "e1f895bbdb7b57e1b8e06ea429e49b428149d68fce6649187e1075f78a3cc71c",
@@ -111,8 +111,8 @@
         "exitCode": 0,
         "command": "npm run --silent placement",
         "seeds": "1..1200",
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "c49c6584f6c41b91878860b207ec71e5c35d0ad7cb99b73a6a041095d72dbdee",
@@ -124,8 +124,8 @@
         "exitCode": 0,
         "command": "npm run --silent intervention",
         "seeds": "1..300",
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "14f86439199653bfe33b908b56fe1237ce2c24b42ba7bf62e73824c4d8884a83",
@@ -137,8 +137,8 @@
         "exitCode": 0,
         "command": "npm run --silent map",
         "seeds": "prep:1..300;policy-space:1..1500",
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "7f5e709b5fde25df82066b95cf6ffc394ee0130f54015e6013d6416cef0d0119",
@@ -150,8 +150,8 @@
         "exitCode": 0,
         "command": "npm run --silent relics",
         "seeds": "1..2000",
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "7d73a3fba5773aa20c10e6e0e22a53187907c216f3c19bd5cb3a6eca9013b7b1",
@@ -162,8 +162,8 @@
     "allSixPassed": true,
     "raidContracts": {
       "source": {
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/contract-space.mjs",
         "seeds": {
@@ -260,12 +260,12 @@
         "dominance": true,
         "balance": true
       },
-      "evidenceSha256": "f68354eb598eaac742011db6cfcaed1112a54269ee77113540e0eaccb2f7a0c6"
+      "evidenceSha256": "1bd8e7af95b06cc46f33257ac15b07b6959d2273a8edf910707a671364d04647"
     },
     "mapPreparation": {
       "source": {
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/map-prep-space.mjs",
         "seeds": {
@@ -330,12 +330,12 @@
         "delivery": true,
         "outcome": true
       },
-      "evidenceSha256": "d547dbeb5be6d028e3dafda94a59ae85be1312d0cf0e92cc5fcb266f07e9ccc9"
+      "evidenceSha256": "6a7efbaa09deb9daa3c0366005ca93b14c3a14e6bae5e6d3cee43ce667a3d735"
     },
     "mapSpace": {
       "source": {
-        "head": "51776023aff4ab743b9cd6dd69df235e869ac009",
-        "tree": "ef39a53326bf2b06233edc78839e3f8e70a7885c",
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/map-space.mjs",
         "seeds": {
@@ -362,17 +362,559 @@
         "effect": true,
         "read": true
       },
-      "evidenceSha256": "a2638cf7df56bf9e028deb8033de364bbe37b506dc8b8bc429a2248e11aee074"
+      "evidenceSha256": "46500454179d9761e987217546997ef6e1cb04e0869bbe1249e02e224cdf1fc2"
+    }
+  },
+  "observations": {
+    "matchupCensus": {
+      "status": "OBSERVATION_ONLY",
+      "gate": false,
+      "decisionEligible": false,
+      "source": {
+        "head": "ef2cdbea4c01ddaf6ae9e6266b61b4504b18495d",
+        "tree": "853fea63b8fd36d5f332b6dc7c92abe358be4c51",
+        "dirty": false,
+        "command": "node --experimental-strip-types scripts/matchup-space.mjs",
+        "seeds": {
+          "scenarioSeed": 1296127043,
+          "fights": 81
+        },
+        "exitCode": 0,
+        "node": "v24.12.0"
+      },
+      "fights": 81,
+      "blocks": 9,
+      "cellN": 9,
+      "interactionDf": 4,
+      "estimand": "matched legal roster package × normal wave kind interaction residual",
+      "inference": "descriptive only; no p-value, confidence interval, or population claim",
+      "commonSeed": 1296127043,
+      "adjacencyMode": "kept as part of the actual roster package; not equalized or attributed to range alone",
+      "manifestSha256": "0d46546571ad1b2fe2067a5909aaff6820511b709ab1fe13cac2125060e7450c",
+      "cells": [
+        {
+          "team": "melee",
+          "waveKind": "mixed",
+          "fights": 9,
+          "wins": 1,
+          "meanMargin": -0.662736,
+          "interaction": 0.00538,
+          "meanElapsedMs": 4944.444444
+        },
+        {
+          "team": "melee",
+          "waveKind": "rush",
+          "fights": 9,
+          "wins": 0,
+          "meanMargin": -0.644037,
+          "interaction": -0.089655,
+          "meanElapsedMs": 6122.222222
+        },
+        {
+          "team": "melee",
+          "waveKind": "snipe",
+          "fights": 9,
+          "wins": 3,
+          "meanMargin": -0.281412,
+          "interaction": 0.084275,
+          "meanElapsedMs": 5644.444444
+        },
+        {
+          "team": "balanced",
+          "waveKind": "mixed",
+          "fights": 9,
+          "wins": 1,
+          "meanMargin": -0.616014,
+          "interaction": -0.01934,
+          "meanElapsedMs": 4033.333333
+        },
+        {
+          "team": "balanced",
+          "waveKind": "rush",
+          "fights": 9,
+          "wins": 3,
+          "meanMargin": -0.44399,
+          "interaction": 0.03895,
+          "meanElapsedMs": 5200
+        },
+        {
+          "team": "balanced",
+          "waveKind": "snipe",
+          "fights": 9,
+          "wins": 3,
+          "meanMargin": -0.313856,
+          "interaction": -0.01961,
+          "meanElapsedMs": 6200
+        },
+        {
+          "team": "ranged",
+          "waveKind": "mixed",
+          "fights": 9,
+          "wins": 3,
+          "meanMargin": -0.483235,
+          "interaction": 0.013959,
+          "meanElapsedMs": 3877.777778
+        },
+        {
+          "team": "ranged",
+          "waveKind": "rush",
+          "fights": 9,
+          "wins": 3,
+          "meanMargin": -0.332754,
+          "interaction": 0.050705,
+          "meanElapsedMs": 4000
+        },
+        {
+          "team": "ranged",
+          "waveKind": "snipe",
+          "fights": 9,
+          "wins": 3,
+          "meanMargin": -0.25943,
+          "interaction": -0.064665,
+          "meanElapsedMs": 6077.777778
+        }
+      ],
+      "checkpoints": [
+        {
+          "checkpoint": 4,
+          "fights": 27,
+          "wins": 20,
+          "cells": [
+            {
+              "team": "melee",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 1,
+              "meanMargin": -0.09533
+            },
+            {
+              "team": "melee",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.20006
+            },
+            {
+              "team": "melee",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 3,
+              "meanMargin": 0.610037
+            },
+            {
+              "team": "balanced",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 1,
+              "meanMargin": -0.100514
+            },
+            {
+              "team": "balanced",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 3,
+              "meanMargin": 0.423567
+            },
+            {
+              "team": "balanced",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 3,
+              "meanMargin": 0.560503
+            },
+            {
+              "team": "ranged",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 3,
+              "meanMargin": 0.189928
+            },
+            {
+              "team": "ranged",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 3,
+              "meanMargin": 0.664719
+            },
+            {
+              "team": "ranged",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 3,
+              "meanMargin": 0.593651
+            }
+          ]
+        },
+        {
+          "checkpoint": 8,
+          "fights": 27,
+          "wins": 0,
+          "cells": [
+            {
+              "team": "melee",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.912152
+            },
+            {
+              "team": "melee",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.77569
+            },
+            {
+              "team": "melee",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.52
+            },
+            {
+              "team": "balanced",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.797729
+            },
+            {
+              "team": "balanced",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.817973
+            },
+            {
+              "team": "balanced",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.591972
+            },
+            {
+              "team": "ranged",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.708935
+            },
+            {
+              "team": "ranged",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.728484
+            },
+            {
+              "team": "ranged",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.485794
+            }
+          ]
+        },
+        {
+          "checkpoint": 12,
+          "fights": 27,
+          "wins": 0,
+          "cells": [
+            {
+              "team": "melee",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.980727
+            },
+            {
+              "team": "melee",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.95636
+            },
+            {
+              "team": "melee",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.934272
+            },
+            {
+              "team": "balanced",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.9498
+            },
+            {
+              "team": "balanced",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.937564
+            },
+            {
+              "team": "balanced",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.910098
+            },
+            {
+              "team": "ranged",
+              "waveKind": "mixed",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.930697
+            },
+            {
+              "team": "ranged",
+              "waveKind": "rush",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.934495
+            },
+            {
+              "team": "ranged",
+              "waveKind": "snipe",
+              "fights": 3,
+              "wins": 0,
+              "meanMargin": -0.886146
+            }
+          ]
+        }
+      ],
+      "interactionResiduals": [
+        {
+          "team": "melee",
+          "waveKind": "mixed",
+          "count": 9,
+          "meanMargin": -0.662736,
+          "interaction": 0.00538
+        },
+        {
+          "team": "melee",
+          "waveKind": "rush",
+          "count": 9,
+          "meanMargin": -0.644037,
+          "interaction": -0.089655
+        },
+        {
+          "team": "melee",
+          "waveKind": "snipe",
+          "count": 9,
+          "meanMargin": -0.281412,
+          "interaction": 0.084275
+        },
+        {
+          "team": "balanced",
+          "waveKind": "mixed",
+          "count": 9,
+          "meanMargin": -0.616014,
+          "interaction": -0.01934
+        },
+        {
+          "team": "balanced",
+          "waveKind": "rush",
+          "count": 9,
+          "meanMargin": -0.44399,
+          "interaction": 0.03895
+        },
+        {
+          "team": "balanced",
+          "waveKind": "snipe",
+          "count": 9,
+          "meanMargin": -0.313856,
+          "interaction": -0.01961
+        },
+        {
+          "team": "ranged",
+          "waveKind": "mixed",
+          "count": 9,
+          "meanMargin": -0.483235,
+          "interaction": 0.013959
+        },
+        {
+          "team": "ranged",
+          "waveKind": "rush",
+          "count": 9,
+          "meanMargin": -0.332754,
+          "interaction": 0.050705
+        },
+        {
+          "team": "ranged",
+          "waveKind": "snipe",
+          "count": 9,
+          "meanMargin": -0.25943,
+          "interaction": -0.064665
+        }
+      ],
+      "dominant": {
+        "team": "melee",
+        "waveKind": "rush",
+        "interaction": -0.089655,
+        "absInteraction": 0.089655
+      },
+      "sensitivity": {
+        "rosterOmissions": [
+          {
+            "omitted": 1,
+            "combatCount": 54,
+            "dominant": {
+              "team": "melee",
+              "waveKind": "rush",
+              "interaction": -0.098963,
+              "absInteraction": 0.098963
+            },
+            "maxAbsDeltaFromFull": 0.027069
+          },
+          {
+            "omitted": 2,
+            "combatCount": 54,
+            "dominant": {
+              "team": "melee",
+              "waveKind": "snipe",
+              "interaction": 0.103445,
+              "absInteraction": 0.103445
+            },
+            "maxAbsDeltaFromFull": 0.035268
+          },
+          {
+            "omitted": 3,
+            "combatCount": 54,
+            "dominant": {
+              "team": "melee",
+              "waveKind": "rush",
+              "interaction": -0.096445,
+              "absInteraction": 0.096445
+            },
+            "maxAbsDeltaFromFull": 0.029576
+          }
+        ],
+        "checkpointOmissions": [
+          {
+            "omitted": 4,
+            "combatCount": 54,
+            "dominant": {
+              "team": "melee",
+              "waveKind": "mixed",
+              "interaction": -0.039838,
+              "absInteraction": 0.039838
+            },
+            "maxAbsDeltaFromFull": 0.108653
+          },
+          {
+            "omitted": 8,
+            "combatCount": 54,
+            "dominant": {
+              "team": "melee",
+              "waveKind": "rush",
+              "interaction": -0.149484,
+              "absInteraction": 0.149484
+            },
+            "maxAbsDeltaFromFull": 0.059829
+          },
+          {
+            "omitted": 12,
+            "combatCount": 54,
+            "dominant": {
+              "team": "melee",
+              "waveKind": "rush",
+              "interaction": -0.13848,
+              "absInteraction": 0.13848
+            },
+            "maxAbsDeltaFromFull": 0.048824
+          }
+        ],
+        "cells": [
+          {
+            "team": "melee",
+            "waveKind": "mixed",
+            "full": 0.00538,
+            "min": -0.039838,
+            "max": 0.045188,
+            "directionStable": false
+          },
+          {
+            "team": "melee",
+            "waveKind": "rush",
+            "full": -0.089655,
+            "min": -0.149484,
+            "max": 0.018998,
+            "directionStable": false
+          },
+          {
+            "team": "melee",
+            "waveKind": "snipe",
+            "full": 0.084275,
+            "min": 0.02084,
+            "max": 0.12769,
+            "directionStable": true
+          },
+          {
+            "team": "balanced",
+            "waveKind": "mixed",
+            "full": -0.01934,
+            "min": -0.049075,
+            "max": 0.020493,
+            "directionStable": false
+          },
+          {
+            "team": "balanced",
+            "waveKind": "rush",
+            "full": 0.03895,
+            "min": -0.00509,
+            "max": 0.064593,
+            "directionStable": false
+          },
+          {
+            "team": "balanced",
+            "waveKind": "snipe",
+            "full": -0.01961,
+            "min": -0.033589,
+            "max": -0.003027,
+            "directionStable": true
+          },
+          {
+            "team": "ranged",
+            "waveKind": "mixed",
+            "full": 0.013959,
+            "min": -0.013109,
+            "max": 0.030445,
+            "directionStable": false
+          },
+          {
+            "team": "ranged",
+            "waveKind": "rush",
+            "full": 0.050705,
+            "min": -0.013908,
+            "max": 0.084892,
+            "directionStable": false
+          },
+          {
+            "team": "ranged",
+            "waveKind": "snipe",
+            "full": -0.064665,
+            "min": -0.09978,
+            "max": -0.005436,
+            "directionStable": true
+          }
+        ],
+        "directionStableCells": 3
+      },
+      "evidenceSha256": "29a9a835d84d29db07df2847c9f676460891750d1ca0020e6c0ac31e07bdbe12"
     }
   },
   "openIssues": [
     {
-      "id": "matchup-metric-noisy",
-      "what": "궁합 표(팀 성격 x 웨이브 성격)가 결정에 쓸 만큼 안정적이지 않다",
-      "measured": "같은 코드·같은 시드 범위에서 4.2%p와 7.6%p가 나온다. 무관한 변수를 바꾸면 9.2%p와 5.0%p",
-      "diagnosis": "팀 성격 분류가 봇이 그때그때 어떤 팀을 갖게 되느냐에 달려 있어 칸마다 표본이 들쭉날쭉하다",
-      "consequence": "이 수치로 '일반 웨이브에 궁합이 있다/없다'를 말하면 안 된다. WS4(일반 웨이브에 역할 주기)는 지표를 고치기 전까지 보류",
-      "stable": "보스 열만은 일관되다 — 근접 87% vs 원거리 75%, 세 번 잰 값이 모두 12~15%p"
+      "id": "matchup-census-generalization-limited",
+      "what": "통제형 궁합 관찰은 매니페스트의 고정 81장면 밖으로 일반화할 수 없다",
+      "measured": "최대 |I| 0.090 · 체크포인트 승리 W4 20/27 · W8 0/27 · W12 0/27",
+      "diagnosis": "roster set·checkpoint·seed는 확률 표본이 아니라 사전 선택한 유한 census이며, wave 8·12는 바닥 포화가 있다",
+      "consequence": "이 값만으로 사거리 단일 효과나 자연 런 메타를 주장하거나 밸런스 수치를 바꾸지 않는다",
+      "stable": "leave-one-out에서 상호작용 방향을 유지한 셀 3/9"
     }
   ]
 }
