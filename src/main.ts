@@ -95,6 +95,7 @@ if (RAID_CONTRACT_POOL_STATUS.usingFallback) {
 
 let layout: Layout = computeLayout(800, 600);
 const initialUrl = new URL(location.href);
+const debugEnabled = initialUrl.searchParams.get("debug") === "1";
 const initialRaidRaw = initialUrl.searchParams.get("raid");
 const initialSeedRaw = initialUrl.searchParams.get("seed");
 const initialRaid = parseRaidShareCode(initialRaidRaw);
@@ -118,6 +119,44 @@ if (initialSeedRaw && parseRaidSeed(initialSeedRaw) === null) {
 }
 const drag: DragState = { active: false, fromCell: -1, x: 0, y: 0, pointerId: -1, hoverX: -1, hoverY: -1 };
 let hoverCell = -1;
+
+interface RuntimeObservation {
+  assetsReady: boolean;
+  booted: boolean;
+  frameCount: number;
+  paused: boolean;
+  lastDt: number;
+  resumeFirstDt: number | null;
+  resizeCount: number;
+  orientationCount: number;
+  visibilityCount: number;
+  resumeCount: number;
+  lastInput: Readonly<Record<string, unknown>> | null;
+  lastResize: Readonly<{
+    width: number;
+    height: number;
+    dpr: number;
+    backingWidth: number;
+    backingHeight: number;
+  }> | null;
+}
+
+// `?debug=1` 하네스가 읽는 관찰값이다. 판정에는 들어가지 않으며 기본 URL에는
+// 노출되지 않는다. 객체는 이 모듈만 쓰고, 창에는 매번 복사본만 건넨다.
+const runtimeObservation: RuntimeObservation = {
+  assetsReady: false,
+  booted: false,
+  frameCount: 0,
+  paused: document.hidden,
+  lastDt: 0,
+  resumeFirstDt: null,
+  resizeCount: 0,
+  orientationCount: 0,
+  visibilityCount: 0,
+  resumeCount: 0,
+  lastInput: null,
+  lastResize: null,
+};
 
 /**
  * 페이즈가 바뀐 시각. 전환 직후 짧게 입력을 잠근다.
@@ -276,6 +315,16 @@ function resize(): void {
   ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx!.imageSmoothingEnabled = false;
   layout = computeLayout(w, h, state.phase !== "battle");
+  if (debugEnabled) {
+    runtimeObservation.resizeCount += 1;
+    runtimeObservation.lastResize = {
+      width: w,
+      height: h,
+      dpr,
+      backingWidth: canvas.width,
+      backingHeight: canvas.height,
+    };
+  }
   // 드래그 중 회전하거나 주소창이 접히면 보드 위치가 통째로 바뀐다.
   // 옛 레이아웃으로 잡은 출발 셀을 새 레이아웃 좌표에 드롭하면 엉뚱한 칸으로 간다.
   routeInput({ kind: "resize" });
@@ -457,6 +506,16 @@ const inputEffects: GameInputEffects = {
 
 /** DOM 이벤트는 좌표만 정규화하고, 실제 입력 정책은 Node 테스트와 같은 경계를 지난다. */
 function routeInput(event: GameInputEvent): boolean {
+  // resize는 입력 정책을 정리하는 내부 신호다. 사용자가 실제로 누른 마지막
+  // 키·포인터를 덮지 않아 CDP가 DOM 입력 경계를 그대로 확인할 수 있게 한다.
+  if (
+    debugEnabled
+    && event.kind !== "resize"
+    && event.kind !== "pointer-move"
+    && event.kind !== "lost-pointer-capture"
+  ) {
+    runtimeObservation.lastInput = { ...event };
+  }
   const outcome = dispatchGameInput(
     {
       state,
@@ -558,7 +617,7 @@ window.addEventListener("keydown", (e) => {
  * 기본 경로에는 없다 — 플래그가 없으면 아무것도 붙지 않으므로 출고 빌드의
  * 동작과 크기에 영향이 없다.
  */
-if (new URLSearchParams(location.search).get("debug") === "1") {
+if (debugEnabled) {
   Object.defineProperty(window, "nyang", {
     get: () => ({
       phase: state.phase,
@@ -603,12 +662,35 @@ if (new URLSearchParams(location.search).get("debug") === "1") {
       telegraphs: state.enemy.filter((c) => c?.telegraph).map((c) => c!.telegraph!.mode),
       vulnerable: state.enemy.some((c) => c?.alive && c.vulnerableMs > 0),
       button: { ...layout.button },
+      runtime: {
+        ...runtimeObservation,
+        lastInput: runtimeObservation.lastInput ? { ...runtimeObservation.lastInput } : null,
+        lastResize: runtimeObservation.lastResize ? { ...runtimeObservation.lastResize } : null,
+      },
     }),
   });
 }
 
 let last = 0;
+let rafId: number | null = null;
+let awaitingResumeFrame = false;
+
+/** 실행 가능한 동안 rAF를 정확히 하나만 예약한다. */
+function scheduleFrame(): void {
+  if (!runtimeObservation.booted || runtimeObservation.paused || rafId !== null) return;
+  rafId = requestAnimationFrame(frame);
+}
+
 function frame(now: number): void {
+  // 이 콜백이 소비한 예약을 먼저 비운다. 이후 경로는 scheduleFrame 하나만 쓴다.
+  rafId = null;
+  // visibilitychange와 같은 태스크 경계에서 이미 실행 대기 중이던 콜백도
+  // 판정·렌더 전에 멈춘다. 숨은 탭은 단 한 스텝도 진행하지 않는다.
+  if (document.hidden || runtimeObservation.paused) {
+    runtimeObservation.paused = true;
+    last = 0;
+    return;
+  }
   if (state.phase !== lastPhase) {
     // 카드가 뜨고 지는 국면에서 아래 띠의 높이가 달라진다. 그때만 판을 다시
     // 잡는다 — 전투 중에 다시 잡으면 유닛이 눈앞에서 크기가 변한다.
@@ -633,6 +715,14 @@ function frame(now: number): void {
   }
   const dt = last === 0 ? 16 : Math.min(100, now - last);
   last = now;
+  if (debugEnabled) {
+    runtimeObservation.frameCount += 1;
+    runtimeObservation.lastDt = dt;
+  }
+  if (debugEnabled && awaitingResumeFrame) {
+    runtimeObservation.resumeFirstDt = dt;
+    awaitingResumeFrame = false;
+  }
   /**
    * 화면 체감용 배속(`BALANCE.battleSpeed`)은 **여기, 실시간 dt에만** 곱한다.
    * `scripts/`의 헤드리스 하네스는 `stepBattle(s, 100)`을 직접 부르므로 이
@@ -653,31 +743,54 @@ function frame(now: number): void {
    * `dt`가 100ms로 잘려 게임 시간이 10분의 1 속도로 기어가고 배터리는 계속 쓴다. 세워 두면
    * 돌아왔을 때 떠난 자리에서 그대로 이어진다 — 전투 중에 탭을 바꿔도 판이 흘러가 있지 않다.
    */
-  if (document.hidden) {
-    paused = true;
-    return;
-  }
-  requestAnimationFrame(frame);
+  scheduleFrame();
 }
 
-let paused = false;
 document.addEventListener("visibilitychange", () => {
+  if (debugEnabled) runtimeObservation.visibilityCount += 1;
   setAudioVisibility(document.hidden);
-  if (document.hidden || !paused) return;
-  paused = false;
-  // 떠난 동안의 시간을 한 번에 밀어 넣지 않도록 dt 기준점을 비운다.
+  if (document.hidden) {
+    runtimeObservation.paused = true;
+    // 이미 큐에 든 프레임도 취소해 숨은 탭에서 상태가 한 번 더 흐르는 경주를 막는다.
+    if (rafId !== null) cancelAnimationFrame(rafId);
+    rafId = null;
+    last = 0;
+    return;
+  }
+  if (!runtimeObservation.paused) return;
+  runtimeObservation.paused = false;
+  if (debugEnabled) {
+    runtimeObservation.resumeCount += 1;
+    awaitingResumeFrame = true;
+  }
+  // 떠난 동안의 시간을 한 번에 밀어 넣지 않도록 첫 복귀 프레임은 16ms로 고정한다.
   last = 0;
-  requestAnimationFrame(frame);
+  scheduleFrame();
 });
 
 async function boot0(): Promise<void> {
   // 둘을 나란히 기다린다. 아이콘은 33KB뿐이라 스프라이트보다 먼저 끝난다.
   await Promise.all([loadSprites(), loadIcons()]);
+  if (debugEnabled) runtimeObservation.assetsReady = true;
   resize();
   window.addEventListener("resize", resize);
-  window.addEventListener("orientationchange", () => setTimeout(resize, 120));
+  let orientationTimer: number | null = null;
+  const onOrientationChange = () => {
+    // 표준 이벤트와 구형 이벤트가 함께 오면 하나의 회전으로 합친다. Screen
+    // Orientation API가 없는 브라우저도 window 이벤트만으로 같은 resize를 탄다.
+    if (orientationTimer === null && debugEnabled) runtimeObservation.orientationCount += 1;
+    if (orientationTimer !== null) clearTimeout(orientationTimer);
+    orientationTimer = window.setTimeout(() => {
+      orientationTimer = null;
+      resize();
+    }, 120);
+  };
+  window.addEventListener("orientationchange", onOrientationChange);
+  screen.orientation?.addEventListener("change", onOrientationChange);
   boot?.classList.add("gone");
-  requestAnimationFrame(frame);
+  runtimeObservation.booted = true;
+  runtimeObservation.paused = document.hidden;
+  scheduleFrame();
 }
 
 void boot0();
