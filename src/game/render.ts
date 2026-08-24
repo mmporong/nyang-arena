@@ -22,7 +22,7 @@ import { bossHint, bossOrdinalInStage, isRaidPrepStep, nodeInfo, openLanes, STAG
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
-import { cellRect, fieldToScreen, type Layout, type Rect } from "./layout.ts";
+import { cellRect, fieldToScreen, uiSpace, type Layout, type Rect } from "./layout.ts";
 import { spriteFor } from "./sprites.ts";
 import {
   boardUnits,
@@ -2900,6 +2900,23 @@ function drawRerollButton(
   numText(ctx, String(REROLL_COST), rollRight, rr.y + rr.h / 2, rollPx, canRoll ? T.fish : T.muted, "right", false);
 }
 
+/** 패널 안의 서로 다른 읽기 구역을 배경색만으로 구분하지 않게 하는 기준선. */
+function drawPanelDivider(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+): void {
+  const fade = Math.min(24, w * 0.12);
+  const gradient = ctx.createLinearGradient(x, y, x + w, y);
+  gradient.addColorStop(0, "rgba(239,224,198,0)");
+  gradient.addColorStop(fade / w, "rgba(239,224,198,0.18)");
+  gradient.addColorStop(1 - fade / w, "rgba(239,224,198,0.18)");
+  gradient.addColorStop(1, "rgba(239,224,198,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, Math.round(y), w, 1);
+}
+
 function drawBottomZone(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -2921,26 +2938,40 @@ function drawBottomZone(
     // 아니면 보유 유물. 국면마다 패널이 생겼다 사라지면 화면이 요동친다.
     const p = L.offersPanel;
     roundRect(ctx, p, Math.min(16, p.w * 0.06));
-    ctx.fillStyle = "rgba(20,14,11,0.72)";
+    ctx.fillStyle = "rgba(20,14,11,0.80)";
     ctx.fill();
-    ctx.strokeStyle = "rgba(239,224,198,0.08)";
+    ctx.strokeStyle = "rgba(239,224,198,0.18)";
     ctx.lineWidth = 1;
     ctx.stroke();
     // 왼쪽 줄(직업 수 + 목표)은 전투 중에도 남는다. 무엇이 몇 마리 살아 있고
     // 목표를 얼마나 채웠는지가 전투를 보는 정보다. 두 블록을 한 패널로 묶어야
     // 한 덩어리로 읽힌다 — 따로 깔았더니 직업 수만 떠 있는 상자로 보였다.
+    const panelPad = uiSpace(L.scale, 3);
+    const leftPanelPad = Math.min(panelPad, L.offers.x);
     const lp = {
-      x: L.offers.x - 10,
-      y: L.offers.y - 10,
-      w: L.offers.w + 20,
-      h: L.synergyBar.y + L.synergyBar.h - L.offers.y + 20,
+      x: L.offers.x - leftPanelPad,
+      y: L.offers.y - leftPanelPad,
+      w: L.offers.w + leftPanelPad * 2,
+      h: L.synergyBar.y + L.synergyBar.h - L.offers.y + leftPanelPad * 2,
     };
     roundRect(ctx, lp, Math.min(16, lp.w * 0.06));
-    ctx.fillStyle = "rgba(20,14,11,0.72)";
+    ctx.fillStyle = "rgba(20,14,11,0.80)";
     ctx.fill();
-    ctx.strokeStyle = "rgba(239,224,198,0.08)";
+    ctx.strokeStyle = "rgba(239,224,198,0.18)";
     ctx.lineWidth = 1;
     ctx.stroke();
+    drawPanelDivider(
+      ctx,
+      lp.x + leftPanelPad,
+      (L.offers.y + L.offers.h + L.synergyBar.y) / 2,
+      lp.w - leftPanelPad * 2,
+    );
+    drawPanelDivider(
+      ctx,
+      p.x + panelPad,
+      L.offerCards.y - uiSpace(L.scale, 1),
+      p.w - panelPad * 2,
+    );
     drawTeamStrip(ctx, L, s);
     if (reward) {
       drawRerollButton(ctx, L, s, rr);
@@ -2981,7 +3012,7 @@ function drawBottomZone(
     ctx.fillStyle = g;
     ctx.fillRect(0, panel.y - fade, L.w, fade);
   } else {
-    ctx.strokeStyle = "rgba(239,224,198,0.09)";
+    ctx.strokeStyle = "rgba(239,224,198,0.18)";
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, panel.y + 0.5);
@@ -3025,6 +3056,7 @@ function drawSynergies(
   s: RunState,
 ): void {
   const r = L.synergyBar;
+  if (r.h < 12) return;
   const n = Math.max(1, s.synergies.length);
   const units = boardUnits(s);
   // 세로줄에서는 위아래로 쌓고, 접힌 구성에서는 좌우로 늘어놓는다.
@@ -3191,6 +3223,62 @@ export function mapNodeRects(L: Layout, s: RunState): { rect: Rect; step: number
   return out;
 }
 
+/** 그림의 호버와 포인터 입력이 함께 쓰는 현재 열린 길 목록. */
+export function openMapNodeRects(L: Layout, s: RunState): { rect: Rect; step: number; idx: number }[] {
+  const step = mapStep(s);
+  const open = new Set(openLanes(s.map, step));
+  return mapNodeRects(L, s).filter((entry) => entry.step === step && open.has(entry.idx));
+}
+
+/** 지도 원이 작아져도 포인터 판정은 DESIGN.md의 44px 하한을 지킨다. */
+export function mapNodeHitRadius(rect: Rect): number {
+  return Math.max(22, rect.w / 2 + 6);
+}
+
+/** 겹치는 44px 판정 안에서는 배열 순서가 아니라 손가락에 가장 가까운 칸을 고른다. */
+export function nearestMapNode<T extends { rect: Rect }>(
+  nodes: readonly T[],
+  x: number,
+  y: number,
+): T | undefined {
+  let nearest: T | undefined;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const node of nodes) {
+    const cx = node.rect.x + node.rect.w / 2;
+    const cy = node.rect.y + node.rect.h / 2;
+    const distance = Math.hypot(x - cx, y - cy);
+    if (distance > mapNodeHitRadius(node.rect) || distance >= nearestDistance) continue;
+    nearest = node;
+    nearestDistance = distance;
+  }
+  return nearest;
+}
+
+export interface MapChoiceLabelGeometry {
+  y: number;
+  fontSize: number;
+  maxWidth: number;
+  bottom: number;
+}
+
+/** 열린 길의 영구 라벨. 행동 구역 위에서 끝나도록 렌더와 프로브가 같이 쓴다. */
+export function mapChoiceLabelGeometry(L: Layout, rect: Rect, boss = false): MapChoiceLabelGeometry {
+  const fontSize = Math.max(10, rect.w * (boss ? 0.3 : 0.28));
+  const actionBoundary = L.button.y - L.actionGap;
+  const preferredY = rect.y + rect.h + fontSize * 0.95;
+  const y = Math.min(preferredY, actionBoundary - fontSize * 0.6);
+  return {
+    y,
+    fontSize,
+    maxWidth: rect.w * (boss ? 3.4 : 2.8),
+    bottom: y + fontSize * 0.6,
+  };
+}
+
+export function mapChoiceLabelText(shortcut: number, label: string): string {
+  return `${shortcut} ${label}`;
+}
+
 /**
  * 지도가 서는 자리.
  *
@@ -3200,7 +3288,8 @@ export function mapNodeRects(L: Layout, s: RunState): { rect: Rect; step: number
  */
 function mapBox(L: Layout): Rect {
   const top = L.notice.y + L.notice.h + L.scale * 10;
-  const bottom = L.button.y - L.scale * 12;
+  // 맨 아래 원 밑에 숫자·종류 라벨이 설 한 토큰을 먼저 예약한다.
+  const bottom = L.button.y - L.actionGap - uiSpace(L.scale, 3);
   const h = Math.max(L.scale * 160, bottom - top);
   const w = Math.min(L.w * 0.5, Math.max(L.scale * 260, 320));
   return { x: L.w / 2 - w / 2, y: top, w, h };
@@ -3208,13 +3297,18 @@ function mapBox(L: Layout): Rect {
 
 /** 첫 화면의 악몽 계약 카드. 렌더·히트테스트·레이아웃 검사가 같은 기하를 쓴다. */
 export function raidContractRects(L: Layout, count = 3): Rect[] {
-  const gap = Math.max(6, Math.min(18, L.scale * 14));
-  const top = L.notice.y + L.notice.h + (L.h < 360 ? 30 : Math.max(52, L.scale * 58));
-  const bottom = L.button.y - Math.max(8, L.scale * 10);
+  const veryShort = L.h < 300;
+  const top = L.notice.y + L.notice.h + (veryShort ? 8 : L.h < 360 ? 30 : Math.max(52, L.scale * 58));
+  const bottom = L.button.y - L.actionGap;
   const availableH = Math.max(96, bottom - top);
-  const stacked = L.portrait || L.w < 600;
+  const stackedGap = uiSpace(L.scale, 3);
+  const wantsStacked = L.portrait || L.w < 600;
+  // 폭만 보고 세로 스택을 고르면 599×359에서 카드가 61px까지 무너진다.
+  // 세 장이 각각 본문·footer 최소 높이를 가질 때만 1열로 접는다.
+  const stacked = wantsStacked && availableH >= 112 * count + stackedGap * (count - 1);
+  const gap = stacked || L.w < 600 ? stackedGap : 24;
   if (stacked) {
-    const w = Math.min(L.w - 24, Math.max(260, L.w * 0.88));
+    const w = Math.min(L.w - uiSpace(L.scale, 3) * 2, Math.max(260, L.w * 0.88));
     const h = (availableH - gap * (count - 1)) / count;
     return Array.from({ length: count }, (_, i) => ({
       x: L.w / 2 - w / 2,
@@ -3223,14 +3317,96 @@ export function raidContractRects(L: Layout, count = 3): Rect[] {
       h,
     }));
   }
-  const side = Math.max(12, Math.min(40, L.w * 0.035));
-  const w = (L.w - side * 2 - gap * (count - 1)) / count;
+  const maxCardW = 420;
+  const maxCardH = 440;
+  const side = uiSpace(L.scale, 4);
+  const availableW = Math.min(L.w - side * 2, maxCardW * count + gap * (count - 1));
+  const w = (availableW - gap * (count - 1)) / count;
+  const h = Math.min(availableH, maxCardH);
+  const left = (L.w - availableW) / 2;
+  const y = top + (availableH - h) / 2;
   return Array.from({ length: count }, (_, i) => ({
-    x: side + i * (w + gap),
-    y: top,
+    x: left + i * (w + gap),
+    y,
     w,
-    h: availableH,
+    h,
   }));
+}
+
+export interface RaidContractCardGeometry {
+  narrow: boolean;
+  compactHeader: boolean;
+  pad: number;
+  titleSize: number;
+  bodySize: number;
+  textTop: number;
+  lineH: number;
+  sectionGap: number;
+  maxLines: number;
+  contentBottomY: number;
+  footerLineY: number;
+  rewardY: number;
+  rewardMaxWidth: number;
+  keyRect: Rect | null;
+}
+
+/** 계약 카드 내부의 제목·본문·footer 경계. 실제 그림과 프로브가 같은 값을 쓴다. */
+export function raidContractCardGeometry(rect: Rect, compact: boolean): RaidContractCardGeometry {
+  const narrow = rect.w < 180;
+  const short = rect.h < 112;
+  const pad = compact || narrow || short ? 8 : Math.max(12, Math.min(16, rect.w * 0.05));
+  const fullTitleSize = Math.max(14, Math.min(narrow ? 16 : compact ? 18 : 24, rect.h * (compact ? 0.12 : 0.09)));
+  const bodySize = compact
+    ? 12
+    : Math.max(12, Math.min(narrow ? 12 : 16, rect.h * 0.057));
+  // 한 행 header는 번호·최대 7자 제목·발톱·위험 문구 사이 8px을 확보할 때만 쓴다.
+  const titleHalfW = fullTitleSize * 0.92 * 7 / 2;
+  const numberRight = pad + bodySize * 0.92;
+  const riskLeft = rect.w - pad - Math.max(bodySize * 5.1, bodySize * 0.92 * 5);
+  const compactHeader = rect.w / 2 - titleHalfW < numberRight + 8 ||
+    rect.w / 2 + titleHalfW + 8 > riskLeft;
+  const titleSize = compactHeader ? Math.min(fullTitleSize, 18) : fullTitleSize;
+  const textTop = rect.y + pad + titleSize * (compactHeader ? 2.2 : 1.45);
+  const lineH = bodySize * (compact ? 1.2 : 1.35);
+  const sectionGap = bodySize * (compact ? 0.25 : 0.45);
+  const rewardY = rect.y + rect.h - pad - bodySize * 0.15;
+  const footerLineY = rewardY - bodySize * (compact ? 1.2 : 1.45);
+  // 규칙과 대응이 같은 줄 예산을 나눠 쓴다. 좁고 높은 카드는 4~8줄까지 써
+  // 폭 때문에 생긴 세로 여백을 실제 설명으로 돌려준다.
+  const bodyBudget = footerLineY - 8 - textTop;
+  const maxLines = Math.max(
+    1,
+    Math.min(8, Math.floor((bodyBudget - sectionGap - bodySize / 2 + lineH) / (lineH * 2))),
+  );
+  const worstCounterY = textTop + maxLines * lineH + sectionGap;
+  const contentBottomY = worstCounterY + (maxLines - 1) * lineH + bodySize / 2;
+  const keyW = Math.max(46, bodySize * 4.1);
+  const keyRect: Rect | null = narrow
+    ? null
+    : {
+        x: rect.x + rect.w - pad - keyW,
+        y: rewardY - bodySize * 0.82,
+        w: keyW,
+        h: bodySize * 1.64,
+      };
+  return {
+    narrow,
+    compactHeader,
+    pad,
+    titleSize,
+    bodySize,
+    textTop,
+    lineH,
+    sectionGap,
+    maxLines,
+    contentBottomY,
+    footerLineY,
+    rewardY,
+    rewardMaxWidth: narrow
+      ? rect.w - pad * 2 - bodySize * 1.35
+      : rect.w - pad * 2 - bodySize * 5.2,
+    keyRect,
+  };
 }
 
 function drawRiskClaws(
@@ -3330,12 +3506,15 @@ function drawRaidContractOverlay(
   const rects = raidContractRects(L, s.raidOffers.length);
   const target = nextRaidBossTarget(s);
   const compact = L.h < 380;
+  const veryShort = L.h < 300;
   uiText(
     ctx,
     compact ? `악몽 계약 · ${target.name}` : "악몽과 계약할 시간",
     L.w / 2,
-    L.notice.y + L.notice.h + (compact ? 13 : Math.max(20, L.scale * 22)),
-    compact ? 16 : Math.max(20, L.scale * 25),
+    veryShort
+      ? L.notice.y + L.notice.h / 2
+      : L.notice.y + L.notice.h + (compact ? 13 : Math.max(20, L.scale * 22)),
+    veryShort ? 14 : compact ? 16 : Math.max(20, L.scale * 25),
     T.paper,
     { align: "center", weight: 800, outline: true },
   );
@@ -3368,9 +3547,21 @@ function drawRaidContractOverlay(
     const contract = s.raidOffers[i];
     if (!contract) return;
     const hot = hovered === i;
-    const pad = Math.max(9, Math.min(18, rect.w * 0.055));
-    const titleSize = Math.max(14, Math.min(24, rect.h * (compact ? 0.12 : 0.09)));
-    const bodySize = Math.max(12, Math.min(16, rect.h * (compact ? 0.078 : 0.057)));
+    const card = raidContractCardGeometry(rect, compact || rect.h < 140 || rect.w < 160);
+    const {
+      compactHeader,
+      pad,
+      titleSize,
+      bodySize,
+      textTop,
+      lineH,
+      sectionGap,
+      maxLines,
+      rewardY,
+      footerLineY,
+      rewardMaxWidth,
+      keyRect,
+    } = card;
     const face = hot ? "rgba(62,39,29,0.98)" : "rgba(35,24,19,0.98)";
     bevelPanel(ctx, rect, Math.max(8, L.scale * 10), face, "rgba(0,0,0,0.72)", hot ? 5 : 3);
     ctx.save();
@@ -3380,36 +3571,46 @@ function drawRaidContractOverlay(
     ctx.stroke();
     ctx.restore();
 
-    uiText(ctx, `${i + 1}`, rect.x + pad, rect.y + pad + titleSize * 0.35, bodySize, T.action, {
-      weight: 800,
-    });
-    uiText(ctx, contract.name, rect.x + rect.w / 2, rect.y + pad + titleSize * 0.35, titleSize, T.paper, {
-      align: "center",
-      weight: 800,
-      maxWidth: rect.w - pad * 4,
-    });
     const riskColor = contract.risk === 3 ? T.danger : contract.risk === 2 ? T.gold : T.gather;
-    drawRiskClaws(
-      ctx,
-      rect.x + rect.w - pad - bodySize * 5.1,
-      rect.y + pad + titleSize * 0.42,
-      contract.risk,
-      bodySize * 0.78,
-      riskColor,
-    );
-    uiText(
-      ctx,
-      `위험 ${raidRiskLabel(contract.risk)}`,
-      rect.x + rect.w - pad,
-      rect.y + pad + titleSize * 0.35,
-      bodySize,
-      riskColor,
-      { align: "right", weight: 800, maxWidth: rect.w * 0.42 },
-    );
+    if (compactHeader) {
+      uiText(ctx, `${i + 1} ${contract.name}`, rect.x + rect.w / 2, rect.y + pad + titleSize * 0.35, titleSize, T.paper, {
+        align: "center",
+        weight: 800,
+        maxWidth: rect.w - pad * 2,
+      });
+      uiText(ctx, `위험 ${raidRiskLabel(contract.risk)}`, rect.x + rect.w / 2, rect.y + pad + titleSize * 1.28, bodySize, riskColor, {
+        align: "center",
+        weight: 800,
+        maxWidth: rect.w - pad * 2,
+      });
+    } else {
+      uiText(ctx, `${i + 1}`, rect.x + pad, rect.y + pad + titleSize * 0.35, bodySize, T.action, {
+        weight: 800,
+      });
+      uiText(ctx, contract.name, rect.x + rect.w / 2, rect.y + pad + titleSize * 0.35, titleSize, T.paper, {
+        align: "center",
+        weight: 800,
+        maxWidth: rect.w - pad * 4,
+      });
+      drawRiskClaws(
+        ctx,
+        rect.x + rect.w - pad - bodySize * 5.1,
+        rect.y + pad + titleSize * 0.42,
+        contract.risk,
+        bodySize * 0.78,
+        riskColor,
+      );
+      uiText(
+        ctx,
+        `위험 ${raidRiskLabel(contract.risk)}`,
+        rect.x + rect.w - pad,
+        rect.y + pad + titleSize * 0.35,
+        bodySize,
+        riskColor,
+        { align: "right", weight: 800, maxWidth: rect.w * 0.42 },
+      );
+    }
 
-    const textTop = rect.y + pad + titleSize * 1.45;
-    const lineH = bodySize * 1.35;
-    const maxLines = compact ? 1 : rect.h > 190 ? 2 : 1;
     const contentW = rect.w - pad * 2;
     const rule = wrapLines(ctx, `규칙 · ${contract.rule}`, bodySize, 400, contentW, maxLines);
     rule.forEach((line, lineIdx) => {
@@ -3417,7 +3618,7 @@ function drawRaidContractOverlay(
         maxWidth: contentW,
       });
     });
-    const counterY = textTop + Math.max(1, rule.length) * lineH + bodySize * 0.45;
+    const counterY = textTop + Math.max(1, rule.length) * lineH + sectionGap;
     const counter = wrapLines(ctx, `대응 · ${contract.counter}`, bodySize, 800, contentW, maxLines);
     counter.forEach((line, lineIdx) => {
       uiText(ctx, line, rect.x + pad, counterY + lineIdx * lineH, bodySize, T.gather, {
@@ -3426,12 +3627,25 @@ function drawRaidContractOverlay(
       });
     });
 
-    const rewardY = rect.y + rect.h - pad - bodySize * 0.15;
+    drawPanelDivider(ctx, rect.x + pad, footerLineY, rect.w - pad * 2);
     drawFish(ctx, rect.x + pad + bodySize * 0.5, rewardY, bodySize * 1.1, T.fish);
-    uiText(ctx, `승리 시 생선 +${contract.rewardFish}`, rect.x + pad + bodySize * 1.35, rewardY, bodySize, T.fish, {
+    uiText(ctx, keyRect ? `승리 시 생선 +${contract.rewardFish}` : `생선 +${contract.rewardFish}`, rect.x + pad + bodySize * 1.35, rewardY, bodySize, T.fish, {
       weight: 800,
-      maxWidth: rect.w - pad * 2 - bodySize,
+      maxWidth: rewardMaxWidth,
     });
+    if (keyRect) {
+      const keyLabel = `${i + 1} 선택`;
+      roundRect(ctx, keyRect, keyRect.h * 0.28);
+      ctx.fillStyle = hot ? "rgba(245,160,60,0.16)" : "rgba(239,224,198,0.06)";
+      ctx.fill();
+      ctx.strokeStyle = hot ? T.action : "rgba(239,224,198,0.24)";
+      ctx.lineWidth = hot ? 2 : 1;
+      ctx.stroke();
+      uiText(ctx, keyLabel, keyRect.x + keyRect.w / 2, keyRect.y + keyRect.h / 2, bodySize * 0.82, hot ? T.action : T.paperDim, {
+        align: "center",
+        weight: 800,
+      });
+    }
   });
 }
 
@@ -3472,7 +3686,8 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     return;
   }
   const step = mapStep(s);
-  const open = new Set(openLanes(s.map, step));
+  const openOrder = openLanes(s.map, step);
+  const open = new Set(openOrder);
   const prepRoute = s.raidContract && isRaidPrepStep(step)
     ? raidPrepRoute(s.raidContract)
     : null;
@@ -3522,15 +3737,8 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
    */
   let hovered = -1;
   if (drag.hoverX >= 0) {
-    for (const { rect, step: st, idx } of rects) {
-      if (st !== step || !open.has(idx)) continue;
-      const dx = drag.hoverX - (rect.x + rect.w / 2);
-      const dy = drag.hoverY - (rect.y + rect.h / 2);
-      if (Math.hypot(dx, dy) <= rect.w / 2 + 6) {
-        hovered = idx;
-        break;
-      }
-    }
+    const nearest = nearestMapNode(openMapNodeRects(L, s), drag.hoverX, drag.hoverY);
+    hovered = nearest?.idx ?? -1;
   }
 
   for (const { rect, step: st, idx } of rects) {
@@ -3542,6 +3750,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     const done = st < step;
     const hot = here && idx === hovered;
     const contractPrep = pickable && prepRoute === node.kind;
+    const shortcut = pickable ? openOrder.indexOf(idx) + 1 : 0;
 
     const hue =
       node.kind === "boss" ? T.enemy
@@ -3582,6 +3791,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
     // 다음 보스 이름으로 바뀌어** 한 지도에 같은 이름이 둘 뜬다.
     if (node.kind === "boss") {
       const name = bossForIndex(bossIndexAt(s, st)).name;
+      const visibleName = shortcut > 0 ? mapChoiceLabelText(shortcut, name) : name;
       const weight = pickable ? 800 : 400;
       /**
        * 아이콘은 원 **안**, 이름은 원 **아래**.
@@ -3599,15 +3809,15 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
         (rect.w + grow * 2) * 0.68,
         hot ? T.paper : hue,
       );
-      const fs = Math.max(10, rect.w * 0.3);
+      const label = mapChoiceLabelGeometry(L, rect, true);
       uiText(
         ctx,
-        name,
+        visibleName,
         rect.x + rect.w / 2,
-        rect.y + rect.h + fs * 0.95,
-        fs,
+        label.y,
+        label.fontSize,
         hot ? T.paper : hue,
-        { align: "center", weight, outline: true },
+        { align: "center", weight, outline: true, maxWidth: label.maxWidth },
       );
       // 우두머리 칸에만 왕관. 색·크기와 달리 멀리서도 "종류가 다르다"로 읽힌다.
       if (stageBossNode) {
@@ -3622,6 +3832,20 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, drag: Dr
         (rect.w + grow * 2) * 0.72,
         hot ? T.paper : hue,
       );
+      // 터치에는 호버가 없다. 지금 고를 수 있는 길만 숫자 단축키와 종류를
+      // 상시 표시해 화면의 선택지와 키보드의 1/2/3 순서를 일치시킨다.
+      if (shortcut > 0) {
+        const label = mapChoiceLabelGeometry(L, rect);
+        uiText(
+          ctx,
+          mapChoiceLabelText(shortcut, nodeInfo(node.kind).name),
+          rect.x + rect.w / 2,
+          label.y,
+          label.fontSize,
+          contractPrep ? T.gold : hot ? T.paper : hue,
+          { align: "center", weight: 800, outline: true, maxWidth: label.maxWidth },
+        );
+      }
     }
     ctx.restore();
 
@@ -3740,20 +3964,22 @@ export function buttonText(s: RunState): string {
  * 가른다. 극성 전용 이름을 안 쓴 것은 그 게이트와 같은 이유다 — 원버튼
  * 폐기가 검토 중이라 나중엔 극성이 아닌 예고에서도 이 함수가 그대로 쓰인다.
  *
- * 사이 틈은 **그림에서만** 있다 — 히트테스트(`main.ts`)는 이 틈을 모르고
- * 그냥 버튼 가운데 x로 좌/우를 가른다. 틈이 2~4px뿐이라 손가락이 정확히
- * 거기 떨어지는 사고를 걱정하는 것보다 "가운데 기준 어느 쪽이든 걸린다"가
- * 더 실수를 덜 만든다. `L.button`은 손대지 않는다 — `npm run probe`의
- * 최소 손가락 크기 검사(`L.button.h >= 40`)가 이 값을 그대로 보므로, 반쪽을
- * 여기서만 계산해야 그 검사가 계속 뜻이 있다.
+ * 둘은 독립 CTA가 아니라 한 세그먼트 그룹이다. 2px 내부선만 남기고 히트테스트는
+ * 전체 그룹을 가운데로 나눠, 내부선 위를 눌러도 가장 가까운 선택이 동작한다.
+ * `L.button`은 손대지 않는다 — `npm run probe`가 전체 터치 영역을 검사한다.
  */
 export function splitButton(r: Rect): [Rect, Rect] {
-  const gap = Math.max(4, r.w * 0.02);
+  const gap = 2;
   const halfW = (r.w - gap) / 2;
   return [
     { x: r.x, y: r.y, w: halfW, h: r.h },
     { x: r.x + halfW + gap, y: r.y, w: halfW, h: r.h },
   ];
+}
+
+/** 2px 내부선도 버튼 중심을 기준으로 가장 가까운 세그먼트에 배정한다. */
+export function splitButtonChoice(r: Rect, x: number): "dodge" | "gather" {
+  return x < r.x + r.w / 2 ? "dodge" : "gather";
 }
 
 /**
@@ -3782,6 +4008,9 @@ function drawButton(
   s: RunState,
 ): void {
   const openBoss = s.enemy.some((c) => c?.alive && c.vulnerableMs > 0);
+
+  // 보드·정보 띠와 행동 구역의 경계. 실제 버튼 기하는 바꾸지 않아 히트테스트와 같다.
+  drawPanelDivider(ctx, L.button.x, L.button.y - L.actionGap / 2, L.button.w);
 
   /**
    * 전투 중 버튼은 **반응할 것이 있을 때만** 살아 있다.
@@ -3828,17 +4057,29 @@ function drawButton(
   drawButtonFace(ctx, L.button, armed, pulse, buttonText(s));
 }
 
-/** 버튼 한 짝을 그린다. 단일 버튼과 극성의 두 짝이 같은 얼굴을 쓰도록 뺐다. */
+type ButtonVariant = "primary" | "secondary";
+
+/** 버튼 한 짝을 그린다. 주 행동과 보조 선택이 같은 상태 문법을 공유한다. */
 function drawButtonFace(
   ctx: CanvasRenderingContext2D,
   r: Rect,
   armed: boolean,
   pulse: boolean,
   label: string,
+  variant: ButtonVariant = "primary",
 ): void {
   const idle = !armed;
-  const face = idle ? "rgba(239,224,198,0.07)" : T.action;
-  const edge = idle ? "rgba(0,0,0,0.3)" : "#A85E1E";
+  const secondary = variant === "secondary";
+  const face = idle
+    ? "rgba(239,224,198,0.07)"
+    : secondary
+      ? "rgba(48,34,27,0.98)"
+      : T.action;
+  const edge = idle
+    ? "rgba(0,0,0,0.3)"
+    : secondary
+      ? "rgba(239,224,198,0.28)"
+      : "#A85E1E";
 
   bevelPanel(
     ctx,
@@ -3850,7 +4091,7 @@ function drawButtonFace(
   );
 
   // 살아난 순간을 놓치지 않게 테두리가 한 번 밝아진다. 예고는 1.2초뿐이다.
-  if (pulse) {
+  if (pulse && !secondary) {
     const p = motionPulse(150);
     ctx.save();
     roundRect(ctx, r, r.h * 0.26);
@@ -3860,7 +4101,7 @@ function drawButtonFace(
     ctx.restore();
   }
 
-  if (!idle) {
+  if (!idle && !secondary) {
     // 위쪽 하이라이트. 눌리는 물건처럼 보이게 하는 최소한의 장치.
     roundRect(
       ctx,
@@ -3883,8 +4124,8 @@ function drawButtonFace(
     label,
     r.x + r.w / 2,
     r.y + r.h / 2,
-    Math.max(15, r.h * 0.36),
-    idle ? T.muted : T.actionInk,
+    secondary ? Math.max(12, r.h * 0.32) : Math.max(15, r.h * 0.36),
+    idle ? T.muted : secondary ? T.paper : T.actionInk,
     {
       align: "center",
       weight: 800,
@@ -4076,6 +4317,16 @@ function drawNotice(
   const chipGeometry = s.raidContract && (s.phase === "map" || s.phase === "prepare" || s.phase === "reward")
     ? raidContractChipGeometry(L, s.raidContract, s.phase)
     : null;
+  const showsKind =
+    s.phase === "prepare" || (s.phase === "reward" && s.nodeKind !== "shop" && !s.notice);
+  if (chipGeometry || showsKind || s.notice) {
+    roundRect(ctx, r, Math.max(3, r.h * 0.18));
+    ctx.fillStyle = "rgba(20,14,11,0.56)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(239,224,198,0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
   if (chipGeometry && s.raidContract) drawActiveRaidContractChip(ctx, chipGeometry, s.raidContract.risk);
   const body = chipGeometry?.content ?? r;
   const bodyCx = body.x + body.w / 2;
@@ -4092,8 +4343,6 @@ function drawNotice(
    * 이긴다 — 성격은 매 걸음 같은 자리에 뜨지만 안내는 그때만 뜨므로,
    * 겹치면 드문 쪽이 더 알릴 것이 있다.
    */
-  const showsKind =
-    s.phase === "prepare" || (s.phase === "reward" && s.nodeKind !== "shop" && !s.notice);
   if (showsKind) {
     // 웨이브 번호가 아니라 **고른 칸**이 성격을 정한다. `waveKind(s.wave)`를
     // 쓰던 동안 상점을 밟은 판에서 배너가 실제 적과 다른 이름을 달고 있었다.
@@ -4165,8 +4414,14 @@ export interface GameoverGeometry {
   choices: { retry: Rect; daily: Rect; challenge: Rect };
   /** 부검 줄 간격(px). 작은 화면에서는 하한이 붙고, 공간이 모자라면 scale 치수로 접는다. */
   lineH: number;
-  /** 본문 글자 하한(px). 접힌 구성에서는 0 — scale만 따른다. */
+  /** 본문 글자 하한(px). 극저높이에서도 11px 아래로 접지 않는다. */
   fontFloor: number;
+  /** 큰 숫자 중심과 부검 첫 줄. 렌더와 프로브가 같은 세로 흐름을 쓴다. */
+  statY: number;
+  firstLineY: number;
+  /** 부검·기록 정보의 실제 마지막 픽셀과 선택 안내문 중심. */
+  contentBottomY: number;
+  choiceHintY: number;
 }
 
 /**
@@ -4174,17 +4429,18 @@ export interface GameoverGeometry {
  *
  * 줄 수가 판마다 다르므로(무엇에 막혔나 · 예고 성적 · 팀 · 판 종류 · 도감) 높이를
  * 여기서 한 번만 계산하고, 세 갈래 버튼은 판 바닥에 깐다. 버튼 높이는 손가락
- * 최소치(40px)를 지킨다 — `npm run probe`가 큰 버튼에 거는 기준과 같다.
+ * 최소치(44px)를 지킨다 — `npm run probe`가 큰 버튼에 거는 기준과 같다.
  */
 export function gameoverGeometry(L: Layout, s: RunState): GameoverGeometry {
+  const compact = L.h < 360;
+  const contextLines = compact
+    ? 1
+    : (s.telegraphsSeen > 0 ? 1 : 0) + 1 + (s.kind !== "free" ? 1 : 0) + 1;
   const lines =
     (s.lossReason === "timeout" || s.killer ? 1 : 0) +
     (s.raidContract || s.lastRaidContract ? 1 : 0) +
-    (s.telegraphsSeen > 0 ? 1 : 0) +
-    1 +
-    (s.kind !== "free" ? 1 : 0) +
-    1;
-  const choiceH = Math.max(40, L.scale * 40);
+    contextLines;
+  const choiceH = Math.max(44, L.scale * 40);
   // 폭 하한 260px — 320px 폰에서 scale(0.36)×560 = 199px로는 세 버튼이 손가락 폭(56px)에
   // 못 미친다. 화면의 86%를 넘지는 않는다.
   const panelW = Math.min(L.w * 0.86, Math.max(260, L.scale * 560));
@@ -4192,29 +4448,45 @@ export function gameoverGeometry(L: Layout, s: RunState): GameoverGeometry {
    * 줄 간격·글자·버튼 위 여백에 **픽셀 하한**을 둔다. 폰 세로(390px)에서 scale이 0.43이라
    * 20×0.43 = 8.6px 줄 간격에 6px 글자가 겹쳤고, 버튼(40px 하한)은 안 줄어 라벨을 덮었다.
    * 그런데 하한을 두면 납작한 가로 화면(667×275)에서는 판이 큰 버튼 위 공간에 안 들어간다.
-   * 그래서 **모자라면 scale 치수로 접는다** — 작게라도 전부 보이는 것이 겹치는 것보다 낫다.
+   * 그래서 **모자라면 정보와 여백을 접는다** — 글자 하한을 깨서 공간을 만드는 대신
+   * 극저높이는 예고·팀·도감·기록을 한 줄로 요약한다.
    */
   const avail = L.button.y - Math.max(6, L.scale * 10) - 4;
-  let lineH = Math.max(16, L.scale * 20);
-  let fontFloor = 11;
-  let inset = Math.max(10, L.scale * 12);
-  let extra = Math.max(30, L.scale * 30) + Math.max(0, 12 - L.scale * 12) * 2;
-  let panelH = L.scale * 174 + lines * lineH + choiceH + extra;
+  let lineH = Math.max(compact ? 14 : 16, L.scale * 20);
+  const fontFloor = 11;
+  let inset = Math.max(compact ? 8 : 10, L.scale * 12);
+  let extra = compact
+    ? Math.max(22, L.scale * 24)
+    : Math.max(30, L.scale * 30) + Math.max(0, 12 - L.scale * 12) * 2 + uiSpace(L.scale, 3);
+  let lead = compact ? Math.max(72, L.scale * 128) : Math.max(88, L.scale * 174);
+  let panelH = lead + lines * lineH + choiceH + extra;
   if (panelH > avail) {
-    lineH = L.scale * 20;
-    fontFloor = 0;
-    inset = L.scale * 12;
-    extra = L.scale * 30;
-    panelH = L.scale * 174 + lines * lineH + choiceH + extra;
+    // 마지막 접힘에서도 글자를 줄이지 않는다. 여백과 숫자 머리 구역만 압축한다.
+    lineH = Math.max(13, L.scale * 18);
+    inset = Math.max(8, L.scale * 10);
+    extra = Math.max(16, L.scale * 20);
+    lead = compact ? Math.max(62, L.scale * 112) : Math.max(78, L.scale * 150);
+    panelH = lead + lines * lineH + choiceH + extra;
   }
   // 버튼 위로만 쓴다. 아래로 내려가면 유일한 행동이 판에 깔린다.
   const top = Math.max(L.scale * 10, (L.button.y - panelH) / 2);
   const panel: Rect = { x: L.w / 2 - panelW / 2, y: top, w: panelW, h: panelH };
-  const gap = Math.max(6, L.scale * 8);
+  const gap = uiSpace(L.scale, compact ? 2 : 3);
   const cw = (panel.w - inset * 2 - gap * 2) / 3;
   const cy = panel.y + panel.h - inset - choiceH;
   const at = (i: number): Rect => ({ x: panel.x + inset + i * (cw + gap), y: cy, w: cw, h: choiceH });
-  return { panel, choices: { retry: at(0), daily: at(1), challenge: at(2) }, lineH, fontFloor };
+  const choices = { retry: at(0), daily: at(1), challenge: at(2) };
+  const statY = panel.y + (compact ? Math.max(34, L.scale * 56) : Math.max(48, L.scale * 76));
+  const statPx = Math.max(3, Math.round(L.scale * 9));
+  const statH = numTextHeight(statPx);
+  const statGap = Math.max(8, L.scale * 12);
+  const firstLineY = statY + statH / 2 + statGap * 2.6;
+  const afterLinesY = firstLineY + lines * lineH;
+  const contentBottomY = compact
+    ? firstLineY + Math.max(0, lines - 1) * lineH + Math.max(fontFloor, L.scale * 13) / 2
+    : afterLinesY + L.scale * 6 + Math.max(6, L.scale * 9) + Math.max(12, L.scale * 14) + Math.max(fontFloor, L.scale * 14) / 2;
+  const choiceHintY = choices.retry.y - Math.max(10, L.scale * 11);
+  return { panel, choices, lineH, fontFloor, statY, firstLineY, contentBottomY, choiceHintY };
 }
 
 let codexCacheFor: RunState | null = null;
@@ -4259,11 +4531,12 @@ function drawGameOver(
    * 너머로 비쳐 글자와 겹쳤다. 읽어야 할 것과 이미 끝난 것이 같은 자리에서
    * 싸우면 둘 다 안 읽힌다. 판을 깔아 안팎을 가른다.
    */
-  const { panel, choices, lineH, fontFloor } = gameoverGeometry(L, s);
+  const { panel, choices, lineH, fontFloor, statY, firstLineY, choiceHintY } = gameoverGeometry(L, s);
+  const compact = L.h < 360;
   const font = (base: number): number => Math.max(fontFloor, L.scale * base);
   bevelPanel(ctx, panel, L.scale * 12, "rgba(20,14,11,0.94)", "rgba(0,0,0,0.6)", 2);
 
-  const cy = panel.y + L.scale * 76;
+  const cy = statY;
   const px = Math.max(3, Math.round(L.scale * 9));
   const num = String(s.wave);
   // 라벨 자리를 숫자의 **실제 높이**에서 뽑는다. 상수로 두면 화면 배율이 바뀔 때
@@ -4290,7 +4563,7 @@ function drawGameOver(
    * 측정상 가장 큰 결정 축이 개입이고 판이 끝나는 이유의 41%가 보스라서,
    * 그 둘이 첫 두 줄이다. 더 얹으면 읽히지 않는다.
    */
-  let ly = cy + numH / 2 + gap * 2.6;
+  let ly = firstLineY;
   const line = (text: string, color: string, weight = 400): void => {
     uiText(ctx, text, L.w / 2, ly, font(13), color, { align: "center", weight, maxWidth: panel.w - L.scale * 24 });
     ly += lineH;
@@ -4322,35 +4595,43 @@ function drawGameOver(
     line(`다음 계약 ${s.raidContract.name} · ${raidShareCode(s.seed, s.raidContract.id)}`, T.paperDim, 800);
   }
 
-  // 예고 성적. 보스를 한 번도 안 만난 판에는 뜨지 않는다 — 없는 얘기를 하면
-  // 화면만 길어진다.
-  if (s.telegraphsSeen > 0) {
-    const eaten = s.telegraphsEaten;
-    const read = s.telegraphsSeen - eaten;
-    const rate = Math.round((read / s.telegraphsSeen) * 100);
-    line(
-      `예고 ${s.telegraphsSeen}번 중 ${read}번 피함 (${rate}%)`,
-      rate >= 70 ? T.gather : rate >= 40 ? T.paperDim : T.danger,
-      800,
-    );
-  }
-
   // 살아남은 고양이가 아니라 **데리고 있던** 고양이를 센다. 전멸한 판에서
   // livingCats를 쓰면 전부 0이 떠서 어떤 팀이었는지가 사라진다.
   const cats = s.ally.filter((c): c is Cat => c !== null);
   const by = zeroByClass();
   for (const c of cats) by[c.breed.cls] += 1;
   const team = CLASS_ORDER.map((c) => `${CLASS_SHORT[c]}${by[c]}`).join(" ");
-  line(s.relics.length > 0 ? `${team} · ${s.relics.map((r) => r.name).join(" · ")}` : team, T.muted);
-
-  // 판의 종류와 도감. 기본 판이면 종류는 말하지 않는다 — 없는 얘기를 하면 화면만
-  // 길어진다. 도감은 정보 해금이다: 본 것이 쌓일 뿐 다음 판이 쉬워지지 않는다.
-  if (s.kind !== "free") line(modeLabel(s), T.paperDim, 800);
   const cx = codexFor(s);
-  line(
-    `도감  고양이 ${cx.breeds.length}/${CODEX_TOTALS.breeds} · 유물 ${cx.relics.length}/${CODEX_TOTALS.relics} · 보스 ${cx.bosses.length}/${CODEX_TOTALS.bosses}`,
-    T.muted,
-  );
+  if (compact) {
+    const read = Math.max(0, s.telegraphsSeen - s.telegraphsEaten);
+    const seen = cx.breeds.length + cx.relics.length + cx.bosses.length;
+    const total = CODEX_TOTALS.breeds + CODEX_TOTALS.relics + CODEX_TOTALS.bosses;
+    const mode = s.kind === "daily"
+      ? " · 오늘"
+      : s.kind === "challenge"
+        ? ` · 도전 ${s.challenge}`
+        : s.kind === "retry"
+          ? " · 재도전"
+          : "";
+    line(`예고 ${read}/${s.telegraphsSeen} · 팀 ${cats.length} · 유물 ${s.relics.length} · 도감 ${seen}/${total} · 최고 ${s.modeBest}${mode}`, T.muted, 800);
+  } else {
+    // 예고 성적. 보스를 한 번도 안 만난 판에는 뜨지 않는다.
+    if (s.telegraphsSeen > 0) {
+      const read = s.telegraphsSeen - s.telegraphsEaten;
+      const rate = Math.round((read / s.telegraphsSeen) * 100);
+      line(
+        `예고 ${s.telegraphsSeen}번 중 ${read}번 피함 (${rate}%)`,
+        rate >= 70 ? T.gather : rate >= 40 ? T.paperDim : T.danger,
+        800,
+      );
+    }
+    line(s.relics.length > 0 ? `${team} · ${s.relics.map((r) => r.name).join(" · ")}` : team, T.muted);
+    if (s.kind !== "free") line(modeLabel(s), T.paperDim, 800);
+    line(
+      `도감  고양이 ${cx.breeds.length}/${CODEX_TOTALS.breeds} · 유물 ${cx.relics.length}/${CODEX_TOTALS.relics} · 보스 ${cx.bosses.length}/${CODEX_TOTALS.bosses}`,
+      T.muted,
+    );
+  }
 
   /**
    * 최고 기록 대비 막대.
@@ -4358,33 +4639,35 @@ function drawGameOver(
    * "12웨이브"는 잘한 건지 못한 건지 알 수 없는 숫자다. 자기 최고 기록 옆에
    * 놓으면 그때서야 뜻이 생긴다 — 거의 다 왔는지, 한참 못 미쳤는지.
    */
-  const goal = Math.max(s.modeBest, s.wave, 1);
-  const bw = Math.min(L.w * 0.5, L.scale * 320);
-  const bh = Math.max(6, L.scale * 9);
-  const bx = L.w / 2 - bw / 2;
-  const byy = ly + L.scale * 6;
-  roundRect(ctx, { x: bx, y: byy, w: bw, h: bh }, bh / 2);
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fill();
-  roundRect(ctx, { x: bx, y: byy, w: Math.max(bh, (bw * s.wave) / goal), h: bh }, bh / 2);
-  ctx.fillStyle = s.recordBroken ? T.gold : T.ally;
-  ctx.fill();
-  // 최고 기록 눈금. 갱신한 판에는 내가 그 눈금이므로 그리지 않는다.
-  if (!s.recordBroken && s.modeBest > 0) {
-    const tx = bx + (bw * s.modeBest) / goal;
-    ctx.fillStyle = T.gold;
-    ctx.fillRect(tx - 1, byy - bh * 0.35, 2, bh * 1.7);
-  }
+  if (!compact) {
+    const goal = Math.max(s.modeBest, s.wave, 1);
+    const bw = Math.min(L.w * 0.5, L.scale * 320);
+    const bh = Math.max(6, L.scale * 9);
+    const bx = L.w / 2 - bw / 2;
+    const byy = ly + L.scale * 6;
+    roundRect(ctx, { x: bx, y: byy, w: bw, h: bh }, bh / 2);
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fill();
+    roundRect(ctx, { x: bx, y: byy, w: Math.max(bh, (bw * s.wave) / goal), h: bh }, bh / 2);
+    ctx.fillStyle = s.recordBroken ? T.gold : T.ally;
+    ctx.fill();
+    // 최고 기록 눈금. 갱신한 판에는 내가 그 눈금이므로 그리지 않는다.
+    if (!s.recordBroken && s.modeBest > 0) {
+      const tx = bx + (bw * s.modeBest) / goal;
+      ctx.fillStyle = T.gold;
+      ctx.fillRect(tx - 1, byy - bh * 0.35, 2, bh * 1.7);
+    }
 
-  uiText(
-    ctx,
-    s.recordBroken ? `${recordCaption(s)} 갱신` : `${recordCaption(s)} 깊이 ${s.modeBest}`,
-    L.w / 2,
-    byy + bh + Math.max(fontFloor > 0 ? 12 : 0, L.scale * 14),
-    font(14),
-    s.recordBroken ? T.gold : T.muted,
-    { align: "center", weight: 800 },
-  );
+    uiText(
+      ctx,
+      s.recordBroken ? `${recordCaption(s)} 갱신` : `${recordCaption(s)} 깊이 ${s.modeBest}`,
+      L.w / 2,
+      byy + bh + Math.max(12, L.scale * 14),
+      font(14),
+      s.recordBroken ? T.gold : T.muted,
+      { align: "center", weight: 800 },
+    );
+  }
 
   /**
    * 다음 판 세 갈래 — 같은 시드 · 오늘의 시드 · 도전 +1.
@@ -4399,14 +4682,14 @@ function drawGameOver(
     ctx,
     `도전은 단계마다 적 +${Math.round(BALANCE.challengeStep * 100)}% · 기록은 종류별로 따로 남는다`,
     L.w / 2,
-    choices.retry.y - Math.max(fontFloor > 0 ? 10 : 0, L.scale * 11),
-    Math.max(fontFloor > 0 ? 10 : 0, L.scale * 11),
+    choiceHintY,
+    Math.max(11, L.scale * 11),
     T.muted,
     { align: "center", maxWidth: panel.w - L.scale * 24 },
   );
-  drawButtonFace(ctx, choices.retry, true, false, "같은 시드");
-  drawButtonFace(ctx, choices.daily, true, false, "오늘의 시드");
-  drawButtonFace(ctx, choices.challenge, true, false, `도전 ${s.challenge + 1}`);
+  drawButtonFace(ctx, choices.retry, true, false, "1 같은 판", "secondary");
+  drawButtonFace(ctx, choices.daily, true, false, "2 오늘", "secondary");
+  drawButtonFace(ctx, choices.challenge, true, false, "3 도전+", "secondary");
 }
 
 /* ------------------------------------------------------------------ */

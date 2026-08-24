@@ -15,6 +15,25 @@ const OFFER_SLOTS = 3;
 /** 목표(시너지)도 늘 셋. `pickSynergies`가 세 개를 뽑는다. 같은 이유로 여기 둔다. */
 const SYNERGY_SLOTS = 3;
 
+/**
+ * DESIGN.md의 4px 간격 체계. 작은 화면에서도 CSS 픽셀 기준 하한을 지켜
+ * 선택지 사이의 경계가 사라지지 않게 하고, 큰 화면에서만 1.25배까지 늘린다.
+ */
+export const UI_SPACE = {
+  1: 4,
+  2: 8,
+  3: 12,
+  4: 16,
+  5: 24,
+  6: 32,
+} as const;
+
+export type UiSpaceToken = keyof typeof UI_SPACE;
+
+export function uiSpace(scale: number, token: UiSpaceToken): number {
+  return Math.round(UI_SPACE[token] * Math.min(1.25, Math.max(1, scale)));
+}
+
 export interface Rect {
   x: number;
   y: number;
@@ -60,6 +79,8 @@ export interface Layout {
   labelH: number;
   synergyBar: Rect;
   button: Rect;
+  /** 보드·하단 정보와 주 행동 버튼 사이의 시각적 경계. */
+  actionGap: number;
   /** 팀 요약(직업 카운터) 자리. 세로줄에서는 왼쪽 줄 위쪽이다. */
   offers: Rect;
   /** 보상 단계의 카드 영역. 세로줄에서는 오른쪽 줄, 아니면 offers 위로 자란다. */
@@ -102,20 +123,20 @@ export function rectHas(r: Rect, x: number, y: number): boolean {
 export function computeLayout(w: number, h: number, shop = true): Layout {
   const portrait = h > w * 1.05;
   const scale = Math.min(w / 900, h / 600);
-  const pad = Math.round(Math.min(w, h) * (Math.min(w, h) < 420 ? 0.022 : 0.03));
+  const pad = Math.round(Math.max(8, Math.min(w, h) * (Math.min(w, h) < 420 ? 0.022 : 0.03)));
 
   // 보드가 5x5가 되면서 세로로 10줄이 필요하다. 작은 화면에서는 크롬 최소 높이를
   // 낮춰 보드에 자리를 넘긴다. 버튼만은 손가락 크기 아래로 내리지 않는다.
   const tight = Math.min(w, h) < 420;
-  const hudH = Math.round(Math.max(tight ? 34 : 44, Math.min(w, h) * 0.09));
+  const hudH = Math.round(Math.max(h < 360 ? 34 : 44, Math.min(w, h) * 0.09));
   // 시너지 칩은 폭이 좁으면 두 줄이 되므로 세로 화면에서만 바를 키운다.
   // 가로에서는 칩이 넓어 한 줄로 들어가고, 짧은 가로 화면은 그 1px이 아쉽다.
-  const barFloor = portrait ? 34 : tight ? 26 : 34;
+  const barFloor = portrait ? 34 : h < 360 ? 18 : tight ? 26 : 34;
   const barH = Math.round(Math.max(barFloor, Math.min(w, h) * 0.07));
-  const btnH = Math.round(Math.max(tight ? 42 : 46, Math.min(w, h) * 0.09));
+  const btnH = Math.round(Math.max(tight ? 44 : 48, Math.min(w, h) * 0.09));
 
-  // 음소거는 손가락으로 눌러야 하므로 HUD가 얇아져도 32px 아래로는 안 간다.
-  const muteS = Math.round(Math.max(32, Math.min(hudH, 40)));
+  // 음소거도 다른 포인터 대상과 같은 44px 하한을 지킨다.
+  const muteS = Math.round(Math.max(44, Math.min(hudH, 48)));
   const muteGap = Math.round(pad * 0.5);
   let hud: Rect = { x: pad, y: pad, w: w - pad * 2 - muteS - muteGap, h: hudH };
   let mute: Rect = {
@@ -125,6 +146,8 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
     h: muteS,
   };
   const bottomY = h - pad - btnH;
+  // 극저높이만 한 토큰 접고, 나머지는 카드·보드와 CTA 사이 16px을 지킨다.
+  const actionGap = h < 360 ? uiSpace(scale, 3) : uiSpace(scale, 4);
 
   /**
    * 세로줄을 세울 수 있는가.
@@ -149,10 +172,13 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
   // 페이즈가 한 줄로 들어가야 해서 안내 문구만 있을 때보다 조금 두껍다.
   // 좁은 화면(tight)에서는 그대로 두는데, 거기서는 배너도 같이 줄어든다.
   const noticeH = Math.round(Math.max(tight ? 13 : 24, Math.min(w, h) * (tight ? 0.045 : 0.055)));
-  let notice: Rect = { x: pad, y: hud.y + hud.h, w: w - pad * 2, h: noticeH };
+  // 극저높이에서는 44px 음소거가 34px HUD보다 크다. 안내 띠의 오른쪽을 그만큼
+  // 비워 두면 두 컨트롤이 세로로 5px 겹쳐도 실제 내용과 히트 영역은 충돌하지 않는다.
+  const noticeInset = muteS > hudH ? muteS + muteGap : 0;
+  let notice: Rect = { x: pad, y: hud.y + hud.h, w: w - pad * 2 - noticeInset, h: noticeH };
 
   // 보드 위 진영 라벨("우리 편"/"상대")이 안내 문구와 겹치지 않도록 자리를 뗀다.
-  const labelH = Math.round(Math.max(tight ? 9 : 14, Math.min(w, h) * 0.032));
+  const labelH = Math.round(Math.max(h < 360 ? 6 : tight ? 9 : 14, Math.min(w, h) * 0.032));
 
   const cardGap = Math.max(6, Math.round(Math.min(w, h) * 0.016));
   const fieldTop = notice.y + notice.h + labelH;
@@ -175,7 +201,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
      * 읽는 순서가 곧 결정하는 순서다.
      */
     const colTop = fieldTop;
-    const colBottom = bottomY - pad * 0.6;
+    const colBottom = bottomY - actionGap;
     const colH = Math.max(120, colBottom - colTop);
     const rightX = w - pad - colW;
 
@@ -187,7 +213,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
      * 잡은 "참고 정보가 주인공보다 크다"를 세로줄에서 그대로 재현한 셈이다.
      */
     const stripH = Math.round(Math.min(colH * 0.3, Math.max(110, colW * 0.62)));
-    const stripGap = Math.round(pad * 0.9);
+    const stripGap = uiSpace(scale, 3);
     offers = { x: pad, y: colTop, w: colW, h: stripH };
 
     /**
@@ -198,7 +224,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
      * 된다. `drawSynergies`가 같은 식을 쓴다 — 둘이 갈라지면 칩이 패널을 넘는다.
      */
     const barAvail = colH - stripH - stripGap;
-    const chipGap = Math.max(6, colW * 0.04);
+    const chipGap = Math.max(uiSpace(scale, 2), colW * 0.04);
     const chipH = Math.max(
       52,
       Math.min(colW * 0.23, (barAvail - chipGap * (SYNERGY_SLOTS - 1)) / SYNERGY_SLOTS),
@@ -231,7 +257,10 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
      * 삼켜서** 판이 안 잡힌다. 세로줄 구성은 아예 안 덮는다.
      * 단, HUD와 안내 문구는 절대 덮지 않는다. `npm run probe`가 둘 다 검사한다.
      */
-    synergyBar = { x: pad, y: bottomY - barH - pad * 0.6, w: w - pad * 2, h: barH };
+    // 360px보다 낮고 세로줄도 못 세우는 화면에서는 보조 정보인 시너지 띠를
+    // 접는다. 10px 글자를 18px 띠에 억지로 넣는 대신 판의 24px 셀을 보존한다.
+    const foldedBarH = h < 360 ? 0 : barH;
+    synergyBar = { x: pad, y: bottomY - foldedBarH - actionGap, w: w - pad * 2, h: foldedBarH };
 
     // 높이를 cell이 아니라 min(w,h)에서 뽑는다. cell 계산이 이 값에 의존하므로
     // cell 기반으로 잡으면 순환이 생긴다.
@@ -350,7 +379,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
       const stageR = rightX2 + colW;
       hud = { x: stageX, y: hud.y, w: stageR - stageX - muteS - muteGap, h: hud.h };
       mute = { ...mute, x: stageR - muteS };
-      notice = { x: stageX, y: notice.y, w: stageR - stageX, h: notice.h };
+      notice = { x: stageX, y: notice.y, w: stageR - stageX - noticeInset, h: notice.h };
       // 주 행동 버튼은 판 가운데 — 두 세로줄 사이, 곧 보드 폭에 맞춘다.
       const btnX = leftX + colW + colGap;
       button = { x: btnX, y: button.y, w: rightX2 - colGap - btnX, h: button.h };
@@ -379,6 +408,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
     labelH,
     synergyBar,
     button,
+    actionGap,
     offers,
     offerCards,
     offerGap: cardGap,

@@ -3,13 +3,14 @@ import { BALANCE } from "./game/balance.ts";
 import { computeLayout, hitCell, rectHas, type Layout } from "./game/layout.ts";
 import {
   gameoverGeometry,
-  mapNodeRects,
+  nearestMapNode,
+  openMapNodeRects,
   offerRects,
   raidContractRects,
   render,
   rerollRect,
   spawnBuyTween,
-  splitButton,
+  splitButtonChoice,
   type DragState,
 } from "./game/render.ts";
 import {
@@ -466,12 +467,11 @@ canvas.addEventListener("pointerdown", (e) => {
       // **지금은 극성(polarity)만 버튼이 두 짝이다(C1).** `dualChoiceActive`
       // (battle.ts) 하나가 그 기준이다 — 원버튼 폐기가 검토 중이라, 나중에
       // 그 게이트가 넓어지면(모든 예고에서 산개/집결을 직접 고르는 쪽으로)
-      // 여기는 손댈 것이 없다. `splitButton`이 render.ts와 같은 값을 내므로
+      // 여기는 손댈 것이 없다. `splitButtonChoice`가 render.ts의 가운데 경계를 쓰므로
       // 그림과 히트테스트가 어긋나지 않는다. 게이트가 닫혀 있으면 예전처럼
       // `act` 하나뿐.
       if (dualChoiceActive(state)) {
-        const [left] = splitButton(layout.button);
-        pushIntent(x < left.x + left.w ? "dodge" : "gather", true);
+        pushIntent(splitButtonChoice(layout.button, x), true);
       } else {
         pushIntent("act");
       }
@@ -493,12 +493,10 @@ canvas.addEventListener("pointerdown", (e) => {
       }
       return;
     }
-    for (const n of mapNodeRects(layout, state)) {
-      if (n.step !== mapStep(state)) continue;
-      // 원 안쪽만 받는다. 사각 판정으로 두면 붙어 있는 칸끼리 모서리가 겹친다.
-      const cx = n.rect.x + n.rect.w / 2;
-      const cy = n.rect.y + n.rect.h / 2;
-      if (Math.hypot(x - cx, y - cy) > n.rect.w / 2 + 6) continue;
+    const nearest = nearestMapNode(openMapNodeRects(layout, state), x, y);
+    if (nearest) {
+      // 44px 원이 좁은 화면에서 겹치면 배열 첫 칸이 아니라 손가락에 가까운 칸을 고른다.
+      const n = nearest;
       if (!chooseNode(state, n.idx)) setNotice(state, "그 길로는 갈 수 없어요");
       return;
     }

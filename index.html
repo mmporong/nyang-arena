@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <title>냥 아레나 — Nyang Arena</title>
     <!-- 인라인 SVG 파비콘. 별도 요청이 생기지 않는다. -->
@@ -47,9 +47,14 @@
       }
       canvas {
         display: block;
-        touch-action: none;
+        /* 한 손가락 배치 드래그는 게임이 받고, 두 손가락 확대는 브라우저에 남긴다. */
+        touch-action: pinch-zoom;
         image-rendering: pixelated;
         cursor: default;
+      }
+      canvas:focus-visible {
+        outline: 3px solid #f0ba4a;
+        outline-offset: -5px;
       }
       .raid-a11y-controls {
         position: fixed;
@@ -59,8 +64,9 @@
         display: flex;
         max-width: min(720px, calc(100vw - 24px));
         flex-wrap: wrap;
-        gap: 8px;
-        padding: 12px;
+        gap: 12px;
+        padding: 16px;
+        box-sizing: border-box;
         color: #efe0c6;
         background: #241a14;
         border: 2px solid #9c8b76;
@@ -80,16 +86,29 @@
       }
       .raid-a11y-controls p {
         flex-basis: 100%;
+        margin: 0 0 4px;
+        line-height: 1.45;
       }
       .raid-a11y-controls button {
         min-height: 44px;
-        padding: 8px 12px;
+        padding: 10px 14px;
         color: #241a14;
         background: #efe0c6;
         border: 2px solid #f5a03c;
         border-radius: 8px;
         font: inherit;
+        line-height: 1.35;
         cursor: pointer;
+      }
+      .raid-a11y-controls button:hover {
+        background: #fff0d6;
+      }
+      .raid-a11y-controls button:active {
+        transform: translateY(1px);
+      }
+      .raid-a11y-controls button:focus-visible {
+        outline: 3px solid #f0ba4a;
+        outline-offset: 3px;
       }
       #boot {
         position: fixed;

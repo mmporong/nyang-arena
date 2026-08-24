@@ -26,12 +26,21 @@ import {
   healthBarGeom,
   offerRects,
   gameoverGeometry,
+  mapChoiceLabelGeometry,
+  mapChoiceLabelText,
+  mapNodeHitRadius,
+  nearestMapNode,
+  openMapNodeRects,
+  raidContractCardGeometry,
   raidContractRects,
   raidContractChipGeometry,
+  splitButton,
+  splitButtonChoice,
 } from "../src/game/render.ts";
 import { BOARD_SIZE, BOARD_COLS, cellToField } from "../src/game/types.ts";
 import { BOSS_RADIUS, SNIPER_RADIUS } from "../src/game/bosses.ts";
 import { RAID_CONTRACT_POOL } from "../src/validate/raid-contract-schema.ts";
+import { makeStage, nodeInfo, openLanes } from "../src/game/map.ts";
 
 const DEVICES = [
   ["iPhone SE 세로", 375, 553],
@@ -44,6 +53,12 @@ const DEVICES = [
   ["데스크톱 와이드", 1920, 1080],
   ["극단 세로", 320, 900],
   ["극단 가로", 1200, 300],
+  ["599px 계약 경계", 599, 359],
+  ["568px 계약 경계", 568, 320],
+  ["짧은 세로", 390, 500],
+  ["초소형 가로", 375, 320],
+  ["좁고 낮은 세로", 320, 480],
+  ["footer 폭 경계", 540, 500],
 ];
 
 function overlapArea(a, b) {
@@ -53,7 +68,7 @@ function overlapArea(a, b) {
 }
 
 let failed = 0;
-console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  전투셀  음소거  구성    판정");
+console.log("기기               보드셀겹침  카드    머리줄여백  최소셀  버튼  행동틈  전투셀  음소거  구성    판정");
 for (const [name, w, h] of DEVICES) {
   const L = computeLayout(w, h);
   /**
@@ -98,13 +113,25 @@ for (const [name, w, h] of DEVICES) {
    *
    * HUD에서 자리를 떼는 방식이라 `hud.w`를 줄이는 걸 빼먹으면 조용히
    * "최고 기록" 위에 올라탄다 — 그런 종류의 실수는 화면을 봐야 보이고,
-   * 기기 열 종을 매번 눈으로 보지는 않는다. 32px는 손가락 최소치다.
+   * 기기 열 종을 매번 눈으로 보지는 않는다. 모든 포인터 대상은 44px 하한이다.
    */
   const muteClear =
     L.mute.x >= L.hud.x + L.hud.w &&
     L.mute.x + L.mute.w <= w &&
     L.mute.y >= 0 &&
-    L.mute.w >= 32;
+    L.mute.w >= 44;
+
+  const actionClear = B.columns
+    ? B.button.y - Math.max(B.allyBoard.y + B.allyBoard.h, B.enemyBoard.y + B.enemyBoard.h)
+    : B.button.y - (B.synergyBar.y + B.synergyBar.h);
+  const [splitLeft, splitRight] = splitButton(B.button);
+  const splitGap = splitRight.x - (splitLeft.x + splitLeft.w);
+  const splitCenter = B.button.x + B.button.w / 2;
+  const splitClear = splitLeft.w >= 44 &&
+    splitRight.w >= 44 &&
+    Math.abs(splitGap - 2) < 0.01 &&
+    splitButtonChoice(B.button, splitCenter - 0.5) === "dodge" &&
+    splitButtonChoice(B.button, splitCenter + 0.5) === "gather";
 
   // roomy=false는 준비 단계 띠까지 보드를 덮는 좁은 화면이다. 겹침 검사를 면제하되,
   // **입력이 안 새는 것은 레이아웃이 아니라 `main.ts`가 보장한다** — 보상 분기가
@@ -118,15 +145,18 @@ for (const [name, w, h] of DEVICES) {
     headroom >= 0 &&
     cardsOnScreen &&
     L.cell >= 24 &&
-    L.button.h >= 40 &&
+    L.button.h >= 44 &&
+    actionClear >= B.actionGap - 0.5 &&
     muteClear &&
-    battleClear;
+    battleClear &&
+    splitClear;
   if (!ok) failed++;
   console.log(
     `${name.padEnd(18)} ${(worst * 100).toFixed(1).padStart(7)}%  ` +
       `${shape} ${String(Math.round(L.offerCards.w / 3)).padStart(3)}x${String(Math.round(L.offerCards.h)).padEnd(4)}` +
       `${String(Math.round(headroom)).padStart(8)}  ${String(Math.round(L.cell)).padStart(5)}  ` +
-      `${String(Math.round(L.button.h)).padStart(4)}  ${String(Math.round(B.cell)).padStart(5)}  ` +
+      `${String(Math.round(L.button.h)).padStart(4)}  ${String(Math.round(actionClear)).padStart(6)}  ` +
+      `${String(Math.round(B.cell)).padStart(5)}  ` +
       `${String(Math.round(L.mute.w)).padStart(5)}  ` +
       `${(L.columns ? "세로줄" : L.stacked ? "쌓음" : "눕힘").padEnd(6)}` +
       (ok ? "OK" : "실패"),
@@ -145,7 +175,7 @@ console.log("\n전부 통과 — HUD와 안내 문구는 어느 구성에서도 
 
 /**
  * 부검 판 바닥의 세 버튼(같은 시드 · 오늘의 시드 · 도전 +1)이 어느 기기에서도
- * (1) 손가락 최소치(40px)를 지키고 (2) 판 안에 있고 (3) 판이 큰 버튼을 덮지 않고
+ * (1) 손가락 최소치(44px)를 지키고 (2) 판 안에 있고 (3) 판이 큰 버튼을 덮지 않고
  * (4) 판이 화면 위로 나가지 않는지 본다. 줄 수가 가장 많은 판(무엇에 막혔나 ·
  * 예고 성적 · 팀 · 판 종류 · 도감)으로 잰다 — 그보다 짧은 판은 더 여유롭다.
  * 그림과 히트테스트가 같은 `gameoverGeometry`를 쓰므로 여기서 통과하면 손이
@@ -157,24 +187,30 @@ const worstCase = {
   telegraphsSeen: 6,
   kind: "challenge",
   challenge: 3,
+  lastRaidContract: { id: "probe" },
 };
 let goFailed = 0;
 console.log("\n죽은 화면 세 갈래 버튼 (최다 줄 기준)");
-console.log("기기               버튼 w×h   판 위끝  판 밑끝/큰버튼  판정");
+console.log("기기               버튼 w×h   버튼틈  글자하한  판 위끝  판 밑끝/큰버튼  판정");
 for (const [name, w, h] of DEVICES) {
   const L = computeLayout(w, h);
-  const { panel, choices } = gameoverGeometry(L, worstCase);
+  const { panel, choices, fontFloor, contentBottomY, choiceHintY } = gameoverGeometry(L, worstCase);
   const all = [choices.retry, choices.daily, choices.challenge];
   const inside = all.every(
     (r) => r.x >= panel.x && r.x + r.w <= panel.x + panel.w + 0.5 && r.y >= panel.y && r.y + r.h <= panel.y + panel.h + 0.5,
   );
-  const finger = all.every((r) => r.h >= 40 && r.w >= 56);
+  const finger = all.every((r) => r.h >= 44 && r.w >= 56);
+  const choiceGap = choices.daily.x - (choices.retry.x + choices.retry.w);
+  const rhythm = choiceGap >= 8;
+  const readable = fontFloor >= 11;
+  const contentClear = contentBottomY + 4 <= choiceHintY - fontFloor / 2 && choiceHintY + fontFloor / 2 + 4 <= choices.retry.y;
   const aboveButton = panel.y + panel.h <= L.button.y + 0.5;
   const onScreen = panel.y >= 0;
-  const ok = inside && finger && aboveButton && onScreen;
+  const ok = inside && finger && rhythm && readable && contentClear && aboveButton && onScreen;
   if (!ok) goFailed++;
   console.log(
     `${name.padEnd(18)} ${String(Math.round(choices.retry.w)).padStart(4)}×${String(Math.round(choices.retry.h)).padEnd(4)} ` +
+      `${String(Math.round(choiceGap)).padStart(6)}  ${String(Math.round(fontFloor)).padStart(8)}  ` +
       `${String(Math.round(panel.y)).padStart(6)}  ${String(Math.round(panel.y + panel.h)).padStart(6)}/${String(Math.round(L.button.y)).padEnd(6)}  ` +
       (ok ? "OK" : "실패"),
   );
@@ -190,9 +226,15 @@ console.log("전부 통과 — 세 갈래 버튼은 어느 기기에서도 손�
 /* ---------------------------------------------------------------- */
 
 let contractFailed = 0;
-console.log("\n첫 화면 악몽 계약 카드");
-console.log("기기               카드 w×h   배치   화면/버튼/겹침  판정");
-for (const [name, w, h] of DEVICES) {
+const contractCtx = {
+  font: "",
+  measureText(text) {
+    const px = Number(this.font.match(/([0-9.]+)px/)?.[1] ?? 12);
+    return { width: [...text].length * px * 0.92 };
+  },
+};
+
+function inspectContractLayout(w, h) {
   const L = computeLayout(w, h);
   const cards = raidContractRects(L, 3);
   const inside = cards.every(
@@ -200,18 +242,76 @@ for (const [name, w, h] of DEVICES) {
       card.x >= 0 &&
       card.y >= L.notice.y + L.notice.h &&
       card.x + card.w <= w + 0.5 &&
-      card.y + card.h <= L.button.y + 0.5,
+      card.y + card.h <= L.button.y - L.actionGap + 0.5,
   );
   const finger = cards.every((card) => card.w >= 44 && card.h >= 44);
   const separate = cards.every((card, i) => cards.every((other, j) => i === j || overlapArea(card, other) === 0));
-  const ok = cards.length === 3 && inside && finger && separate;
+  const stacked = cards[1].y > cards[0].y + 1;
+  const cardGaps = cards.slice(1).map((card, i) => stacked
+    ? card.y - (cards[i].y + cards[i].h)
+    : card.x - (cards[i].x + cards[i].w));
+  const rhythm = cardGaps.every((gap) => gap + 0.5 >= (stacked || L.w < 600 ? 12 : 20));
+  const compactHeight = !stacked || cards.every((card) => card.h >= 112);
+  const bounded = stacked || cards.every((card) => card.w <= 420.5 && card.h <= 440.5);
+  const header = cards.every((card) => {
+    const g = raidContractCardGeometry(card, L.h < 380 || card.h < 140 || card.w < 160);
+    if (g.compactHeader) return true;
+    const maxTitleW = Math.max(...RAID_CONTRACT_POOL.map((contract) => [...contract.name].length)) * g.titleSize * 0.92;
+    const numberRight = card.x + g.pad + g.bodySize * 0.92;
+    const titleLeft = card.x + card.w / 2 - maxTitleW / 2;
+    const titleRight = card.x + card.w / 2 + maxTitleW / 2;
+    const riskLeft = card.x + card.w - g.pad - Math.max(g.bodySize * 5.1, g.bodySize * 0.92 * 5);
+    return titleLeft + 0.5 >= numberRight + 8 && titleRight + 8 <= riskLeft + 0.5;
+  });
+  const footer = cards.every((card) => {
+    const g = raidContractCardGeometry(card, L.h < 380 || card.h < 140 || card.w < 160);
+    const keyInside = g.keyRect === null || (
+      g.keyRect.x >= card.x && g.keyRect.y >= card.y &&
+      g.keyRect.x + g.keyRect.w <= card.x + card.w + 0.5 &&
+      g.keyRect.y + g.keyRect.h <= card.y + card.h + 0.5
+    );
+    return g.contentBottomY + 8 <= g.footerLineY && keyInside && g.rewardMaxWidth >= (g.keyRect === null ? 52 : 60);
+  });
+  const copyVisible = cards.every((card) => RAID_CONTRACT_POOL.every((contract) => {
+    const compactCard = L.h < 380 || card.h < 140 || card.w < 160;
+    const g = raidContractCardGeometry(card, compactCard);
+    const contentW = card.w - g.pad * 2;
+    const lines = [
+      ...wrapLines(contractCtx, `규칙 · ${contract.rule}`, g.bodySize, 400, contentW, g.maxLines),
+      ...wrapLines(contractCtx, `대응 · ${contract.counter}`, g.bodySize, 800, contentW, g.maxLines),
+    ];
+    const mayEllipsize = L.h < 380 || card.w < 160;
+    return mayEllipsize || lines.every((line) => !line.endsWith("…"));
+  }));
+  const ok = cards.length === 3 && inside && finger && separate && rhythm && compactHeight && bounded && header && footer && copyVisible;
+  return { L, cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, footer, copyVisible, ok };
+}
+
+console.log("\n첫 화면 악몽 계약 카드");
+console.log("기기               카드 w×h   배치   화면/버튼/겹침  판정");
+for (const [name, w, h] of DEVICES) {
+  const result = inspectContractLayout(w, h);
+  const { cards, stacked, inside, finger, separate, rhythm, compactHeight, bounded, header, footer, copyVisible, ok } = result;
   if (!ok) contractFailed++;
   const first = cards[0];
   console.log(
     `${name.padEnd(18)} ${String(Math.round(first.w)).padStart(4)}×${String(Math.round(first.h)).padEnd(4)} ` +
-      `${(L.portrait || L.w < 600 ? "1열" : "3열").padEnd(4)}   ` +
-      `${inside && finger && separate ? "OK" : "실패"}              ${ok ? "OK" : "실패"}`,
+      `${(stacked ? "1열" : "3열").padEnd(4)}   ` +
+      `${inside && finger && separate && rhythm && compactHeight && bounded && header && footer && copyVisible ? "OK" : "실패"}              ${ok ? "OK" : "실패"}`,
   );
+}
+
+let sweepCases = 0;
+let sweepFailed = 0;
+for (let w = 320; w <= 900; w += 20) {
+  for (let h = 275; h <= 900; h += 20) {
+    sweepCases++;
+    if (!inspectContractLayout(w, h).ok) sweepFailed++;
+  }
+}
+contractFailed += sweepFailed;
+if (sweepFailed > 0) {
+  console.log(`실패 반응형 경계 sweep ${sweepFailed}/${sweepCases}건`);
 }
 
 const cp = (text) => [...text].length;
@@ -245,7 +345,51 @@ if (contractFailed > 0) {
   console.log(`\n${contractFailed}건 실패 — 계약 카드가 화면을 벗어나거나 카피 예산을 넘겼다`);
   process.exit(1);
 }
-console.log(`전부 통과 — 10기기 카드 3장·활성 칩 12px·터치 영역·겹침 0, 출고 ${RAID_CONTRACT_POOL.length}종 카피 예산 준수`);
+console.log(`전부 통과 — ${DEVICES.length}기기 + ${sweepCases}경계 카드 3장·활성 칩 12px·터치 영역·겹침 0, 출고 ${RAID_CONTRACT_POOL.length}종 카피 예산 준수`);
+
+/* ---------------------------------------------------------------- */
+/* 지도 선택 라벨·터치 영역                                           */
+/* ---------------------------------------------------------------- */
+
+const probeMap = makeStage(1, 424242);
+const openAtStart = openLanes(probeMap, 0);
+let mapChoiceFailed = 0;
+console.log("\n지도 열린 길 — 숫자 라벨·44px 터치·행동 영역 분리");
+for (const [name, w, h] of DEVICES) {
+  const L = computeLayout(w, h);
+  const state = { map: probeMap, step: 0 };
+  const current = openMapNodeRects(L, state);
+  const checks = current.map((entry) => {
+    const ordinal = openAtStart.indexOf(entry.idx) + 1;
+    const node = probeMap.steps[0][entry.idx];
+    const label = mapChoiceLabelGeometry(L, entry.rect, node?.kind === "boss");
+    const text = mapChoiceLabelText(ordinal, nodeInfo(node.kind).name);
+    const hit = mapNodeHitRadius(entry.rect) * 2 >= 44;
+    const belowNode = label.y - label.fontSize * 0.6 >= entry.rect.y + entry.rect.h - 0.5;
+    const aboveAction = label.bottom <= L.button.y - L.actionGap + 0.5;
+    const numbered = text.startsWith(`${ordinal} `);
+    return hit && belowNode && aboveAction && numbered;
+  });
+  const byX = [...current].sort((a, b) => a.rect.x - b.rect.x);
+  const nearestWins = byX.slice(1).every((right, i) => {
+    const left = byX[i];
+    const leftCx = left.rect.x + left.rect.w / 2;
+    const rightCx = right.rect.x + right.rect.w / 2;
+    const cy = (left.rect.y + left.rect.h / 2 + right.rect.y + right.rect.h / 2) / 2;
+    const overlap = rightCx - leftCx < mapNodeHitRadius(left.rect) + mapNodeHitRadius(right.rect);
+    if (!overlap) return true;
+    return nearestMapNode([left, right], (leftCx + rightCx) / 2 + 1, cy) === right &&
+      nearestMapNode([left, right], (leftCx + rightCx) / 2 - 1, cy) === left;
+  });
+  const ok = current.length === openAtStart.length && checks.every(Boolean) && nearestWins;
+  if (!ok) mapChoiceFailed++;
+  console.log(`  ${ok ? "OK  " : "실패"} ${name.padEnd(18)} 열린 길 ${current.length}개 · 터치/라벨/순서 ${ok ? "일치" : "위반"}`);
+}
+if (mapChoiceFailed > 0) {
+  console.log(`\n${mapChoiceFailed}개 기기에서 실패 — 지도 선택 라벨이나 44px 입력 영역이 행동 버튼과 충돌한다`);
+  process.exit(1);
+}
+console.log("전부 통과 — 지도 숫자 순서와 키보드 순서가 같고 터치 영역은 44px 이상이다");
 
 
 /* ---------------------------------------------------------------- */
