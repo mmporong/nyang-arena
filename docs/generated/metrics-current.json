@@ -1,9 +1,9 @@
 {
   "schema": 2,
   "generatedFrom": {
-    "commit": "cadad2f",
-    "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-    "tree": "54606de83756f6682968e475796ad5f626671289",
+    "commit": "5a76b18",
+    "head": "5a76b18df872bb403456197338784121b702ccff",
+    "tree": "93351c2c9696721d577ac618c478de99d496c51b",
     "dirty": false,
     "reproducible": true,
     "node": "v24.12.0",
@@ -23,57 +23,59 @@
     "bossSharePct": 33.3
   },
   "distribution": {
-    "min": 1,
-    "p25": 6,
-    "median": 14,
+    "min": 2,
+    "p25": 8,
+    "median": 12,
     "p75": 21,
-    "max": 42,
-    "mean": 14.14,
+    "max": 35,
+    "mean": 13.56,
     "hitMaxWave": 0
   },
   "session": {
-    "battleSecP25": 86.9,
-    "battleSecMedian": 156,
-    "battleSecP75": 222.8
+    "battleSecP25": 96.8,
+    "battleSecMedian": 156.5,
+    "battleSecP75": 220.8
   },
   "waveKinds": {
     "mixed": {
-      "tried": 617,
-      "passPct": 96.3,
-      "p50Sec": 4,
-      "p90Sec": 6.4
+      "tried": 604,
+      "passPct": 93.9,
+      "p50Sec": 4.1,
+      "p90Sec": 6.5
     },
     "rush": {
-      "tried": 666,
-      "passPct": 99.5,
+      "tried": 659,
+      "passPct": 99.1,
       "p50Sec": 4.1,
-      "p90Sec": 6.7
+      "p90Sec": 6.8
     },
     "snipe": {
-      "tried": 1166,
-      "passPct": 94.4,
-      "p50Sec": 6.4,
-      "p90Sec": 10.4
+      "tried": 1102,
+      "passPct": 91.6,
+      "p50Sec": 6.3,
+      "p90Sec": 10.5
     },
     "boss": {
-      "tried": 1364,
-      "passPct": 84.7,
-      "p50Sec": 24,
-      "p90Sec": 42.1
+      "tried": 1279,
+      "passPct": 87.2,
+      "p50Sec": 27.9,
+      "p90Sec": 49.1
     }
   },
   "balance": {
-    "enemyScale": 1.28,
+    "enemyScale": 1.295,
     "levelScale": 1.4,
     "upgradeCostBase": 4,
     "upgradeCostGrowth": 1.32,
     "goldBase": 5,
     "goldPerWave": 1.5,
     "telegraphDmg": 1.277,
-    "dodgeCharges": 2
+    "dodgeCharges": 2,
+    "strikeFrac": 0.07,
+    "vulnerableChargesPerWindow": 2
   },
   "build": {
-    "bundleBytes": 191361
+    "bundleBytes": 193312
   },
   "verification": {
     "sixAxis": [
@@ -83,11 +85,11 @@
         "exitCode": 0,
         "command": "npm run --silent sim",
         "seeds": "1..300",
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "node": "v24.12.0",
-        "sha256": "2669a4111fec1bc77a97b35e3bf3ec8e6c3a5e9e8bd7b70a4f9fe6982be9b171",
+        "sha256": "4b20e869c67fdef8ff74d96fb403fff897391b9445fead725937c52b56ddf867",
         "logShaMatches": true
       },
       {
@@ -96,11 +98,11 @@
         "exitCode": 0,
         "command": "npm run --silent decisions",
         "seeds": "1..300",
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "node": "v24.12.0",
-        "sha256": "3b672c668687f9badc3b076b9d17f640215947f1c5735acce28aa32d40f6375a",
+        "sha256": "e1f895bbdb7b57e1b8e06ea429e49b428149d68fce6649187e1075f78a3cc71c",
         "logShaMatches": true
       },
       {
@@ -109,11 +111,11 @@
         "exitCode": 0,
         "command": "npm run --silent placement",
         "seeds": "1..1200",
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "node": "v24.12.0",
-        "sha256": "96827b0f780b53b60c0fe2028c70e75220214ff18eb348e6a442e9d29a9ee235",
+        "sha256": "c49c6584f6c41b91878860b207ec71e5c35d0ad7cb99b73a6a041095d72dbdee",
         "logShaMatches": true
       },
       {
@@ -122,11 +124,11 @@
         "exitCode": 0,
         "command": "npm run --silent intervention",
         "seeds": "1..300",
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "node": "v24.12.0",
-        "sha256": "b61761ac4cc996e4641576ccc3db4965227a7967602bed334090bedf745d8ab9",
+        "sha256": "14f86439199653bfe33b908b56fe1237ce2c24b42ba7bf62e73824c4d8884a83",
         "logShaMatches": true
       },
       {
@@ -135,11 +137,11 @@
         "exitCode": 0,
         "command": "npm run --silent map",
         "seeds": "prep:1..300;policy-space:1..1500",
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "node": "v24.12.0",
-        "sha256": "6345a6e7678898265ed0db4d7f7442aa7a7564ab6e2f151d5bb167eb555c6aae",
+        "sha256": "7f5e709b5fde25df82066b95cf6ffc394ee0130f54015e6013d6416cef0d0119",
         "logShaMatches": true
       },
       {
@@ -148,11 +150,11 @@
         "exitCode": 0,
         "command": "npm run --silent relics",
         "seeds": "1..2000",
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "node": "v24.12.0",
-        "sha256": "858ecb62eb874f364c4dd19b94bd491bc6773790f7e669336714d0db9f4cfd24",
+        "sha256": "7d73a3fba5773aa20c10e6e0e22a53187907c216f3c19bd5cb3a6eca9013b7b1",
         "logShaMatches": true
       }
     ],
@@ -160,8 +162,8 @@
     "allSixPassed": true,
     "raidContracts": {
       "source": {
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/contract-space.mjs",
         "seeds": {
@@ -178,92 +180,92 @@
         "to": 11800
       },
       "rewardOnly": {
-        "median": 11,
-        "pass": 0.7810264385692068,
-        "topPickShare": 0.4076142878141996
+        "median": 9,
+        "pass": 0.7700752823086575,
+        "topPickShare": 0.4106820049301561
       },
       "contractAware": {
-        "median": 20,
-        "pass": 0.9383480825958702,
-        "topPickShare": 0.3481637740914757
+        "median": 18,
+        "pass": 0.9441805225653207,
+        "topPickShare": 0.34492753623188405
       },
       "forcedContractHoldout": {
         "comparison": "각 계약을 모든 시드의 첫 두 보스에 연속 적용; 평균·95% 구간 비교",
         "contracts": {
           "split_night": {
-            "mean": 17.64,
+            "mean": 17.18,
             "median": 18,
             "ci95": [
-              17.29,
-              17.99
+              16.84,
+              17.52
             ],
-            "firstTwoBossPass": 0.9524
+            "firstTwoBossPass": 0.9586
           },
           "spreading_dark": {
-            "mean": 16.73,
-            "median": 18,
+            "mean": 15.22,
+            "median": 14,
             "ci95": [
-              16.37,
-              17.08
+              14.87,
+              15.58
             ],
-            "firstTwoBossPass": 0.9626
+            "firstTwoBossPass": 0.9456
           },
           "falling_floor": {
-            "mean": 17.09,
-            "median": 21,
-            "ci95": [
-              16.71,
-              17.46
-            ],
-            "firstTwoBossPass": 0.9407
-          },
-          "mirror_hunt": {
-            "mean": 17.95,
-            "median": 20,
-            "ci95": [
-              17.59,
-              18.3
-            ],
-            "firstTwoBossPass": 0.9575
-          },
-          "last_rescue": {
-            "mean": 16.84,
+            "mean": 16.2,
             "median": 18,
             "ci95": [
-              16.48,
-              17.2
+              15.84,
+              16.57
             ],
-            "firstTwoBossPass": 0.9592
+            "firstTwoBossPass": 0.9465
+          },
+          "mirror_hunt": {
+            "mean": 16.51,
+            "median": 18,
+            "ci95": [
+              16.16,
+              16.86
+            ],
+            "firstTwoBossPass": 0.949
+          },
+          "last_rescue": {
+            "mean": 15.46,
+            "median": 14,
+            "ci95": [
+              15.11,
+              15.8
+            ],
+            "firstTwoBossPass": 0.9598
           },
           "iron_tremor": {
-            "mean": 16.77,
-            "median": 20,
+            "mean": 16.14,
+            "median": 18,
             "ci95": [
-              16.39,
-              17.14
+              15.77,
+              16.51
             ],
-            "firstTwoBossPass": 0.938
+            "firstTwoBossPass": 0.9451
           }
         },
-        "top": "mirror_hunt",
-        "runnerUp": "split_night",
-        "meanSpread": 1.22,
+        "top": "split_night",
+        "runnerUp": "mirror_hunt",
+        "meanSpread": 1.96,
         "topClearlySeparated": false,
         "everyContractPlayable": true
       },
       "medianGain": 9,
-      "firstTwoBossGainPct": 15.7,
+      "firstTwoBossGainPct": 17.4,
       "gates": {
         "depth": true,
         "dominance": true,
         "balance": true
       },
-      "evidenceSha256": "33e518441d5700e3bee30c78dcb21839e695f4d98a09100a96b7bcb2f9630343"
+      "evidenceSha256": "773ecf76609c733477cc28c67d5befc7c4dc0bcb242b7e9266f53a213c045ec9"
     },
     "mapPreparation": {
       "source": {
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/map-prep-space.mjs",
         "seeds": {
@@ -319,21 +321,21 @@
       },
       "highRiskOutcome": {
         "contractId": "spreading_dark",
-        "unpreparedPassPct": 74,
-        "preparedPassPct": 91.7,
-        "gainPct": 17.7
+        "unpreparedPassPct": 74.7,
+        "preparedPassPct": 88.7,
+        "gainPct": 14
       },
       "gates": {
         "access": true,
         "delivery": true,
         "outcome": true
       },
-      "evidenceSha256": "0a57585a7259643c6dcc057046c5d395c5dbcf14e6720fe77ab4547978d41c0d"
+      "evidenceSha256": "69099657cd42ee9918a9b987a0bc6fa59473b20c41340f3a11554a582e6cc1ec"
     },
     "mapSpace": {
       "source": {
-        "head": "cadad2fe318c0422957af33dc20e7fbd5c342975",
-        "tree": "54606de83756f6682968e475796ad5f626671289",
+        "head": "5a76b18df872bb403456197338784121b702ccff",
+        "tree": "93351c2c9696721d577ac618c478de99d496c51b",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/map-space.mjs",
         "seeds": {
@@ -345,32 +347,25 @@
         "node": "v24.12.0"
       },
       "means": {
-        "전투만": 13.704,
-        "정예 몰빵": 13.740666666666666,
-        "정찰 몰빵": 12.495333333333333,
-        "무작위": 13.632,
-        "읽고 고름": 15.088
+        "전투만": 12.759333333333334,
+        "정예 몰빵": 14.188,
+        "정찰 몰빵": 11.516,
+        "무작위": 12.736,
+        "읽고 고름": 14.210666666666667
       },
-      "spread": 2.5926666666666662,
-      "readMean": 15.088,
-      "randomMean": 13.632,
-      "bestMean": 15.088,
+      "spread": 2.6946666666666665,
+      "readMean": 14.210666666666667,
+      "randomMean": 12.736,
+      "bestMean": 14.210666666666667,
       "readGap": 0,
       "gates": {
         "effect": true,
         "read": true
       },
-      "evidenceSha256": "04b2a40d8ecad3eda76c41becbb1f042cbc1cd75375a19b84253b5495880e76b"
+      "evidenceSha256": "d6035524d320155e21f76d882fb72dbc8edfe9dc7c4bee38dd16432a7aaae0be"
     }
   },
   "openIssues": [
-    {
-      "id": "strike-not-a-choice",
-      "what": "취약 창 연타가 선택이 아니다",
-      "measured": "회피만 83.3% → 읽고 판단 85.7% (합산 기준 +2.4%p)",
-      "diagnosis": "연타에 비용이 없고 창이 3초로 제한돼 있어 '열리면 무조건 누른다'가 유일한 답이다. 화면에서 가장 화려한 연출인데 결정으로서는 가장 작다",
-      "consequence": "강화하거나(비용·상충 부여), 결정이 아닌 보상 연출로 인정하고 그렇게 설명해야 한다"
-    },
     {
       "id": "matchup-metric-noisy",
       "what": "궁합 표(팀 성격 x 웨이브 성격)가 결정에 쓸 만큼 안정적이지 않다",
