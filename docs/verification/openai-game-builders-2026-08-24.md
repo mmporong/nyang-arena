@@ -81,6 +81,40 @@ footer·guide·44px 입력 영역, 지도 라벨의 겹침이 0임을 프로브�
 `175,524 → 184,628 bytes`로 `9,104 bytes` 늘었고, 이는 카드 기하·선택/구매 VFX·
 Web Audio 확인음의 의도된 출고 비용이다.
 
+## 상호작용 피드백·입력 자동화 증거
+
+- 기능 커밋: `cadad2fe318c0422957af33dc20e7fbd5c342975`
+- Git tree: `54606de83756f6682968e475796ad5f626671289`
+- 명령: 깨끗한 기능 커밋에서 `npm run verify`
+- 결과: 종료 코드 `0`, `dirty:false`, `reproducible:true`, provenance `MATCH`,
+  6축 `allSixPassed:true`
+- 독립 코드 리뷰: 두 번째 포인터의 capture 해제가 첫 드래그를 취소하던 P1을
+  회귀 테스트와 함께 수정한 뒤 P0/P1/P2 0건으로 승인
+
+재추첨 성공은 새 카드 세 장에 최대 300ms 테두리 sweep와 `새 제안` 봉인을,
+실패는 성공음 없는 정적 호박색 경계를 남긴다. 지도 선택과 같은 판·오늘·도전
+재진입은 실제 상태를 즉시 적용하고 이전 화면 대신 선택 위치·이름만 최대 320ms
+남긴다. 각 연출은 기대 국면을 벗어나면 즉시 폐기되며 `prefers-reduced-motion`에서는
+이동·크기 변화 없이 정적 테두리와 alpha만 쓴다. 신규 Web Audio 큐는 기존 master,
+자동재생 잠금, 음소거, 숨은 탭, 노드 cleanup 계약을 그대로 통과했다.
+
+포인터·키보드·resize는 production과 Node 테스트가 같은 `dispatchGameInput`과
+`executeGameInputAction`을 사용한다. 자동 회귀는 계약·지도·재추첨·다음 런의
+포인터/키보드 동등성, 빈 카드 슬롯과 접힌 패널 틈의 입력 삼킴, 소유 포인터만
+drop/cancel/lost-capture 가능, 회전 뒤 최신 레이아웃 hit-test, phase lock보다
+음소거 우선, Space/G 반복 허용과 다른 반복키 차단을 실제 `run.ts` 전이로 확인했다.
+인앱 브라우저 연결은 사용 가능한 인스턴스 0개라 픽셀 캡처 없이 자동 관문만
+사용했으며 사람의 수동 확인을 완료 조건으로 두지 않았다.
+
+변경 전후 metrics를 같은 제외 키로 정규화한 compact JSON은 양쪽 모두
+4,934 code units / 5,565 UTF-8 bytes이고 SHA-256
+`7280fb34f742472e2e63f9faddccd78dca649b5e848eae1fc12006d592e3c2eb`로 동일하다.
+아래 6축 원시 출력 SHA도 6/6 같다. JavaScript 번들은
+`184,628 → 191,361 bytes`로 `6,733 bytes` 늘었으며, 이는 공용 입력 dispatcher·
+회귀 가능한 실행 포트·세 선택 피드백 VFX와 합성음의 의도된 출고 비용이다.
+상태 불변식은 300런·518,665스텝 위반 0, 반응형 기하는 17기기와 960경계 PASS,
+런타임 의존성과 외부 origin 요청은 계속 0이다.
+
 ## 결정 축 6개
 
 | 축 | 시드 | 종료 | 원시 출력 SHA-256 |
