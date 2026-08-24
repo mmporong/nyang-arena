@@ -31,6 +31,8 @@ const SCHEMA = 2;
 const RUNS = Number(process.argv[2] ?? 300);
 const MAX_WAVE = 60;
 const mapPick = MAP_POLICIES["무작위"];
+const MATCHUP_TABLE_TEAMS = Object.freeze(["melee", "balanced", "ranged"]);
+const MATCHUP_TABLE_WAVES = Object.freeze(["mixed", "rush", "snipe"]);
 
 const finals = [];
 /** 한 판의 **전투 시간 합계**(초). 상점·지도에서 고르는 시간은 안 들어간다. */
@@ -181,6 +183,7 @@ const sixAxis = readAxisManifest();
 const contractEvidence = readJson(".omx/evidence/contract-space.json");
 const mapPrepEvidence = readJson(".omx/evidence/map-prep.json");
 const mapSpaceEvidence = readJson(".omx/evidence/map-space.json");
+const matchupEvidence = readJson(".omx/evidence/matchup-space.json");
 const currentSource = evidenceSource("npm run metrics", { from: 1, to: RUNS, runs: RUNS }, 0);
 const sourceMatches = (source) =>
   currentSource.dirty === false &&
@@ -236,6 +239,43 @@ const mapSpaceEvidenceMatches = (evidence) =>
   evidence?.source?.seeds?.from === 1 &&
   evidence?.source?.seeds?.to === 1500 &&
   evidence?.source?.seeds?.runs === 1500;
+function matchupEvidenceMatches(evidence) {
+  const expectedCells = new Set(
+    MATCHUP_TABLE_TEAMS.flatMap((team) => MATCHUP_TABLE_WAVES.map((waveKind) => `${team}|${waveKind}`)),
+  );
+  const cells = Array.isArray(evidence?.cells) ? evidence.cells : [];
+  const interactions = Array.isArray(evidence?.analysis?.interactions) ? evidence.analysis.interactions : [];
+  const cellKeys = new Set(cells.map((cell) => `${cell?.team}|${cell?.waveKind}`));
+  const interactionKeys = new Set(interactions.map((cell) => `${cell?.team}|${cell?.waveKind}`));
+  const checkpoints = Array.isArray(evidence?.checkpoints) ? evidence.checkpoints : [];
+  const checkpointKeys = new Set(checkpoints.map((row) => row?.checkpoint));
+  return evidence?.schema === "matchup-census-v1" &&
+    evidence?.status === "OBSERVATION_ONLY" &&
+    evidence?.gate === false &&
+    evidence?.decisionEligible === false &&
+    evidence?.source?.command === "node --experimental-strip-types scripts/matchup-space.mjs" &&
+    evidence?.source?.seeds?.scenarioSeed === 0x4d415443 &&
+    evidence?.source?.seeds?.fights === 81 &&
+    evidence?.design?.combatCount === 81 &&
+    evidence?.design?.blockCount === 9 &&
+    evidence?.design?.gridCellCount === 9 &&
+    evidence?.design?.observationsPerCell === 9 &&
+    evidence?.design?.interactionDf === 4 &&
+    evidence?.rosterManifest?.sha256 === "0d46546571ad1b2fe2067a5909aaff6820511b709ab1fe13cac2125060e7450c" &&
+    cells.length === 9 &&
+    cellKeys.size === 9 &&
+    [...expectedCells].every((key) => cellKeys.has(key)) &&
+    cells.every((cell) => cell?.fights === 9) &&
+    checkpoints.length === 3 &&
+    checkpointKeys.size === 3 &&
+    [4, 8, 12].every((checkpoint) => checkpointKeys.has(checkpoint)) &&
+    checkpoints.every((row) => row?.fights === 27) &&
+    interactions.length === 9 &&
+    interactionKeys.size === 9 &&
+    [...expectedCells].every((key) => interactionKeys.has(key)) &&
+    Array.isArray(evidence?.observations) &&
+    evidence.observations.length === 81;
+}
 const axisProvenanceMatches =
   sixAxis.length === 6 &&
   new Set(sixAxis.map((row) => row.axis)).size === 6 &&
@@ -257,6 +297,37 @@ const evidenceProvenanceMatches =
   sealedPassingEvidence(contractEvidence, contractEvidenceMatches) &&
   sealedPassingEvidence(mapPrepEvidence, mapPrepEvidenceMatches) &&
   sealedPassingEvidence(mapSpaceEvidence, mapSpaceEvidenceMatches);
+const matchupObservationCurrent =
+  sourceMatches(matchupEvidence?.source) &&
+  matchupEvidenceMatches(matchupEvidence) &&
+  verifyEvidenceSeal(matchupEvidence);
+const matchupObservation = matchupObservationCurrent
+  ? {
+      status: "OBSERVATION_ONLY",
+      gate: false,
+      decisionEligible: false,
+      source: matchupEvidence.source,
+      fights: matchupEvidence.design.combatCount,
+      blocks: matchupEvidence.design.blockCount,
+      cellN: matchupEvidence.design.observationsPerCell,
+      interactionDf: matchupEvidence.design.interactionDf,
+      estimand: matchupEvidence.design.estimand,
+      inference: matchupEvidence.design.inference,
+      commonSeed: matchupEvidence.source.seeds.scenarioSeed,
+      adjacencyMode: matchupEvidence.design.adjacencyMode,
+      manifestSha256: matchupEvidence.rosterManifest.sha256,
+      cells: matchupEvidence.cells,
+      checkpoints: matchupEvidence.checkpoints,
+      interactionResiduals: matchupEvidence.analysis.interactions,
+      dominant: matchupEvidence.analysis.dominant,
+      sensitivity: matchupEvidence.sensitivity,
+      evidenceSha256: matchupEvidence.evidenceSha256,
+    }
+  : {
+      status: matchupEvidence ? "STALE" : "UNAVAILABLE",
+      gate: false,
+      decisionEligible: false,
+    };
 
 const metrics = {
   schema: SCHEMA,
@@ -325,19 +396,36 @@ const metrics = {
     mapPreparation: mapPrepEvidence,
     mapSpace: mapSpaceEvidence,
   },
+  observations: {
+    matchupCensus: matchupObservation,
+  },
   /** 합격 관문과 별개로 과장하지 않고 남겨 둘 제품 한계. */
-  openIssues: [
-    {
-      id: "matchup-metric-noisy",
-      what: "궁합 표(팀 성격 x 웨이브 성격)가 결정에 쓸 만큼 안정적이지 않다",
-      measured: "같은 코드·같은 시드 범위에서 4.2%p와 7.6%p가 나온다. 무관한 변수를 바꾸면 9.2%p와 5.0%p",
-      diagnosis:
-        "팀 성격 분류가 봇이 그때그때 어떤 팀을 갖게 되느냐에 달려 있어 칸마다 표본이 들쭉날쭉하다",
-      consequence:
-        "이 수치로 '일반 웨이브에 궁합이 있다/없다'를 말하면 안 된다. WS4(일반 웨이브에 역할 주기)는 지표를 고치기 전까지 보류",
-      stable: "보스 열만은 일관되다 — 근접 87% vs 원거리 75%, 세 번 잰 값이 모두 12~15%p",
-    },
-  ],
+  openIssues: matchupObservationCurrent
+    ? [
+        {
+          id: "matchup-census-generalization-limited",
+          what: "통제형 궁합 관찰은 매니페스트의 고정 81장면 밖으로 일반화할 수 없다",
+          measured:
+            `최대 |I| ${matchupObservation.dominant.absInteraction.toFixed(3)} · ` +
+            `체크포인트 승리 ${matchupObservation.checkpoints.map((row) => `W${row.checkpoint} ${row.wins}/${row.fights}`).join(" · ")}`,
+          diagnosis:
+            "roster set·checkpoint·seed는 확률 표본이 아니라 사전 선택한 유한 census이며, wave 8·12는 바닥 포화가 있다",
+          consequence:
+            "이 값만으로 사거리 단일 효과나 자연 런 메타를 주장하거나 밸런스 수치를 바꾸지 않는다",
+          stable:
+            `leave-one-out에서 상호작용 방향을 유지한 셀 ${matchupObservation.sensitivity.directionStableCells}/9`,
+        },
+      ]
+    : [
+        {
+          id: "matchup-metric-noisy",
+          what: "궁합 표(팀 성격 x 웨이브 성격)가 결정에 쓸 만큼 안정적이지 않다",
+          measured: "자연 런 사후 표는 셀 수와 진행 깊이가 다르며 현재 통제형 증거가 없거나 낡았다",
+          diagnosis: "팀 성격 분류가 구매·생존 결과에 달려 있어 셀마다 표본과 노출 깊이가 다르다",
+          consequence: "현재 트리에서 npm run matchup을 다시 실행하기 전까지 궁합 수치를 인용하지 않는다",
+          stable: "없음",
+        },
+      ],
 };
 
 mkdirSync("docs/generated", { recursive: true });
@@ -353,6 +441,13 @@ const axisTable = metrics.verification.sixAxis.length > 0
 const raid = metrics.verification.raidContracts;
 const mapPrep = metrics.verification.mapPreparation;
 const mapSpace = metrics.verification.mapSpace;
+const matchup = metrics.observations.matchupCensus;
+const matchupRows = matchup.status === "OBSERVATION_ONLY"
+  ? MATCHUP_TABLE_TEAMS.map((team) => {
+      const cells = MATCHUP_TABLE_WAVES.map((waveKind) => matchup.cells.find((cell) => cell.team === team && cell.waveKind === waveKind));
+      return `| ${team} | ${cells.map((cell) => `${cell.meanMargin.toFixed(3)} / I ${cell.interaction >= 0 ? "+" : ""}${cell.interaction.toFixed(3)}`).join(" | ")} |`;
+    }).join("\n")
+  : `| ${matchup.status} | - | - | - |`;
 const md = `<!-- 이 파일은 npm run metrics가 생성한다. 손으로 고치지 말 것. -->
 # 기준 수치
 
@@ -391,6 +486,20 @@ ${mapPrep
 ${mapSpace
   ? `지도 1500런 · 정책 평균 격차 **${mapSpace.spread.toFixed(1)}웨이브** · 읽는 정책 ${mapSpace.readMean.toFixed(1)} · 무작위 ${mapSpace.randomMean.toFixed(1)} · 최선 격차 ${mapSpace.readGap.toFixed(1)}`
   : "지도 정책 공간 증거 없음 — `npm run map` 필요"}
+
+## 궁합 센서스 — 관찰 전용
+
+**6축 PASS/FAIL이나 밸런스 변경 근거로 사용하지 않는다.** 고정 로스터 패키지·체크포인트·공통 시드의 81장면 기술통계다.
+
+상태 **${matchup.status}**${matchup.status === "OBSERVATION_ONLY" ? ` · 실제 전투 ${matchup.fights}개 · 셀당 ${matchup.cellN}개 · 독립 상호작용 차원 ${matchup.interactionDf}` : " — `npm run matchup` 필요"}
+
+| 팀 | mixed | rush | snipe |
+|---|---:|---:|---:|
+${matchupRows}
+
+${matchup.status === "OBSERVATION_ONLY"
+  ? `최대 |I| **${matchup.dominant.absInteraction.toFixed(3)}** (${matchup.dominant.team} × ${matchup.dominant.waveKind}) · 체크포인트 승리 ${matchup.checkpoints.map((row) => `W${row.checkpoint} ${row.wins}/${row.fights}`).join(" · ")} · leave-one-out 방향 유지 ${matchup.sensitivity.directionStableCells}/9셀`
+  : "현재 커밋과 일치하는 봉인 증거가 없어 수치를 표시하지 않는다."}
 
 ## 한 판 전투 시간 합계
 

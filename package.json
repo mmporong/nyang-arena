@@ -38,7 +38,7 @@
     "map:observe": "node --experimental-strip-types scripts/map-space.mjs",
     "gold": "node --experimental-strip-types scripts/gold-curve.mjs",
     "measure:all": "node scripts/measure-all.mjs",
-    "verify": "npm run typecheck && npm test && npm run contract:test && npm run contracts && npm run clear:test && npm run outcome:test && npm run submission:test && npm run probe && npm run input:test && npm run dodge:test && npm run strike:test && npm run audio:test && npm run audio:runtime:test && npm run asset:test && npm run invariants && vite build && npm run measure:all",
+    "verify": "npm run typecheck && npm test && npm run contract:test && npm run contracts && npm run clear:test && npm run outcome:test && npm run matchup:test && npm run submission:test && npm run probe && npm run input:test && npm run dodge:test && npm run strike:test && npm run audio:test && npm run audio:runtime:test && npm run asset:test && npm run invariants && vite build && npm run measure:all",
     "typecheck": "tsc --noEmit",
     "metrics": "node --experimental-strip-types scripts/metrics-gen.mjs",
     "formation": "node --experimental-strip-types scripts/formation-space.mjs",
@@ -47,7 +47,9 @@
     "tiers": "node --experimental-strip-types scripts/synergy-tiers.mjs",
     "clear": "node --experimental-strip-types scripts/clear-space.mjs",
     "clear:test": "node --experimental-strip-types scripts/clear-bots-test.mjs",
-    "outcome:test": "node --experimental-strip-types scripts/battle-outcome-test.mjs"
+    "outcome:test": "node --experimental-strip-types scripts/battle-outcome-test.mjs",
+    "matchup": "node --experimental-strip-types scripts/matchup-space.mjs",
+    "matchup:test": "node --experimental-strip-types scripts/matchup-space-test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.7.2",

@@ -19,7 +19,7 @@ const AXES = Object.freeze([
   ["map", "prep:1..300;policy-space:1..1500"],
   ["relics", "1..2000"],
 ]);
-const OBSERVATIONS = Object.freeze(["gold", "clear"]);
+const OBSERVATIONS = Object.freeze(["gold", "clear", "matchup"]);
 const EVIDENCE_DIR = ".omx/evidence/verify-6axis";
 const MANIFEST = join(EVIDENCE_DIR, "manifest.tsv");
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
