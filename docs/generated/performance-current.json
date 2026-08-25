@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "productCommit": "bbb67566bc1ffed3f67782e2336b5f58303752cc",
+  "generatedAt": "2026-08-25T00:41:35.982Z",
+  "node": "v24.12.0",
+  "constraints": {
+    "runtimeDependencies": 0,
+    "externalNetwork": 0,
+    "canvas2d": true
+  },
+  "browsers": {
+    "chrome": {
+      "product": "Chrome/151.0.7922.172",
+      "sampleCount": 108,
+      "frameWorkP95Ms": 1.5,
+      "longFrameCount": 0,
+      "cadenceHz": 57.320404992767976,
+      "tintedSpriteHits": 165,
+      "tintedSpriteMisses": 3
+    },
+    "edge": {
+      "product": "Edg/151.0.4129.101",
+      "sampleCount": 105,
+      "frameWorkP95Ms": 1.4000000059604645,
+      "longFrameCount": 0,
+      "cadenceHz": 56.21925509486998,
+      "tintedSpriteHits": 171,
+      "tintedSpriteMisses": 3
+    }
+  },
+  "cacheStress": {
+    "viewports": 20,
+    "boardGrid": {
+      "peakEntries": 8,
+      "maxEntries": 8,
+      "peakPixels": 1419488,
+      "maxPixels": 8000000
+    },
+    "backdrop": {
+      "peakEntries": 14,
+      "maxEntries": 14,
+      "peakPixels": 862711,
+      "maxPixels": 4000000
+    },
+    "tintedSprites": {
+      "peakEntries": 4,
+      "maxEntries": 24,
+      "peakPixels": 147456,
+      "maxPixels": 884736
+    },
+    "fxBuffer": {
+      "ordinaryPixels": 114009,
+      "maxPixels": 1000000,
+      "fiveKAndEightKContract": true
+    }
+  },
+  "verification": {
+    "sixAxisRawHashes": {
+      "sim": "9923da2d285fca10375b29b1b28f3b0ae01128dc0183c1923809703df917c75a",
+      "decisions": "e1f895bbdb7b57e1b8e06ea429e49b428149d68fce6649187e1075f78a3cc71c",
+      "placement": "c49c6584f6c41b91878860b207ec71e5c35d0ad7cb99b73a6a041095d72dbdee",
+      "intervention": "14f86439199653bfe33b908b56fe1237ce2c24b42ba7bf62e73824c4d8884a83",
+      "map": "7f5e709b5fde25df82066b95cf6ffc394ee0130f54015e6013d6416cef0d0119",
+      "relics": "7d73a3fba5773aa20c10e6e0e22a53187907c216f3c19bd5cb3a6eca9013b7b1"
+    },
+    "normalizedMetricsHash": "ae2c9e24581ae743ccf95922e14b5d8df340137b32f20815fc55644341c2591e",
+    "allSixPassed": true,
+    "provenanceMatches": true
+  }
+}
