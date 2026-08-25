@@ -115,6 +115,53 @@ drop/cancel/lost-capture 가능, 회전 뒤 최신 레이아웃 hit-test, phase 
 상태 불변식은 300런·518,665스텝 위반 0, 반응형 기하는 17기기와 960경계 PASS,
 런타임 의존성과 외부 origin 요청은 계속 0이다.
 
+## 제출 영상 프리비즈·인코딩 파이프라인 증거
+
+- 기능 커밋: `0abe1cb58384254dcc15b00f015a6656237930c4`
+- Git tree: `72681b50fa0f0b59ca9f7f8282ee5031f5ea4041`
+- 명령: 깨끗한 기능 커밋에서 `npm run verify`
+- 결과: 종료 코드 `0`, `dirty:false`, `reproducible:true`, provenance `MATCH`,
+  6축 `allSixPassed:true`
+- 독립 코드 리뷰: 최초 16:10 강제 크롭·하단 CTA 가림·기여 경계 누락·약한 프리비즈
+  표기·provenance 부재를 수정한 뒤 추가 finding 없이 `APPROVE`
+
+영상 변경은 게임 로직·밸런스·번들을 건드리지 않았다. 변경 전 `66b9e88` 기준과
+기능 커밋의 생성 metrics를 같은 함수로 정규화해 `generatedFrom`, `bundleBytes`,
+`head`, `tree`, `dirty`, `node`, `reproducible`, `provenanceMatches`,
+`allSixPassed`, `evidenceSha256`를 제외했다. 양쪽 compact JSON은 각각 11,858 code
+units / 12,174 UTF-8 bytes이고 SHA-256
+`a0ff5949baad5281eaf025871b054dde658a75c11ec13dae0ccf5601a034ac43`로 바이트
+동일하다. 기능 직전 `66b9e88`과 다음 6축 원시 출력 SHA도 6/6 같다.
+
+| 축 | 원시 출력 SHA-256 |
+|---|---|
+| sim | `9923da2d285fca10375b29b1b28f3b0ae01128dc0183c1923809703df917c75a` |
+| decisions | `e1f895bbdb7b57e1b8e06ea429e49b428149d68fce6649187e1075f78a3cc71c` |
+| placement | `c49c6584f6c41b91878860b207ec71e5c35d0ad7cb99b73a6a041095d72dbdee` |
+| intervention | `14f86439199653bfe33b908b56fe1237ce2c24b42ba7bf62e73824c4d8884a83` |
+| map | `7f5e709b5fde25df82066b95cf6ffc394ee0130f54015e6013d6416cef0d0119` |
+| relics | `7d73a3fba5773aa20c10e6e0e22a53187907c216f3c19bd5cb3a6eca9013b7b1` |
+
+프리비즈 `docs/submission-video-previz.mp4`는 `58.736초`, 1280×720, 30fps,
+H.264 High/yuv420p와 AAC-LC 48kHz stereo다. 전체 디코드 오류 0,
+integrated `-19.0 LUFS`, true peak `-4.2 dBFS`, 1초 이상 무음 0이며 MP4 atom은
+`ftyp → moov → mdat` 순서다. 최종 SHA-256은
+`5c18dfa1f3c25f4d706dc122caabf71888f4cb395449b7fd1099ea3ddcd3893b`다.
+
+`scripts/build-submission-video-previz.ps1`은 인코딩 직후 길이·해상도·프레임률·
+픽셀 포맷·비디오/오디오 코덱을 ffprobe로 다시 검사한다. 생성 manifest
+`docs/generated/submission-video-previz.json`은 기능 커밋을 가리키며 FFmpeg/FFprobe
+버전, 입력 11개와 출력 SHA-256을 기록한다. 생성 시 전체 tracked 작업 트리는 위
+metrics 갱신 때문에 dirty였지만 영상 입력·스크립트·출력만 따로 비교한
+`sourceDirty:false`이며 manifest의 출력 SHA와 실제 MP4가 일치한다. 저장소 밖 출력·
+manifest 경로는 인코딩 전에 차단되고, 같은 입력으로 두 번 생성한 MP4 SHA도 같다.
+
+이 파일은 장면 전환·자막·색·음량을 검증하는 **정적 비제출 프리비즈**다. 24px 고대비
+`NOT FOR SUBMISSION · STATIC PREVIZ` 배지를 전체 구간에 넣었고, 2026-08-23 실화면을
+사용했음을 콘티에 적었다. 앱 브라우저 연결 인스턴스가 0개라 2026-08-25의 0.5배 전투·
+13종 스킬을 새 동영상으로 촬영하지 못했으며, 새 계약 루프가 없는 과거 제출 영상을
+최신 실플레이처럼 재사용하지 않았다.
+
 ## 결정 축 6개
 
 | 축 | 시드 | 종료 | 원시 출력 SHA-256 |

@@ -1,0 +1,75 @@
+{
+    "schemaVersion":  1,
+    "generatedFrom":  {
+                          "head":  "0abe1cb58384254dcc15b00f015a6656237930c4",
+                          "trackedDirty":  true,
+                          "sourceDirty":  false
+                      },
+    "tools":  {
+                  "ffmpeg":  "ffmpeg version 8.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+                  "ffprobe":  "ffprobe version 8.1-full_build-www.gyan.dev Copyright (c) 2007-2026 the FFmpeg developers"
+              },
+    "sources":  [
+                    {
+                        "path":  "docs/thumbnail.png",
+                        "sha256":  "FB0EEE1EF22C02B3AB4EDB946CC041315F7694BE54BAB52373DA27C00A722DEE"
+                    },
+                    {
+                        "path":  "docs/shots/track-a/09-boss-arrival.png",
+                        "sha256":  "8899D9087B5B05D8E5AEC408639358ED58065570F0603CEF4497121DE74322F8"
+                    },
+                    {
+                        "path":  "docs/shots/track-a/10-boss-danger.png",
+                        "sha256":  "31A987E20E644CC8BD21219157A34EACD2617A97EF01AF8502A0E8C31F6C1095"
+                    },
+                    {
+                        "path":  "docs/shots/track-a/11-boss-gather-perimeter.png",
+                        "sha256":  "07E6BCC95503BCEAF38EB2F59B3808D983FCEDA06BB028C49528C56AC704381A"
+                    },
+                    {
+                        "path":  "docs/shots/track-a/12-boss-vulnerable.png",
+                        "sha256":  "63EBE9D4C8129987F016188D78AEAB71E12D908364D09014D1EAABC78D654858"
+                    },
+                    {
+                        "path":  "docs/submission-video-previz.ass",
+                        "sha256":  "863AF5593A9A7D2F8142668DA087D5B345A5F070375136BC1A34DA5126020525"
+                    },
+                    {
+                        "path":  "scripts/build-submission-video-previz.ps1",
+                        "sha256":  "4ADDBE4EB956775B13110DA9327BF513B242BC57071BB48496C254550A29DD57"
+                    },
+                    {
+                        "path":  "public/bgm/title.mp3",
+                        "sha256":  "1B712749D891354DA5F3FEFDCE0EC38E4509D711B41595EA124A1D473DCFB123"
+                    },
+                    {
+                        "path":  "public/bgm/prepare.mp3",
+                        "sha256":  "21540EBD99F7423D8F8926E12F13530A928C06E0FD6C3E2EDDE6300D48038F82"
+                    },
+                    {
+                        "path":  "public/bgm/boss.mp3",
+                        "sha256":  "9CF6C93F4F6AB06C469BC5171361E84F6E00AAF86BCD3DED7F150E88CB1ED948"
+                    },
+                    {
+                        "path":  "public/bgm/outro.mp3",
+                        "sha256":  "84F919C27F2811C6AFC4AA37540F863D69A60073484CA108EA25D2420549E20D"
+                    }
+                ],
+    "output":  {
+                   "path":  "docs/submission-video-previz.mp4",
+                   "sha256":  "5C18DFA1F3C25F4D706DC122CAABF71888F4CB395449B7FD1099EA3DDCD3893B",
+                   "durationSeconds":  58.736,
+                   "video":  {
+                                 "codec":  "h264",
+                                 "width":  1280,
+                                 "height":  720,
+                                 "pixelFormat":  "yuv420p",
+                                 "frameRate":  "30/1"
+                             },
+                   "audio":  {
+                                 "codec":  "aac",
+                                 "sampleRate":  48000,
+                                 "channels":  2
+                             }
+               }
+}
