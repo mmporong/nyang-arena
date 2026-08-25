@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "productCommit": "bbb67566bc1ffed3f67782e2336b5f58303752cc",
-  "generatedAt": "2026-08-25T00:41:35.982Z",
+  "productCommit": "6982c40ff0dc8ff260a0543365ec61ed2cea5858",
+  "generatedAt": "2026-08-25T16:37:21.0958002Z",
   "node": "v24.12.0",
   "constraints": {
     "runtimeDependencies": 0,
@@ -11,21 +11,31 @@
   "browsers": {
     "chrome": {
       "product": "Chrome/151.0.7922.172",
-      "sampleCount": 108,
-      "frameWorkP95Ms": 1.5,
+      "sampleCount": 106,
+      "frameWorkP95Ms": 1.199999988079071,
       "longFrameCount": 0,
-      "cadenceHz": 57.320404992767976,
-      "tintedSpriteHits": 165,
-      "tintedSpriteMisses": 3
+      "cadenceHz": 58.88290713324361,
+      "tintedSpriteHits": 357,
+      "tintedSpriteMisses": 4
     },
     "edge": {
-      "product": "Edg/151.0.4129.101",
+      "product": "Edg/151.0.4129.107",
       "sampleCount": 105,
-      "frameWorkP95Ms": 1.4000000059604645,
+      "frameWorkP95Ms": 1.2999999821186066,
       "longFrameCount": 0,
-      "cadenceHz": 56.21925509486998,
-      "tintedSpriteHits": 171,
-      "tintedSpriteMisses": 3
+      "cadenceHz": 57.77777777777778,
+      "tintedSpriteHits": 358,
+      "tintedSpriteMisses": 4
+    }
+  },
+  "fxStress": {
+    "chrome": {
+      "desktop1488x832": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 3.0, "cadenceHz": 57.7 },
+      "mobile390x844Dpr2": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.8, "cadenceHz": 47.5 }
+    },
+    "edge": {
+      "desktop1488x832": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.8, "cadenceHz": 59.2 },
+      "mobile390x844Dpr2": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.4, "cadenceHz": 49.4 }
     }
   },
   "cacheStress": {
@@ -33,7 +43,7 @@
     "boardGrid": {
       "peakEntries": 8,
       "maxEntries": 8,
-      "peakPixels": 1419488,
+      "peakPixels": 2431432,
       "maxPixels": 8000000
     },
     "backdrop": {
@@ -43,9 +53,9 @@
       "maxPixels": 4000000
     },
     "tintedSprites": {
-      "peakEntries": 4,
+      "peakEntries": 5,
       "maxEntries": 24,
-      "peakPixels": 147456,
+      "peakPixels": 184320,
       "maxPixels": 884736
     },
     "fxBuffer": {
@@ -56,14 +66,14 @@
   },
   "verification": {
     "sixAxisRawHashes": {
-      "sim": "9923da2d285fca10375b29b1b28f3b0ae01128dc0183c1923809703df917c75a",
-      "decisions": "e1f895bbdb7b57e1b8e06ea429e49b428149d68fce6649187e1075f78a3cc71c",
-      "placement": "c49c6584f6c41b91878860b207ec71e5c35d0ad7cb99b73a6a041095d72dbdee",
-      "intervention": "14f86439199653bfe33b908b56fe1237ce2c24b42ba7bf62e73824c4d8884a83",
-      "map": "7f5e709b5fde25df82066b95cf6ffc394ee0130f54015e6013d6416cef0d0119",
-      "relics": "7d73a3fba5773aa20c10e6e0e22a53187907c216f3c19bd5cb3a6eca9013b7b1"
+      "sim": "ef03bae54f799a1fc14ea72c8cd802e2c45bd79d1b55e151b940b20c2c460b0b",
+      "decisions": "4eea9cf496f78ebce729f7ed7cd26fc78d5c442ed219427c9ba566d33f8b0ccd",
+      "placement": "9207305341960ea2724a57f9e180a785761c3f3415acc92cc02e74786278eac5",
+      "intervention": "330d4f2f23eab3035b71df59a425bac810e1c64c2500edf8ed2f5400de9ce8dc",
+      "map": "c97333f5ef7bedba14f3d3bbf5d13668b38f9a7e56d320bb55fe2ab52fdabeb7",
+      "relics": "eb6433925ba0227034440d04c67741a7c7b2ba1e4dd3872476dc65d689c852e2"
     },
-    "normalizedMetricsHash": "ae2c9e24581ae743ccf95922e14b5d8df340137b32f20815fc55644341c2591e",
+    "normalizedMetricsHash": "d1a553a2ef4e0def846677a49249a40438842a1455c4add90ef2287954e01389",
     "allSixPassed": true,
     "provenanceMatches": true
   }

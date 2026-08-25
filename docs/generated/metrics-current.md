@@ -1,7 +1,7 @@
 <!-- 이 파일은 npm run metrics가 생성한다. 손으로 고치지 말 것. -->
 # 기준 수치
 
-- 커밋 `626dbf5` · 트리 `71176edf5531…`
+- 커밋 `6982c40` · 트리 `2a62b922a6ad…`
 - 시드 1~300 · Node v24.12.0 · 스키마 v2
 
 ## 구조
@@ -26,7 +26,7 @@
 | map | PASS | 0 | `npm run --silent map` | prep:1..300;policy-space:1..1500 | `c97333f5ef7b…` |
 | relics | PASS | 0 | `npm run --silent relics` | 1..2000 | `eb6433925ba0…` |
 
-전체 판정: **FAIL** · provenance **MISMATCH**
+전체 판정: **PASS** · provenance **MATCH**
 
 ## 악몽 계약
 
