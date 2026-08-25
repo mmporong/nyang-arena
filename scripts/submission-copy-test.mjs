@@ -51,9 +51,22 @@ assert.ok(Math.abs(width / height - 16 / 9) < 0.001, `썸네일이 16:9가 아�
 const size = statSync(thumbnailPath).size;
 assert.ok(size <= 10 * 1024 * 1024, `썸네일이 10MB를 넘는다 (${size})`);
 
-// 최종 문안이 검증 완료를 주장하는 순간부터 저장된 재현 증거도 함께 통과해야 한다.
-// 작업 중 문안은 이 마커를 넣지 않아도 되지만, 제출본은 문구만 앞서갈 수 없다.
-if (doc.includes("<!-- SUBMISSION_EVIDENCE_REQUIRED -->")) {
+// 후보 커밋은 현재 제품의 수치·성능 증거까지 엄격히 검증하되, 그 커밋의 CI가
+// 성공한 뒤에만 최종 배포 metadata를 적을 수 있다. 후보와 최종 마커를 분리해
+// CI head가 자기 자신의 아직 존재하지 않는 run id를 요구하는 순환을 끊는다.
+const finalEvidenceRequired = doc.includes("<!-- SUBMISSION_EVIDENCE_REQUIRED -->");
+const candidateEvidenceRequired = doc.includes("<!-- SUBMISSION_EVIDENCE_CANDIDATE -->");
+assert.equal(
+  finalEvidenceRequired || candidateEvidenceRequired,
+  true,
+  "제출 문안에 후보 또는 최종 증거 마커가 없다",
+);
+assert.equal(
+  finalEvidenceRequired && candidateEvidenceRequired,
+  false,
+  "제출 문안에 후보·최종 증거 마커가 동시에 있다",
+);
+if (finalEvidenceRequired || candidateEvidenceRequired) {
   const metrics = JSON.parse(readFileSync("docs/generated/metrics-current.json", "utf8"));
   const performance = JSON.parse(readFileSync("docs/generated/performance-current.json", "utf8"));
   const release = JSON.parse(readFileSync("docs/generated/submission-release.json", "utf8"));
@@ -64,6 +77,11 @@ if (doc.includes("<!-- SUBMISSION_EVIDENCE_REQUIRED -->")) {
   assert.equal(performance.constraints?.externalNetwork, 0, "외부 네트워크 요청이 0이 아니다");
   assert.equal(performance.constraints?.canvas2d, true, "Canvas 2D 출고 조건이 깨졌다");
   assert.equal(release.schema, 1, "제출 출고 manifest schema가 다르다");
+  assert.equal(
+    release.status,
+    finalEvidenceRequired ? "released" : "candidate",
+    "문안 마커와 출고 manifest 상태가 다르다",
+  );
   assert.equal(release.gameProductCommit, performance.productCommit, "출고 manifest와 성능 제품 커밋이 다르다");
   assert.equal(release.publicBuild?.url, playableUrl, "출고 manifest와 플레이 URL이 다르다");
 
@@ -159,19 +177,26 @@ if (doc.includes("<!-- SUBMISSION_EVIDENCE_REQUIRED -->")) {
     "런타임 출고 조건",
   );
 
-  const evidenceCommit = /게임 출고 기준 증거·배포 커밋: `([0-9a-f]{40})`/.exec(doc)?.[1];
-  assert.ok(evidenceCommit, "게임 출고 증거·배포 커밋을 찾지 못했다");
-  assert.equal(evidenceCommit, release.evidenceCommit, "문서와 출고 manifest의 증거 커밋이 다르다");
-  assert.notEqual(release.evidenceCommit, release.gameProductCommit, "제품과 증거 커밋은 분리되어야 한다");
-  assert.equal(release.ci?.headSha, release.evidenceCommit, "CI HEAD가 출고 증거 커밋과 다르다");
-  assert.equal(release.ci?.status, "completed", "출고 CI가 완료 상태가 아니다");
-  assert.equal(release.ci?.conclusion, "success", "출고 CI가 성공 상태가 아니다");
-  assert.equal(
-    release.ci?.url,
-    `https://github.com/mmporong/nyang-arena/actions/runs/${release.ci?.runId}`,
-    "출고 CI URL과 run id가 다르다",
-  );
-  assert.ok(doc.includes(release.ci.url), "문서의 GitHub Actions 링크가 출고 manifest와 다르다");
+  if (finalEvidenceRequired) {
+    const evidenceCommit = /게임 출고 기준 증거·배포 커밋: `([0-9a-f]{40})`/.exec(doc)?.[1];
+    assert.ok(evidenceCommit, "게임 출고 증거·배포 커밋을 찾지 못했다");
+    assert.equal(evidenceCommit, release.evidenceCommit, "문서와 출고 manifest의 증거 커밋이 다르다");
+    assert.notEqual(release.evidenceCommit, release.gameProductCommit, "제품과 증거 커밋은 분리되어야 한다");
+    assert.equal(release.ci?.headSha, release.evidenceCommit, "CI HEAD가 출고 증거 커밋과 다르다");
+    assert.equal(release.ci?.workflow, "Deploy to GitHub Pages", "출고 CI workflow가 배포 관문이 아니다");
+    assert.equal(release.ci?.status, "completed", "출고 CI가 완료 상태가 아니다");
+    assert.equal(release.ci?.conclusion, "success", "출고 CI가 성공 상태가 아니다");
+    assert.equal(
+      release.ci?.url,
+      `https://github.com/mmporong/nyang-arena/actions/runs/${release.ci?.runId}`,
+      "출고 CI URL과 run id가 다르다",
+    );
+    assert.ok(doc.includes(release.ci.url), "문서의 GitHub Actions 링크가 출고 manifest와 다르다");
+  } else {
+    assert.equal(release.evidenceCommit, null, "후보 manifest가 검증 전 evidence commit을 주장한다");
+    assert.equal(release.ci, null, "후보 manifest가 검증 전 CI 성공을 주장한다");
+    assert.ok(doc.includes("출고 후보 CI: 대기"), "후보 문안이 CI 대기 상태를 명시하지 않는다");
+  }
 }
 
 console.log(

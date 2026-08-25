@@ -161,21 +161,19 @@ Codex는 위 기반을 분석한 뒤 다음 범위를 새로 설계·구현·검
 
 ## 5. 공개 검증 증거
 
-<!-- SUBMISSION_EVIDENCE_REQUIRED -->
+<!-- SUBMISSION_EVIDENCE_CANDIDATE -->
 
-- 게임 출고 기준 제품 커밋: `bbb67566bc1ffed3f67782e2336b5f58303752cc`
-- 게임 출고 기준 증거·배포 커밋: `6d5aca67f6740242287bf2fa5515626c543e9eec`
-- GitHub Actions:
-  <https://github.com/mmporong/nyang-arena/actions/runs/32795736670> — 전체
-  `npm run verify`, 증거 보존, Pages 배포 `SUCCESS`
+- 게임 출고 기준 제품 커밋: `6982c40ff0dc8ff260a0543365ec61ed2cea5858`
+- 출고 후보 CI: 대기 — 후보 커밋의 전체 `npm run verify`와 Pages 배포 성공 뒤
+  증거·배포 커밋 및 GitHub Actions 실행을 결박한다
 - 6축 `sim`, `decisions`, `placement`, `intervention`, `map`, `relics` 전부 PASS,
   clean product provenance MATCH
 - 정규화 metrics SHA-256:
-  `ae2c9e24581ae743ccf95922e14b5d8df340137b32f20815fc55644341c2591e`
-- 도달 웨이브 중앙값 12, 60웨이브 상한 도달 0건
-- 계약-aware 중앙값 18, 보상-only 9; 첫 두 보스 94.4% 대 77.0%
-- 고위험 준비 경로 74.7%→88.7%, 지도 읽기 14.2 대 무작위 12.7
-- Chrome p95 1.50ms, Edge p95 1.40ms, Chrome/Edge 장기 프레임 0/0건
+  `d1a553a2ef4e0def846677a49249a40438842a1455c4add90ef2287954e01389`
+- 도달 웨이브 중앙값 13, 60웨이브 상한 도달 0건
+- 계약-aware 중앙값 14, 보상-only 6; 첫 두 보스 96.5% 대 66.9%
+- 고위험 준비 경로 72.7%→89.7%, 지도 읽기 14.3 대 무작위 12.8
+- Chrome p95 1.20ms, Edge p95 1.30ms, Chrome/Edge 장기 프레임 0/0건
 - 런타임 의존성 0개, 외부 네트워크 요청 0건, Canvas 2D 유지
 
 수치의 구조화 원본은 `docs/generated/metrics-current.json`, 사람이 읽는 투영은
@@ -189,7 +187,7 @@ Codex는 위 기반을 분석한 뒤 다음 범위를 새로 설계·구현·검
 |---|---|---|
 | 제목 | 준비 완료 | 80자 이하를 기계 검증 |
 | 200자 소개 | 준비 완료 | 공식 폼과 같은 JavaScript UTF-16 길이로 기계 검증 |
-| 플레이 URL | 배포 완료 | HTTP 200, 최신 main Pages 배포 성공 |
+| 플레이 URL | 재배포 검증 중 | 후보 CI 성공 뒤 최신 main의 HTTP 200을 다시 봉인 |
 | 썸네일 | 기술 조건 충족 | 16:9 PNG·10MB 이하, 계약 중심 구성은 아님 |
 | Codex 과정 | 준비 완료 | 5,000자 이하, 기존/신규/사람 결정 분리 |
 | 데모 영상 URL | 미확정 | 로컬 52.672초 파일은 있으나 바로 재생되는 공개 URL 없음 |
