@@ -518,6 +518,27 @@ async function main() {
     assert(bootState.a11yButtons === 4, `접근성 계약 3개와 음소거 버튼이 준비되지 않았습니다 (${bootState.a11yButtons})`);
     assert(bootState.runtime.sprites.state === "ready", `sprite 상태가 ready가 아닙니다 (${bootState.runtime.sprites.state})`);
     assert(bootState.runtime.sprites.frameDescriptors === 186 && bootState.runtime.sprites.fallbackFrames === 0, "186 frame descriptor가 준비되지 않았습니다");
+    const fontState = await evaluate(cdp, sessionId, `(async () => {
+      await Promise.all([
+        document.fonts.load('400 16px "Maplestory"'),
+        document.fonts.load('800 16px "Maplestory"'),
+        document.fonts.ready,
+      ]);
+      const faces = [...document.fonts]
+        .filter((face) => face.family.replaceAll('"', '') === "Maplestory")
+        .map((face) => ({ family: face.family, weight: face.weight, style: face.style, status: face.status }));
+      return {
+        light: document.fonts.check('400 16px "Maplestory"'),
+        bold: document.fonts.check('800 16px "Maplestory"'),
+        faces,
+      };
+    })()`);
+    assert(fontState.light && fontState.bold, "Maplestory Light/Bold가 document.fonts에서 사용 가능하지 않습니다");
+    assert(
+      fontState.faces.some((face) => face.weight === "400" && face.status === "loaded")
+        && fontState.faces.some((face) => face.weight === "800" && face.status === "loaded"),
+      `Maplestory 실제 FontFace 두께가 로드되지 않았습니다 (${JSON.stringify(fontState.faces)})`,
+    );
     const happyAtlasRequests = pageRequests.filter((url) => /\/sprites\/atlas-(?:base|extra)\.png(?:$|\?)/u.test(url));
     const happyLegacyRequests = pageRequests.filter((url) => /\/sprites\/\d{2}_[a-z]+\.png(?:$|\?)/u.test(url));
     assert(happyAtlasRequests.length === 2, `정상 sprite 요청이 정확히 2회가 아닙니다 (${happyAtlasRequests.length})`);
@@ -539,6 +560,7 @@ async function main() {
     console.log(
       `browser-runtime boot PASS · ${browserVersion.product} · protocol ${browserVersion.protocolVersion} · ${basename(browserPath)} · colors ${bootState.uniqueColors}`,
     );
+    console.log("browser-runtime fonts PASS · Maplestory Light 400 + Bold 800 document.fonts loaded");
 
     const initialAccessibility = await evaluate(cdp, sessionId, `(() => {
       const panel = document.querySelector(".game-a11y-controls");
@@ -786,6 +808,13 @@ async function main() {
     await evaluate(cdp, sessionId, `document.querySelector("canvas").focus()`);
     await delay(400);
     await clickPoint(cdp, sessionId, clickX, clickY);
+    await waitFor(
+      "보상 버튼의 실제 전투 시작",
+      () => evaluate(cdp, sessionId, `({ phase: window.nyang.phase, lastInput: window.nyang.runtime.lastInput })`),
+      (value) => value?.phase === "battle" && value.lastInput?.kind === "pointer-up",
+    );
+    const stabilizedAllies = await evaluate(cdp, sessionId, `window.nyangQa.stabilizeBattle()`);
+    assert(stabilizedAllies > 0, "브라우저 전투 안정화용 아군이 없습니다");
     const battleState = await waitFor(
       "보상 버튼에서 전투 진입",
       () => evaluate(cdp, sessionId, `({
@@ -1181,6 +1210,135 @@ async function main() {
       );
     }
     console.log("browser-runtime visibility PASS · 2x hidden freeze→16ms single-cadence resume");
+
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: INITIAL_VIEWPORT.width,
+      height: INITIAL_VIEWPORT.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    }, sessionId);
+    await waitFor(
+      "critical E2E viewport 복원",
+      () => evaluate(cdp, sessionId, `window.nyang.runtime.lastResize`),
+      (value) => value?.width === INITIAL_VIEWPORT.width && value.height === INITIAL_VIEWPORT.height && value.dpr === 1,
+    );
+
+    const dodgeFixture = await evaluate(cdp, sessionId, `window.nyangQa.prepareDodgeTelegraph()`);
+    assert(dodgeFixture.phase === "battle" && dodgeFixture.dodgeCharges === 2, "회피 QA 픽스처가 보스 전투를 준비하지 못했습니다");
+    const dodgeUi = await waitFor(
+      "보스 산개 예고와 회피 UI 활성",
+      () => evaluate(cdp, sessionId, `(() => {
+        const button = [...document.querySelectorAll('[data-focus-key^="battle:"]')]
+          .find((candidate) => candidate.textContent.includes("산개"));
+        if (!button) return null;
+        button.focus();
+        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+          const rect = button.getBoundingClientRect();
+          resolve({
+            key: button.dataset.focusKey,
+            label: button.textContent.trim(),
+            disabled: button.disabled,
+            focused: document.activeElement === button,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            charges: window.nyang.dodgeCharges,
+            telegraphs: window.nyang.telegraphs,
+            positions: window.nyang.allyPos,
+            alert: window.nyang.runtime.accessibility.alertText,
+            actionCount: window.nyang.runtime.actionCounts.intent ?? 0,
+          });
+        })));
+      })()`),
+      (value) => value && !value.disabled
+        && value.focused
+        && value.charges === 2
+        && value.telegraphs.includes("avoid")
+        && value.alert.includes("산개 예고")
+        && value.rect.width >= 44
+        && value.rect.height >= 44,
+    );
+    await delay(450);
+    await clickPoint(
+      cdp,
+      sessionId,
+      dodgeUi.rect.x + dodgeUi.rect.width / 2,
+      dodgeUi.rect.y + dodgeUi.rect.height / 2,
+    );
+    const dodgeApplied = await waitFor(
+      "회피 클릭의 자원/이동 반영",
+      () => evaluate(cdp, sessionId, `({
+        charges: window.nyang.dodgeCharges,
+        pending: window.nyang.pending,
+        positions: window.nyang.allyPos,
+        actionCount: window.nyang.runtime.actionCounts.intent ?? 0,
+        lastInput: window.nyang.runtime.lastInput,
+      })`),
+      (value) => value?.charges === 1
+        && value.pending.length === 0
+        && value.actionCount === dodgeUi.actionCount + 1
+        && value.lastInput?.kind === "direct-action"
+        && value.lastInput.action?.kind === "intent"
+        && value.positions.some((cat, index) => {
+          const before = dodgeUi.positions[index];
+          return before && (cat.dash || cat.x !== before.x || cat.y !== before.y);
+        }),
+      10_000,
+    );
+    assert(dodgeApplied.charges === 1, "회피 클릭 뒤 차지가 정확히 한 번 소비되지 않았습니다");
+    console.log("browser-runtime dodge critical E2E PASS · active avoid alert/button → pointer click → charge 2→1 + dash");
+
+    const stageBossFixture = await evaluate(cdp, sessionId, `window.nyangQa.prepareStageBoss()`);
+    assert(
+      stageBossFixture.phase === "battle" && stageBossFixture.stage === 1 && stageBossFixture.step === 5,
+      `스테이지 보스 QA 픽스처가 잘못 준비됐습니다 (${JSON.stringify(stageBossFixture)})`,
+    );
+    const stageBossCleared = await waitFor(
+      "스테이지 1 우두머리 실제 처치와 지도 전이",
+      () => evaluate(cdp, sessionId, `({
+        phase: window.nyang.phase,
+        stage: window.nyang.stage,
+        step: window.nyang.step,
+        gold: window.nyang.gold,
+        raidOffers: window.nyang.raidOffers.length,
+        polite: window.nyang.runtime.accessibility.politeText,
+      })`),
+      (value) => value?.phase === "map"
+        && value.stage === 2
+        && value.step === 0
+        && value.gold > stageBossFixture.gold
+        && value.raidOffers === 3,
+      30_000,
+    );
+    await delay(450);
+    const stageTwoContract = await evaluate(cdp, sessionId, `(() => {
+      const button = document.querySelector('[data-focus-key^="raid-contract:"]');
+      button?.focus();
+      return button?.dataset.focusKey ?? null;
+    })()`);
+    assert(stageTwoContract, "스테이지 2 계약 버튼이 나타나지 않았습니다");
+    await pressKey(cdp, sessionId, { key: "Enter", code: "Enter", keyCode: 13, text: "\r" });
+    const stageTwoMapButton = await waitFor(
+      "스테이지 2 지도 활성",
+      () => evaluate(cdp, sessionId, `(() => {
+        const button = document.querySelector('[data-focus-key^="map-node:"]');
+        if (!button) return null;
+        button.focus();
+        return {
+          stage: window.nyang.stage,
+          step: window.nyang.step,
+          key: button.dataset.focusKey,
+        };
+      })()`),
+      (value) => value?.stage === 2 && value.step === 0,
+    );
+    await delay(450);
+    await pressKey(cdp, sessionId, { key: "Enter", code: "Enter", keyCode: 13, text: "\r" });
+    const stageTwoReward = await waitFor(
+      "스테이지 2 첫 보상/준비 진입",
+      () => evaluate(cdp, sessionId, `({ phase: window.nyang.phase, stage: window.nyang.stage, step: window.nyang.step })`),
+      (value) => value?.phase === "reward" && value.stage === 2 && value.step === 0,
+    );
+    assert(stageTwoReward.stage === 2, "우두머리 처치 뒤 스테이지 2 실제 준비 화면에 진입하지 못했습니다");
+    console.log("browser-runtime stage critical E2E PASS · stage1 boss combat win/reward → stage2 map contract → first reward");
 
     await waitFor(
       "네트워크 유휴",

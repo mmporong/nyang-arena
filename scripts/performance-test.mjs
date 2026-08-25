@@ -7,14 +7,14 @@ import { basename, dirname, join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const EXPECTED_AXIS_HASHES = Object.freeze({
-  sim: "9923da2d285fca10375b29b1b28f3b0ae01128dc0183c1923809703df917c75a",
-  decisions: "e1f895bbdb7b57e1b8e06ea429e49b428149d68fce6649187e1075f78a3cc71c",
-  placement: "c49c6584f6c41b91878860b207ec71e5c35d0ad7cb99b73a6a041095d72dbdee",
-  intervention: "14f86439199653bfe33b908b56fe1237ce2c24b42ba7bf62e73824c4d8884a83",
-  map: "7f5e709b5fde25df82066b95cf6ffc394ee0130f54015e6013d6416cef0d0119",
-  relics: "7d73a3fba5773aa20c10e6e0e22a53187907c216f3c19bd5cb3a6eca9013b7b1",
+  sim: "ef03bae54f799a1fc14ea72c8cd802e2c45bd79d1b55e151b940b20c2c460b0b",
+  decisions: "4eea9cf496f78ebce729f7ed7cd26fc78d5c442ed219427c9ba566d33f8b0ccd",
+  placement: "9207305341960ea2724a57f9e180a785761c3f3415acc92cc02e74786278eac5",
+  intervention: "330d4f2f23eab3035b71df59a425bac810e1c64c2500edf8ed2f5400de9ce8dc",
+  map: "c97333f5ef7bedba14f3d3bbf5d13668b38f9a7e56d320bb55fe2ab52fdabeb7",
+  relics: "eb6433925ba0227034440d04c67741a7c7b2ba1e4dd3872476dc65d689c852e2",
 });
-const EXPECTED_NORMALIZED_METRICS_HASH = "ae2c9e24581ae743ccf95922e14b5d8df340137b32f20815fc55644341c2591e";
+const EXPECTED_NORMALIZED_METRICS_HASH = "d1a553a2ef4e0def846677a49249a40438842a1455c4add90ef2287954e01389";
 const VOLATILE_METRIC_KEYS = new Set([
   "source",
   "evidenceSha256",

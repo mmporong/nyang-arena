@@ -46,11 +46,13 @@ import {
 import { backdropCacheObservation } from "./game/backdrop.ts";
 import { createFramePerformanceObserver } from "./game/performance.ts";
 import {
+  buildEnemyWave,
   buyOffer,
   chooseNode,
   chooseRaidContract,
   chooseSharedRaidContract,
   leaveShop,
+  makeCat,
   moveCat,
   newRun,
   nextRunFrom,
@@ -60,6 +62,7 @@ import {
   type NextChoice,
   type RunState,
 } from "./game/run.ts";
+import { BREEDS } from "./game/breeds.ts";
 import { parseRaidSeed, parseRaidShareCode, raidShareCode } from "./game/raid.ts";
 import { nodeInfo } from "./game/map.ts";
 import { RAID_CONTRACT_POOL_STATUS } from "./validate/raid-contract-schema.ts";
@@ -844,6 +847,90 @@ if (debugEnabled) {
   });
   Object.defineProperty(window, "nyangQa", {
     value: Object.freeze({
+      stabilizeBattle: () => {
+        for (const board of [state.ally, state.enemy]) {
+          for (const cat of board) {
+            if (!cat) continue;
+            cat.maxHp = 1_000_000;
+            cat.hp = cat.maxHp;
+            cat.atk = 1;
+          }
+        }
+        return state.ally.filter(Boolean).length;
+      },
+      prepareDodgeTelegraph: () => {
+        state = newRun(91_001);
+        state.step = 2;
+        state.nodeKind = "boss";
+        state.nodeWave = "boss";
+        buildEnemyWave(state);
+        state.ally.fill(null);
+        for (const [index, cell] of [7, 12, 17].entries()) {
+          const cat = makeCat(BREEDS[index]!, "ally", cell, 3);
+          cat.atk = 0;
+          cat.atkInterval = 60_000;
+          state.ally[cell] = cat;
+        }
+        state.phase = "prepare";
+        startBattle(state);
+        const boss = state.enemy.find((cat) => cat?.radius && cat.radius > 0);
+        const anchor = state.ally[12];
+        if (!boss || !anchor) throw new Error("회피 QA 보스/아군 준비 실패");
+        for (const cat of state.ally) {
+          if (cat) cat.moveLock = 60_000;
+        }
+        for (const cat of state.enemy) {
+          if (!cat) continue;
+          cat.atk = 0;
+          cat.atkInterval = 60_000;
+          cat.cooldown = 60_000;
+          cat.maxHp = Math.max(cat.maxHp, 1_000_000);
+          cat.hp = cat.maxHp;
+        }
+        boss.telegraph = {
+          shape: "circle",
+          mode: "avoid",
+          fx: anchor.fx,
+          fy: anchor.fy,
+          dirX: 1,
+          dirY: 0,
+          arg: 1.2,
+          reach: 0,
+          fuse: 12_000,
+          fuseMax: 12_000,
+        };
+        state.dodgeCharges = 2;
+        state.actCooldown = 0;
+        clearBattleFx();
+        return { phase: state.phase, stage: state.map.stage, step: state.step, dodgeCharges: state.dodgeCharges };
+      },
+      prepareStageBoss: () => {
+        state = newRun(91_002);
+        state.step = 5;
+        state.nodeKind = "boss";
+        state.nodeWave = "boss";
+        buildEnemyWave(state);
+        state.ally.fill(null);
+        for (let cell = 0; cell < 5; cell += 1) {
+          const cat = makeCat(BREEDS[cell]!, "ally", cell, 5);
+          cat.maxHp = 1_000_000;
+          cat.hp = cat.maxHp;
+          cat.atk = 1_000_000;
+          cat.atkInterval = 40;
+          state.ally[cell] = cat;
+        }
+        state.phase = "prepare";
+        startBattle(state);
+        for (const cat of state.ally) if (cat) cat.cooldown = 0;
+        for (const cat of state.enemy) {
+          if (!cat) continue;
+          cat.atk = 0;
+          cat.maxHp = 1;
+          cat.hp = 1;
+        }
+        clearBattleFx();
+        return { phase: state.phase, stage: state.map.stage, step: state.step, gold: state.gold };
+      },
       startFxStress: () => {
         clearBattleFx();
         framePerformance!.clear();
