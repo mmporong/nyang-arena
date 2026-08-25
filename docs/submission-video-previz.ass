@@ -1,0 +1,39 @@
+[Script Info]
+Title: Nyang Arena submission previz captions
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+ScaledBorderAndShadow: yes
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Title,Malgun Gothic,58,&H00E8E0D4,&H000000FF,&H00120B0A,&H80120B0A,-1,0,0,0,100,100,0,0,1,3,1,5,70,70,36,1
+Style: Hook,Malgun Gothic,38,&H00E8E0D4,&H000000FF,&H00120B0A,&HC0120B0A,-1,0,0,0,100,100,0,0,3,2,0,2,80,80,44,1
+Style: Combat,Malgun Gothic,30,&H00E8E0D4,&H000000FF,&H00120B0A,&HC0120B0A,-1,0,0,0,100,100,0,0,3,2,0,3,760,80,105,1
+Style: CardTitle,Malgun Gothic,48,&H004AE9C7,&H000000FF,&H00120B0A,&H00120B0A,-1,0,0,0,100,100,0,0,1,2,0,5,70,70,30,1
+Style: CardBody,Malgun Gothic,30,&H00E8E0D4,&H000000FF,&H00120B0A,&H00120B0A,0,0,0,0,100,100,0,0,1,2,0,5,90,90,30,1
+Style: Red,Malgun Gothic,38,&H006E3FFF,&H000000FF,&H00120B0A,&HC0120B0A,-1,0,0,0,100,100,0,0,3,2,0,3,760,80,105,1
+Style: Teal,Malgun Gothic,38,&H00B4E32B,&H000000FF,&H00120B0A,&HC0120B0A,-1,0,0,0,100,100,0,0,3,2,0,3,760,80,105,1
+Style: Gold,Malgun Gothic,38,&H004AE2FF,&H000000FF,&H00120B0A,&HC0120B0A,-1,0,0,0,100,100,0,0,3,2,0,3,760,80,105,1
+Style: Proof,Malgun Gothic,34,&H00E8E0D4,&H000000FF,&H00120B0A,&H00120B0A,-1,0,0,0,100,100,0,0,1,2,0,5,70,70,30,1
+Style: Url,Malgun Gothic,30,&H004AE9C7,&H000000FF,&H00120B0A,&HC0120B0A,-1,0,0,0,100,100,0,0,3,2,0,2,80,80,44,1
+Style: Preview,Malgun Gothic,24,&H00E8E0D4,&H000000FF,&H00120B0A,&HC0120B0A,-1,0,0,0,100,100,0,0,3,2,0,9,24,24,18,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 9,0:00:00.00,0:00:58.73,Preview,,0,0,0,,NOT FOR SUBMISSION · STATIC PREVIZ
+Dialogue: 1,0:00:00.25,0:00:03.70,Title,,0,0,0,,냥 아레나: 악몽 계약
+Dialogue: 1,0:00:03.70,0:00:07.40,Hook,,0,0,0,,내가 고른 악몽이, 전투 규칙이 된다
+Dialogue: 1,0:00:07.75,0:00:10.90,CardTitle,,0,0,0,,악몽 계약
+Dialogue: 1,0:00:10.90,0:00:14.35,CardBody,,0,0,0,,다음 보스의 패턴 · 위험 · 보상을 직접 고른다\N같은 계약은 URL로 공유된다
+Dialogue: 1,0:00:14.65,0:00:21.65,Combat,,0,0,0,,계약 보스 · 전투 판정 ×0.5\N공격의 원인과 결과를 읽을 시간
+Dialogue: 1,0:00:21.90,0:00:28.85,Red,,0,0,0,,붉으면 흩어져\N위험 예고 → 산개\N피격 회피
+Dialogue: 1,0:00:29.10,0:00:36.10,Teal,,0,0,0,,청록이면 모여\N집결 선택 → 실제 판정
+Dialogue: 1,0:00:36.35,0:00:43.35,Gold,,0,0,0,,금빛이면 때려\N취약 창 → 결정타
+Dialogue: 1,0:00:43.60,0:00:47.15,Proof,,0,0,0,,출발 → 방향 → 충돌 → 피해
+Dialogue: 1,0:00:47.15,0:00:50.55,CardBody,,0,0,0,,13종 스킬 · 보호막 · 기절 · 지속 피해\N표시와 실제 전투 상태를 같은 판정에 연결
+Dialogue: 1,0:00:50.85,0:00:52.75,Hook,,0,0,0,,기존 게임 기반 · 사람 + Claude
+Dialogue: 1,0:00:52.75,0:00:55.15,Proof,,0,0,0,,제출 신규 · 악몽 계약 · 전투 피드백 · 검증 · Codex
+Dialogue: 1,0:00:55.15,0:00:57.15,Proof,,0,0,0,,최종 방향과 출고 결정 · 사람
+Dialogue: 1,0:00:57.15,0:00:58.60,Url,,0,0,0,,mmporong.github.io/nyang-arena
