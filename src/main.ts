@@ -1,4 +1,12 @@
-import { clearBattleFx, hazardZones, queueIntervention, spawnArrivalFx, spawnLevelUpFx, stepBattle } from "./game/battle.ts";
+import {
+  clearBattleFx,
+  combatFeedbackObservation,
+  hazardZones,
+  queueIntervention,
+  spawnArrivalFx,
+  spawnLevelUpFx,
+  stepBattle,
+} from "./game/battle.ts";
 import { BALANCE } from "./game/balance.ts";
 import {
   dispatchGameInput,
@@ -117,6 +125,9 @@ interface RuntimeObservation {
   frameCount: number;
   paused: boolean;
   lastDt: number;
+  lastBattleDt: number;
+  totalBattleRawMs: number;
+  totalBattleAppliedMs: number;
   resumeFirstDt: number | null;
   resizeCount: number;
   orientationCount: number;
@@ -141,6 +152,9 @@ const runtimeObservation: RuntimeObservation = {
   frameCount: 0,
   paused: document.hidden,
   lastDt: 0,
+  lastBattleDt: 0,
+  totalBattleRawMs: 0,
+  totalBattleAppliedMs: 0,
   resumeFirstDt: null,
   resizeCount: 0,
   orientationCount: 0,
@@ -449,6 +463,9 @@ function onPrimaryAction(): void {
  */
 function startNextRun(choice: NextChoice): void {
   clearBattleFx();
+  runtimeObservation.lastBattleDt = 0;
+  runtimeObservation.totalBattleRawMs = 0;
+  runtimeObservation.totalBattleAppliedMs = 0;
   state = nextRunFrom(state, choice);
   const url = new URL(location.href);
   url.searchParams.delete("raid");
@@ -791,6 +808,18 @@ if (debugEnabled) {
       pending: [...state.pending],
       telegraphs: state.enemy.filter((c) => c?.telegraph).map((c) => c!.telegraph!.mode),
       vulnerable: state.enemy.some((c) => c?.alive && c.vulnerableMs > 0),
+      battleElapsedMs: state.battleElapsed,
+      combat: {
+        speed: BALANCE.battleSpeed,
+        battleElapsedMs: state.battleElapsed,
+        timing: {
+          rawActiveMs: runtimeObservation.totalBattleRawMs,
+          appliedMs: runtimeObservation.totalBattleAppliedMs,
+          lastRawDt: runtimeObservation.lastDt,
+          lastBattleDt: runtimeObservation.lastBattleDt,
+        },
+        ...combatFeedbackObservation(state),
+      },
       button: { ...layout.button },
       runtime: {
         ...runtimeObservation,
@@ -874,7 +903,17 @@ function frame(now: number): void {
    * 곱셈을 거치지 않는다 — 그래서 배속을 바꿔도 sim·invariants 수치는
    * 그대로다. 이건 밸런스가 아니라 표현이라는 근거가 바로 이 분리다.
    */
-  stepBattle(state, dt * BALANCE.battleSpeed);
+  const battleActive = state.phase === "battle";
+  const battleDt = dt * BALANCE.battleSpeed;
+  if (debugEnabled) {
+    runtimeObservation.lastBattleDt = battleActive ? battleDt : 0;
+    if (battleActive) {
+      runtimeObservation.totalBattleRawMs += dt;
+      runtimeObservation.totalBattleAppliedMs += battleDt;
+    }
+  }
+  // 판정은 반속, 순수 transient feedback은 실시간 수명으로 흘려 잔상 과밀을 막는다.
+  stepBattle(state, battleDt, dt);
   observeBossSignals({
     phase: state.phase,
     zones: hazardZones(state),

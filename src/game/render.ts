@@ -19,6 +19,7 @@ import {
   sweepDodgeFree,
   sweepZones,
   type Fx,
+  type CombatStatusKind,
   vulnerableWindowBoss,
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
@@ -403,6 +404,7 @@ function drawOneTelegraph(
   L: Layout,
   tg: Telegraph,
   box: { x0: number; y0: number; x1: number; y1: number; m: number },
+  outlineOnly = false,
 ): void {
   const { x0, y0, x1, y1, m } = box;
   // 0 → 1로 차오른다. 다 차면 터진다.
@@ -424,8 +426,10 @@ function drawOneTelegraph(
     const r = tg.arg * pitch;
     ctx.beginPath();
     ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.28})`;
-    ctx.fill();
+    if (!outlineOnly) {
+      ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.28})`;
+      ctx.fill();
+    }
     ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
     ctx.lineWidth = 2 + fill * 2;
     ctx.stroke();
@@ -438,9 +442,9 @@ function drawOneTelegraph(
     ctx.lineWidth = Math.max(3, L.cell * 0.07);
     ctx.lineCap = "round";
     ctx.stroke();
-    if (gather) {
+    if (!outlineOnly && gather) {
       concentric(ctx, origin.x, origin.y, r, hue, fill);
-    } else {
+    } else if (!outlineOnly) {
       ctx.save();
       ctx.beginPath();
       ctx.arc(origin.x, origin.y, r, 0, Math.PI * 2);
@@ -469,8 +473,10 @@ function drawOneTelegraph(
     ctx.moveTo(corners[0]!.x, corners[0]!.y);
     for (const p of corners.slice(1)) ctx.lineTo(p.x, p.y);
     ctx.closePath();
-    ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
-    ctx.fill();
+    if (!outlineOnly) {
+      ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
+      ctx.fill();
+    }
     ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
     ctx.lineWidth = 2 + fill * 2;
     ctx.stroke();
@@ -478,11 +484,13 @@ function drawOneTelegraph(
     const by0 = Math.min(...corners.map((p) => p.y));
     const bx1 = Math.max(...corners.map((p) => p.x));
     const by1 = Math.max(...corners.map((p) => p.y));
-    ctx.save();
-    ctx.clip();
-    if (gather) concentric(ctx, (bx0 + bx1) / 2, (by0 + by1) / 2, (bx1 - bx0) / 2, hue, fill);
-    else hatch(ctx, bx0, by0, bx1 - bx0, by1 - by0, hue, fill);
-    ctx.restore();
+    if (!outlineOnly) {
+      ctx.save();
+      ctx.clip();
+      if (gather) concentric(ctx, (bx0 + bx1) / 2, (by0 + by1) / 2, (bx1 - bx0) / 2, hue, fill);
+      else hatch(ctx, bx0, by0, bx1 - bx0, by1 - by0, hue, fill);
+      ctx.restore();
+    }
   } else {
     // 직선·부채꼴은 방향이 있으므로 화면에서도 같은 방향으로 돌린다.
     const tip = fieldToScreen(L, tg.fx + tg.dirX * tg.reach, tg.fy + tg.dirY * tg.reach);
@@ -500,16 +508,20 @@ function drawOneTelegraph(
       ctx.arc(0, 0, len, -tg.arg, tg.arg);
       ctx.closePath();
     }
-    ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
-    ctx.fill();
+    if (!outlineOnly) {
+      ctx.fillStyle = `rgba(${hue},${0.1 + fill * 0.26})`;
+      ctx.fill();
+    }
     ctx.strokeStyle = `rgba(${hue},${0.5 + fill * 0.5})`;
     ctx.lineWidth = 2 + fill * 2;
     ctx.stroke();
     // 방향이 있는 예고는 전부 회피다. 해칭도 같은 규칙을 따른다.
-    ctx.save();
-    ctx.clip();
-    hatch(ctx, -len, -len, len * 2, len * 2, hue, fill);
-    ctx.restore();
+    if (!outlineOnly) {
+      ctx.save();
+      ctx.clip();
+      hatch(ctx, -len, -len, len * 2, len * 2, hue, fill);
+      ctx.restore();
+    }
   }
   ctx.restore();
 }
@@ -527,6 +539,20 @@ function drawTelegraphs(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
   // 별도 배열이라(creepZones와 같은 이유) 위 루프엔 안 걸린다. 길이는 항상
   // 0 또는 1이라 이 자리에서 그냥 그려도 다른 예고와 겹쳐 그려질 일이 없다.
   for (const z of sweepZones) drawOneTelegraph(ctx, L, z, box);
+}
+
+/**
+ * 타격·상태·피해 숫자 뒤에 입력 필수 윤곽과 도화선만 다시 긋는다.
+ * fill/해칭은 유닛 아래 한 번만 그려 화면을 덮지 않는다.
+ */
+function drawTelegraphOutlines(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  const box = telegraphClipBox(L);
+  for (const c of s.enemy) {
+    if (!c) continue;
+    if (c.telegraph) drawOneTelegraph(ctx, L, c.telegraph, box, true);
+    if (c.telegraph2) drawOneTelegraph(ctx, L, c.telegraph2, box, true);
+  }
+  for (const z of sweepZones) drawOneTelegraph(ctx, L, z, box, true);
 }
 
 /**
@@ -750,8 +776,9 @@ function drawHud(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
   hudChip(
     ctx,
     goldChip,
-    // 캡션을 비운다. 생선 그림이 곧 이름이라 글자까지 붙이면 같은 말을 두 번 한다.
-    "",
+    // 전투 중에는 의도적인 반속 재생임을 숨기지 않는다. 생선은 그림이 이름을
+    // 대신하므로 같은 자리에 별도 화폐 캡션을 더하지 않아도 된다.
+    s.phase === "battle" ? battleSpeedCaption(goldChip.w) : "",
     String(currentGoldShown()),
     T.fish,
     "center",
@@ -814,6 +841,14 @@ let boardGridCachePeakPixels = 0;
 
 function boardGridCachePixels(): number {
   return boardGridCache.weight;
+}
+
+/** HUD 칩 폭에 맞춰 의미를 보존한 채 전투 속도 캡션만 축약한다. */
+export function battleSpeedCaption(chipWidth: number): string {
+  const speed = `×${BALANCE.battleSpeed.toFixed(1)}`;
+  if (chipWidth < 104) return speed;
+  if (chipWidth < 150) return `속도 ${speed}`;
+  return `전투 속도 ${speed}`;
 }
 
 function boardGridImage(L: Layout, side: Side): { canvas: HTMLCanvasElement; x: number; y: number; w: number; h: number } | null {
@@ -1147,6 +1182,109 @@ export function healthBarGeom(
   return { bh, by };
 }
 
+export interface CombatStatusVisual {
+  kind: CombatStatusKind;
+  label: string;
+  color: string;
+  /** 보호막만 실제 남은 양을 체력 대비 세그먼트로 보여 준다. */
+  ratio: number | null;
+}
+
+/** 실제 Cat 상태만 시각 토큰으로 바꾼다. 장식용 가짜 buff/debuff는 만들지 않는다. */
+export function combatStatusVisuals(
+  cat: Pick<Cat, "shield" | "stun" | "dot" | "maxHp">,
+): CombatStatusVisual[] {
+  const out: CombatStatusVisual[] = [];
+  if (cat.shield > 0) {
+    out.push({
+      kind: "shield",
+      label: "보호막",
+      color: "#6E97C4",
+      ratio: Math.max(0, Math.min(1, cat.shield / Math.max(1, cat.maxHp))),
+    });
+  }
+  if (cat.stun > 0) out.push({ kind: "stun", label: "기절", color: "#6E97C4", ratio: null });
+  if (cat.dot) out.push({ kind: "dot", label: "지속 피해", color: "#C9A05C", ratio: null });
+  return out;
+}
+
+function drawCornerBrackets(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  arm: number,
+): void {
+  for (const sx of [-1, 1]) {
+    for (const sy of [-1, 1]) {
+      const x = cx + sx * radius;
+      const y = cy + sy * radius;
+      ctx.beginPath();
+      ctx.moveTo(x - sx * arm, y);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x, y - sy * arm);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawCombatStatusMarkers(
+  ctx: CanvasRenderingContext2D,
+  cat: Cat,
+  cx: number,
+  cy: number,
+  size: number,
+  bx: number,
+  by: number,
+  bw: number,
+  bh: number,
+): void {
+  for (const status of combatStatusVisuals(cat)) {
+    ctx.save();
+    ctx.strokeStyle = status.color;
+    ctx.fillStyle = status.color;
+    ctx.lineWidth = Math.max(1.5, size * 0.045);
+    if (status.kind === "shield") {
+      ctx.globalAlpha = 0.9;
+      drawCornerBrackets(ctx, cx, cy, size * 0.5, size * 0.14);
+      const ratio = status.ratio ?? 0;
+      const segmentH = Math.max(2, bh * 0.38);
+      ctx.fillRect(bx, by - segmentH - 2, bw * ratio, segmentH);
+    } else if (status.kind === "stun") {
+      // 끊긴 머리 고리 + 마름모 둘. 색을 못 봐도 보호막 괄호와 구분된다.
+      ctx.globalAlpha = 0.92;
+      ctx.setLineDash([Math.max(2, size * 0.06), Math.max(2, size * 0.045)]);
+      ctx.beginPath();
+      ctx.arc(cx, cy - size * 0.3, size * 0.18, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const dx of [-0.13, 0.13]) {
+        const x = cx + size * dx;
+        const y = cy - size * 0.51;
+        const r = Math.max(2, size * 0.055);
+        ctx.beginPath();
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r, y);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else {
+      // 체력 바 왼쪽의 세 점. 한 점이던 때보다 지속 중인 효과로 읽히며
+      // 위험 예고의 분홍을 쓰지 않는다.
+      const r = Math.max(1.7, size * 0.045);
+      for (let i = 0; i < 3; i++) {
+        ctx.globalAlpha = 0.55 + i * 0.18;
+        ctx.beginPath();
+        ctx.arc(bx - r * 2.4, by + bh / 2 - r * 2.5 + i * r * 2.5, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+}
+
 function drawCat(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -1351,33 +1489,8 @@ function drawCat(
     drawClassIcon(ctx, cls, bxc, byc, rad * 1.35, hue);
   }
 
-  // 상태이상 — 기절·빙결은 머리에 고리, 지속 피해는 아래에 점
-  if (cat.stun > 0) {
-    ctx.save();
-    ctx.strokeStyle = T.ranged;
-    ctx.lineWidth = Math.max(1.5, size * 0.05);
-    ctx.globalAlpha = 0.9;
-    ctx.beginPath();
-    // 전에는 머리 **위**(-0.56)였는데 체력 바가 그 자리로 올라왔다. 머리에
-    // 얹으면 겹치지 않고, 오히려 기절한 머리 위를 도는 고리로 읽힌다.
-    ctx.arc(cx, cy - size * 0.28, size * 0.16, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-  if (cat.dot) {
-    ctx.save();
-    ctx.fillStyle = T.melee;
-    ctx.beginPath();
-    ctx.arc(
-      cx - bw / 2 - size * 0.09,
-      by + bh / 2,
-      Math.max(2, size * 0.055),
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
-    ctx.restore();
-  }
+  // 실제 상태 필드가 살아 있는 동안 형태가 다른 유지 마커를 계속 보여 준다.
+  drawCombatStatusMarkers(ctx, cat, cx, cy, size, bx, by, bw, bh);
 
   // 스킬 시전 이름표
   if (cat.castFlash > 0) {
@@ -1707,6 +1820,11 @@ function seed(f: Fx, x: number, y: number, cell: number): void {
   const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
 
   switch (f.kind) {
+    case "impact":
+    case "status":
+      // 판정 스탬프와 상태는 벡터 도형만 쓴다. 일반 타격마다 파편을 만들면
+      // 공격이 많아질수록 예고를 덮고 520개 파티클 상한을 독점한다.
+      break;
     case "ring":
       // 넓게 퍼지는 한 방. 바깥으로 고르게 밀린다.
       push(22, (i) => {
@@ -1853,18 +1971,47 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.imageSmoothingEnabled = prev;
 }
 
+/** 상태 적용/해제 문구는 저해상도 FX 버퍼 밖에서 그려 한글 획이 뭉개지지 않게 한다. */
+function drawStatusFxLabels(ctx: CanvasRenderingContext2D, L: Layout): void {
+  const reduce = reducedMotion();
+  for (const f of fxs) {
+    if (f.kind !== "status" || !f.label) continue;
+    const p = fieldToScreen(L, f.fx, f.fy);
+    const t = 1 - f.life / f.maxLife;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, (f.ending ? 0.7 : 1) * (1 - t));
+    uiText(
+      ctx,
+      f.label,
+      p.x,
+      p.y - L.cell * (0.72 + (reduce ? 0 : t * 0.18)),
+      Math.max(9, L.cell * 0.16),
+      f.color,
+      { align: "center", weight: 800, outline: true },
+    );
+    ctx.restore();
+  }
+}
+
 /** 벡터 겹. 좌표와 굵기를 전부 버퍼 배율로 줄여서 저해상도에 그린다. */
 /** 투명도를 네 단계로 계단진다. 연속 페이드는 픽셀 아트에 없는 것이다. */
 function qa(a: number): number {
   return Math.max(0, Math.ceil(Math.min(1, a) * 4) / 4);
 }
 
+/** 모션 축소에서는 수명과 무관한 한 장의 판정 기하를 유지한다. */
+export function combatVectorProgress(life: number, maxLife: number, reduce: boolean): number {
+  if (reduce) return 0.5;
+  return 1 - life / Math.max(1, maxLife);
+}
+
 function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout, scaleX: number, scaleY: number): void {
   const S = Math.min(scaleX, scaleY);
   const pitch = (L.cell + L.gap) * S;
+  const reduce = reducedMotion();
 
   for (const f of fxs) {
-    const t = 1 - f.life / f.maxLife; // 0 → 1
+    const t = combatVectorProgress(f.life, f.maxLife, reduce); // 0 → 1, 모션 축소는 정지
     const raw = fieldToScreen(L, f.fx, f.fy);
     const p = { x: raw.x * scaleX, y: raw.y * scaleY };
     ctx.save();
@@ -1872,6 +2019,77 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout, scaleX: number,
     ctx.lineCap = "butt";
 
     switch (f.kind) {
+      case "impact": {
+        ctx.globalAlpha = qa((f.impact === "block" ? 0.9 : 1) * (1 - t));
+        ctx.strokeStyle = f.color;
+        ctx.lineWidth = Math.max(1, L.cell * (f.impact === "block" ? 0.055 : 0.07) * S);
+        const span = f.radius * pitch * (0.42 + t * 0.28);
+        if (f.impact === "block") {
+          drawCornerBrackets(ctx, p.x, p.y, span, span * 0.42);
+        } else if (f.impact === "miss") {
+          // 근접 빗나감도 원거리 tracer와 같은 문법: 목표 앞에서 두 갈래로 끊긴다.
+          const ux = Math.cos(f.angle);
+          const uy = Math.sin(f.angle);
+          const px = -uy;
+          const py = ux;
+          const startX = p.x - ux * span * 0.55;
+          const startY = p.y - uy * span * 0.55;
+          for (const sign of [-1, 1]) {
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(p.x + ux * span * 0.2 + px * span * 0.62 * sign, p.y + uy * span * 0.2 + py * span * 0.62 * sign);
+            ctx.stroke();
+          }
+        } else {
+          // 공격 방향에 45도로 걸친 X. 어느 쪽에서 왔는지가 한 프레임에 이어진다.
+          for (const da of [-Math.PI / 4, Math.PI / 4]) {
+            const a = f.angle + da;
+            const dx = Math.cos(a) * span;
+            const dy = Math.sin(a) * span;
+            ctx.beginPath();
+            ctx.moveTo(p.x - dx, p.y - dy);
+            ctx.lineTo(p.x + dx, p.y + dy);
+            ctx.stroke();
+          }
+        }
+        break;
+      }
+      case "status": {
+        const expand = f.ending ? 0.88 + t * 0.34 : 1.12 - t * 0.18;
+        const span = f.radius * pitch * expand;
+        ctx.globalAlpha = qa((f.ending ? 0.72 : 0.95) * (1 - t));
+        ctx.strokeStyle = f.color;
+        ctx.fillStyle = f.color;
+        ctx.lineWidth = Math.max(1, L.cell * 0.055 * S);
+        if (f.status === "shield") {
+          drawCornerBrackets(ctx, p.x, p.y, span * 0.56, span * 0.24);
+        } else if (f.status === "stun") {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y - span * 0.3, span * 0.26, 0, Math.PI * 2);
+          ctx.stroke();
+          for (const sx of [-1, 1]) {
+            const x = p.x + sx * span * 0.2;
+            const y = p.y - span * 0.58;
+            const r = Math.max(1.5, span * 0.07);
+            ctx.beginPath();
+            ctx.moveTo(x, y - r);
+            ctx.lineTo(x + r, y);
+            ctx.lineTo(x, y + r);
+            ctx.lineTo(x - r, y);
+            ctx.closePath();
+            ctx.fill();
+          }
+        } else {
+          for (let i = -1; i <= 1; i++) {
+            const x = p.x + i * span * 0.18;
+            const y = p.y + span * 0.24 - Math.abs(i) * span * 0.08;
+            ctx.beginPath();
+            ctx.arc(x, y, Math.max(1.5, span * 0.07), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        break;
+      }
       case "ring": {
         ctx.globalAlpha = qa(0.85 * (1 - t) ** 1.4);
         ctx.strokeStyle = f.color;
@@ -2071,36 +2289,63 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout, scaleX: number,
   }
 }
 
-/** 원거리 투사체. 피해는 이미 적용됐고 이건 순수 연출이다. */
+/**
+ * 원거리 tracer. 피해가 즉시 판정되므로 이동 탄환이 나중에 도착하는 거짓 인과를
+ * 만들지 않고, 같은 프레임에 출발점·방향·피격점을 모두 잇는다.
+ */
 function drawShots(ctx: CanvasRenderingContext2D, L: Layout): void {
   for (const s of shots) {
-    // 모션 축소에서는 궤적을 이동시키지 않고 피격점에 짧게 남긴다.
-    const t = reducedMotion() ? 1 : 1 - s.life / SHOT_LIFE_MS;
-    const fx = s.fromX + (s.toX - s.fromX) * t;
-    const fy = s.fromY + (s.toY - s.fromY) * t;
-    const { x, y } = fieldToScreen(L, fx, fy);
-    const rad = Math.max(2.5, L.cell * 0.05);
-    const color = s.ally ? T.gold : T.enemy;
+    const from = fieldToScreen(L, s.fromX, s.fromY);
+    const to = fieldToScreen(L, s.toX, s.toY);
+    const t = 1 - s.life / SHOT_LIFE_MS;
+    const fade = reducedMotion() ? 0.72 : Math.max(0, 1 - t);
+    const rad = Math.max(2.2, L.cell * 0.045);
+    const color = s.ally ? T.paper : T.enemy;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    const endX = s.hit ? to.x : to.x - ux * rad * 3.2;
+    const endY = s.hit ? to.y : to.y - uy * rad * 3.2;
 
-    const back = fieldToScreen(
-      L,
-      fx - (s.toX - s.fromX) * 0.14,
-      fy - (s.toY - s.fromY) * 0.14,
-    );
     ctx.save();
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = 0.22 * fade;
     ctx.strokeStyle = color;
-    ctx.lineWidth = rad * 1.2;
+    ctx.lineWidth = rad * 2.4;
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(back.x, back.y);
-    ctx.lineTo(x, y);
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(endX, endY);
     ctx.stroke();
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = 0.88 * fade;
+    ctx.lineWidth = Math.max(1.5, rad * 0.72);
     ctx.beginPath();
-    ctx.arc(x, y, rad, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    if (s.hit) {
+      // 목표 머리 — 선과 직교하는 마름모라 이동 탄환과 다르게 읽힌다.
+      const px = -uy * rad * 1.3;
+      const py = ux * rad * 1.3;
+      ctx.beginPath();
+      ctx.moveTo(to.x + ux * rad * 1.5, to.y + uy * rad * 1.5);
+      ctx.lineTo(to.x + px, to.y + py);
+      ctx.lineTo(to.x - ux * rad * 1.5, to.y - uy * rad * 1.5);
+      ctx.lineTo(to.x - px, to.y - py);
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      // 빗나감 — 충돌점 없이 목표 앞에서 선이 양쪽으로 갈라진다.
+      const px = -uy * rad * 2.2;
+      const py = ux * rad * 2.2;
+      for (const sign of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(endX + ux * rad * 1.5 + px * sign, endY + uy * rad * 1.5 + py * sign);
+        ctx.stroke();
+      }
+    }
     ctx.restore();
   }
 }
@@ -2114,7 +2359,7 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     ctx.save();
     // 예고가 떠 있는 동안 일반 피해는 뒤로 물린다. 치명타·회복·빗나감은
     // 판단 피드백이라 절반 이상 남기고, 나머지만 크게 낮춘다.
-    const important = p.crit || p.heal || p.text === "회피";
+    const important = p.crit || p.heal || p.text === "빗나감" || p.text === "막힘";
     const emphasis = quiet ? (important ? 0.68 : 0.34) : 1;
     const sizeScale = quiet ? (important ? 0.65 : 0.4) : 1;
     ctx.globalAlpha = Math.max(0, 1 - t * t) * emphasis;
@@ -2122,8 +2367,8 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
     // `72 61`처럼 붙어 읽혔다. 아래·오른쪽으로 미는 것은 위쪽이 보스와 HUD라서다.
     const ox = x + p.step * L.cell * 0.38;
     const oy = y - L.cell * 0.34 - (reduce ? 0 : t * L.cell * 0.55) + p.step * L.cell * 0.4;
-    if (p.text === "회피") {
-      uiText(ctx, "빗나감", ox, oy, Math.max(9, L.cell * 0.16) * sizeScale, T.paperDim, {
+    if (p.text === "빗나감" || p.text === "막힘") {
+      uiText(ctx, p.text, ox, oy, Math.max(9, L.cell * 0.16) * sizeScale, T.paperDim, {
         align: "center",
         weight: 700,
         outline: true,
@@ -6559,11 +6804,9 @@ export function render(
       });
     }
   }
-  drawBossTargetMark(ctx, L, s);
-  drawSeizeMark(ctx, L, s);
-
   drawFx(ctx, L);
   drawShots(ctx, L);
+  drawStatusFxLabels(ctx, L);
   // 최종 국면(finalPhase) 연출 — 고양이·연출 위, 데미지 숫자 아래. 숫자가
   // 어두워진 화면에서도 그대로 읽혀야 "얼마나 회복했는지"가 안 묻힌다.
   drawFinalPhaseOverlay(ctx, L, s);
@@ -6585,6 +6828,9 @@ export function render(
   }
 
   drawPops(ctx, L, s);
+  drawTelegraphOutlines(ctx, L, s);
+  drawBossTargetMark(ctx, L, s);
+  drawSeizeMark(ctx, L, s);
   ctx.restore();
 
   drawBottomZone(ctx, L, s);

@@ -22,6 +22,7 @@
 import { cellRect, computeLayout, fieldToScreen } from "../src/game/layout.ts";
 import { wrapLines } from "../src/game/theme.ts";
 import {
+  battleSpeedCaption,
   rerollRect,
   healthBarGeom,
   offerRects,
@@ -186,6 +187,33 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log("\n전부 통과 — HUD와 안내 문구는 어느 구성에서도 끝까지 보인다");
+
+const hudMeasureCtx = {
+  font: "",
+  measureText(text) {
+    const px = Number(this.font.match(/([0-9.]+)px/)?.[1] ?? 12);
+    return { width: [...text].length * px * 0.92 };
+  },
+};
+let speedCaptionFailed = 0;
+for (const [name, w, h] of DEVICES) {
+  const B = computeLayout(w, h, false);
+  const chipWidth = B.hud.w / 3;
+  const captionSize = Math.max(11, B.hud.h * 0.30);
+  const caption = battleSpeedCaption(chipWidth);
+  hudMeasureCtx.font = `700 ${captionSize}px sans-serif`;
+  const measuredWidth = hudMeasureCtx.measureText(caption).width;
+  const fits = measuredWidth <= chipWidth - 4;
+  if (!fits) speedCaptionFailed++;
+  if (w <= 360 || !fits) {
+    console.log(`  ${fits ? "OK  " : "실패"} ${name.padEnd(18)} ${caption.padEnd(10)} ${measuredWidth.toFixed(1)}/${chipWidth.toFixed(1)}px`);
+  }
+}
+if (speedCaptionFailed > 0) {
+  console.log(`\n${speedCaptionFailed}개 기기에서 실패 — 전투 속도 캡션이 중앙 HUD 칩을 넘는다`);
+  process.exit(1);
+}
+console.log("전부 통과 — 320px·360px에서도 전투 속도 캡션이 중앙 HUD 칩 안에 있다");
 
 /* ---------------------------------------------------------------- */
 /* 상점 실패 피드백 기하                                              */

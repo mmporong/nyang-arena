@@ -742,6 +742,13 @@ async function main() {
     );
     console.log("browser-runtime pointer route PASS · reward→battle");
 
+    const combatTimingStart = await evaluate(cdp, sessionId, `({
+      now: performance.now(),
+      phase: window.nyang.phase,
+      elapsedMs: window.nyang.battleElapsedMs,
+      combat: window.nyang.combat,
+    })`);
+
     const battlePerformance = await waitFor(
       "battle 프레임 예산 표본",
       () => evaluate(cdp, sessionId, `(() => {
@@ -779,6 +786,57 @@ async function main() {
     console.log(
       `browser-runtime performance PASS · battle ${performanceResult.sampleCount} frames · p95 ${performanceResult.frameWorkMs.p95Ms.toFixed(2)}ms · long ${(performanceResult.frameWorkMs.longRate * 100).toFixed(2)}% · ${performanceResult.cadenceHz.toFixed(1)}Hz`,
     );
+    const combatTimingEnd = await evaluate(cdp, sessionId, `({
+      now: performance.now(),
+      phase: window.nyang.phase,
+      elapsedMs: window.nyang.battleElapsedMs,
+      combat: window.nyang.combat,
+    })`);
+    const rawBattleDelta = combatTimingEnd.combat.timing.rawActiveMs - combatTimingStart.combat.timing.rawActiveMs;
+    const appliedBattleDelta = combatTimingEnd.combat.timing.appliedMs - combatTimingStart.combat.timing.appliedMs;
+    const elapsedBattleDelta = combatTimingEnd.elapsedMs - combatTimingStart.elapsedMs;
+    const wallBattleDelta = combatTimingEnd.now - combatTimingStart.now;
+    assert(combatTimingEnd.phase === "battle", "0.5배 시간축 측정 중 전투가 끝났습니다");
+    assert(rawBattleDelta >= 1_000, `전투 시간축 표본이 1초보다 짧습니다 (${rawBattleDelta}ms)`);
+    assert(Math.abs(appliedBattleDelta / rawBattleDelta - 0.5) <= 0.001,
+      `적용 전투 시간이 raw의 0.5배가 아닙니다 (${appliedBattleDelta}/${rawBattleDelta})`);
+    assert(elapsedBattleDelta / wallBattleDelta >= 0.42 && elapsedBattleDelta / wallBattleDelta <= 0.58,
+      `실제 브라우저 전투 진행률이 0.5배 범위를 벗어났습니다 (${elapsedBattleDelta}/${wallBattleDelta})`);
+    assert(Math.abs(combatTimingEnd.combat.timing.lastBattleDt - combatTimingEnd.combat.timing.lastRawDt * 0.5) <= 0.01,
+      "마지막 브라우저 프레임에 0.5배 dt가 적용되지 않았습니다");
+    console.log(`browser-runtime combat speed PASS · raw ${rawBattleDelta.toFixed(1)}ms → battle ${appliedBattleDelta.toFixed(1)}ms`);
+
+    const combatFeedback = await waitFor(
+      "실제 전투 공격→피격 피드백",
+      () => evaluate(cdp, sessionId, `window.nyang.combat`),
+      (value) => value?.speed === 0.5
+        && value.totals.attacks.melee + value.totals.attacks.ranged > 0
+        && value.totals.hits.damage + value.totals.hits.blocked + value.totals.hits.miss > 0,
+      10_000,
+    );
+    assert(combatFeedback.active.fxs.count <= 90, "실전 FX 큐가 상한을 넘었습니다");
+    assert(combatFeedback.active.shots.count <= 32, "실전 tracer 큐가 상한을 넘었습니다");
+    assert(combatFeedback.active.pops.count <= 16, "실전 피드백 팝업 큐가 상한을 넘었습니다");
+    console.log(`browser-runtime combat feedback PASS · attacks ${JSON.stringify(combatFeedback.totals.attacks)} · hits ${JSON.stringify(combatFeedback.totals.hits)}`);
+
+    const feedbackBeforeReduced = combatFeedback.totals.attacks.melee + combatFeedback.totals.attacks.ranged;
+    await cdp.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    }, sessionId);
+    const reducedCombat = await waitFor(
+      "reduced-motion 전투 피드백 유지",
+      () => evaluate(cdp, sessionId, `({ combat: window.nyang.combat, caches: window.nyangPerformance.caches })`),
+      (value) => value?.caches?.transient?.particles === 0
+        && value.combat.totals.attacks.melee + value.combat.totals.attacks.ranged > feedbackBeforeReduced
+        && value.combat.active.pops.count > 0,
+      10_000,
+    );
+    assert(reducedCombat.combat.active.fxs.byKind.impact > 0 || reducedCombat.combat.active.shots.count > 0,
+      "reduced-motion에서 방향선/충돌 결과가 모두 사라졌습니다");
+    await cdp.send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+    }, sessionId);
+    console.log("browser-runtime combat reduced-motion PASS · particles 0 · tracer/impact/pop retained");
     const tintCache = battlePerformance.caches.tintedSprites;
     const tintHitRate = tintCache.hits / Math.max(1, tintCache.hits + tintCache.misses);
     assert(tintHitRate >= 0.75,
@@ -955,13 +1013,19 @@ async function main() {
       await cdp.send("Target.activateTarget", { targetId: blankTargetId });
       const hidden = await waitFor(
         `게임 탭 숨김 ${cycle}`,
-        () => evaluate(cdp, sessionId, `({ hidden: document.hidden, runtime: window.nyang.runtime })`),
+        () => evaluate(cdp, sessionId, `({ hidden: document.hidden, runtime: window.nyang.runtime, battleElapsedMs: window.nyang.battleElapsedMs, combat: window.nyang.combat })`),
         (value) => value?.hidden && value.runtime.paused,
       );
       const hiddenFrame = hidden.runtime.frameCount;
       await delay(300);
-      const held = await evaluate(cdp, sessionId, `({ hidden: document.hidden, runtime: window.nyang.runtime })`);
+      const held = await evaluate(cdp, sessionId, `({ hidden: document.hidden, runtime: window.nyang.runtime, battleElapsedMs: window.nyang.battleElapsedMs, combat: window.nyang.combat })`);
       assert(held.hidden && held.runtime.frameCount === hiddenFrame, `숨김 ${cycle}회차에 프레임이 진행됐습니다`);
+      assert(held.battleElapsedMs === hidden.battleElapsedMs, `숨김 ${cycle}회차에 전투 시간이 진행됐습니다`);
+      assert(held.combat.timing.rawActiveMs === hidden.combat.timing.rawActiveMs
+        && held.combat.timing.appliedMs === hidden.combat.timing.appliedMs,
+      `숨김 ${cycle}회차에 전투 시간축 관찰값이 진행됐습니다`);
+      assert(JSON.stringify(held.combat.active) === JSON.stringify(hidden.combat.active),
+        `숨김 ${cycle}회차에 transient/status 수명이 진행됐습니다`);
 
       await cdp.send("Target.activateTarget", { targetId });
       const resumed = await waitFor(

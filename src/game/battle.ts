@@ -38,6 +38,7 @@ import {
   type ClassKind,
   type CreepZone,
   type Intervention,
+  type SkillId,
   type Side,
   type Telegraph,
   type TelegraphMode,
@@ -161,10 +162,15 @@ export interface Shot {
   toY: number;
   life: number;
   ally: boolean;
+  /** 판정과 같은 프레임에 확정한 결과. 빗나감 tracer는 목표 머리를 그리지 않는다. */
+  hit: boolean;
 }
 
 export const POP_LIFE_MS = 520;
 export const SHOT_LIFE_MS = 220;
+export const POP_CAP = 16;
+export const SHOT_CAP = 32;
+export const FX_CAP = 90;
 
 export const damagePops: DamagePop[] = [];
 export const shots: Shot[] = [];
@@ -181,6 +187,8 @@ export type FxKind =
   | "beam" // 직선 광선 (꿰뚫기)
   | "streak" // 짧은 돌진 자국 (그림자 일격)
   | "spark" // 튀는 불똥 (타격 지점)
+  | "impact" // 평타 충돌 X 또는 보호막 괄호. 파티클 없는 판정 스탬프
+  | "status" // 보호막·기절·지속 피해의 적용/해제 도형
   | "ember" // 위로 떠오르는 불티 (불씨)
   | "frost" // 얼음 결정 (빙결)
   | "burst" // 장판 모양 그대로 채워지는 섬광 (예고 발동)
@@ -199,6 +207,14 @@ export interface Fx {
   life: number;
   maxLife: number;
   color: string;
+  /** `impact` 전용. hit는 X, block은 방패 괄호, miss는 갈라진 선으로 그린다. */
+  impact?: "hit" | "block" | "miss";
+  /** `status` 전용. 실제 Cat 상태 필드와 일대일로 대응한다. */
+  status?: CombatStatusKind;
+  /** 상태가 적용되는 대신 끝나는 순간이면 참. */
+  ending?: boolean;
+  /** 상태 적용/해제를 한 번만 읽히게 하는 짧은 문구. */
+  label?: string;
   /** `bossdeath` 전용 — 우두머리 처치인가. 렌더의 흔들림 진폭이 갈린다. */
   stageBoss?: boolean;
   /**
@@ -216,6 +232,85 @@ export interface Fx {
 }
 
 export const fxs: Fx[] = [];
+
+export type CombatStatusKind = "shield" | "stun" | "dot";
+
+interface CombatFeedbackTotals {
+  attacks: { melee: number; ranged: number };
+  hits: { damage: number; blocked: number; miss: number };
+  skills: Partial<Record<SkillId, number>>;
+  statuses: { shield: number; stun: number; dot: number; heal: number; summon: number };
+}
+
+const feedbackTotals: CombatFeedbackTotals = {
+  attacks: { melee: 0, ranged: 0 },
+  hits: { damage: 0, blocked: 0, miss: 0 },
+  skills: {},
+  statuses: { shield: 0, stun: 0, dot: 0, heal: 0, summon: 0 },
+};
+
+function resetCombatFeedbackTotals(): void {
+  feedbackTotals.attacks.melee = 0;
+  feedbackTotals.attacks.ranged = 0;
+  feedbackTotals.hits.damage = 0;
+  feedbackTotals.hits.blocked = 0;
+  feedbackTotals.hits.miss = 0;
+  for (const skill of Object.keys(feedbackTotals.skills) as SkillId[]) delete feedbackTotals.skills[skill];
+  feedbackTotals.statuses.shield = 0;
+  feedbackTotals.statuses.stun = 0;
+  feedbackTotals.statuses.dot = 0;
+  feedbackTotals.statuses.heal = 0;
+  feedbackTotals.statuses.summon = 0;
+}
+
+function lifeRange(items: readonly { life: number }[]): { minLifeMs: number | null; maxLifeMs: number | null } {
+  if (items.length === 0) return { minLifeMs: null, maxLifeMs: null };
+  let minLifeMs = Number.POSITIVE_INFINITY;
+  let maxLifeMs = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    minLifeMs = Math.min(minLifeMs, item.life);
+    maxLifeMs = Math.max(maxLifeMs, item.life);
+  }
+  return { minLifeMs, maxLifeMs };
+}
+
+/**
+ * `?debug=1` 브라우저 하네스와 회귀 테스트가 읽는 순수 관찰값.
+ * RNG나 RunState에 쓰지 않으므로 전투 판정·6축 결과에는 영향을 주지 않는다.
+ */
+export function combatFeedbackObservation(state?: RunState) {
+  const byKind: Partial<Record<FxKind, number>> = {};
+  for (const fx of fxs) byKind[fx.kind] = (byKind[fx.kind] ?? 0) + 1;
+  const statuses: Record<CombatStatusKind | "casting", number> = {
+    shield: 0,
+    stun: 0,
+    dot: 0,
+    casting: 0,
+  };
+  if (state) {
+    for (const cat of [...state.ally, ...state.enemy, ...state.summons]) {
+      if (!cat?.alive) continue;
+      if (cat.shield > 0) statuses.shield += 1;
+      if (cat.stun > 0) statuses.stun += 1;
+      if (cat.dot) statuses.dot += 1;
+      if (cat.castFlash > 0) statuses.casting += 1;
+    }
+  }
+  return {
+    totals: {
+      attacks: { ...feedbackTotals.attacks },
+      hits: { ...feedbackTotals.hits },
+      skills: { ...feedbackTotals.skills },
+      statuses: { ...feedbackTotals.statuses },
+    },
+    active: {
+      fxs: { count: fxs.length, byKind, ...lifeRange(fxs) },
+      shots: { count: shots.length, ...lifeRange(shots) },
+      pops: { count: damagePops.length, ...lifeRange(damagePops) },
+      statuses,
+    },
+  };
+}
 
 /**
  * 상주 장판(creep). 발동 후에도 사라지지 않는 예고 하나당 원소 하나다.
@@ -243,11 +338,65 @@ export function clearBattleFx(): void {
   shots.length = 0;
   creepZones.length = 0;
   clearSweepQueue();
+  resetCombatFeedbackTotals();
 }
 
 function pushFx(f: Omit<Fx, "maxLife"> & { maxLife?: number }): void {
-  if (fxs.length > 90) fxs.shift();
+  if (fxs.length >= FX_CAP) fxs.shift();
   fxs.push({ ...f, maxLife: f.maxLife ?? f.life });
+}
+
+const FX_ALLY_HIT = "#F4E3C1";
+const FX_ENEMY_HIT = "#C4715A";
+const FX_SHIELD = "#6E97C4";
+const FX_STUN = "#6E97C4";
+const FX_DOT = "#C9A05C";
+
+function spawnImpactFx(source: Cat | null, target: Cat, impact: "hit" | "block" | "miss", crit = false): void {
+  const color = impact === "block"
+    ? FX_SHIELD
+    : impact === "miss"
+      ? "#A6A19A"
+      : crit
+        ? "#FFE24A"
+        : source?.side === "enemy"
+          ? FX_ENEMY_HIT
+          : FX_ALLY_HIT;
+  pushFx({
+    kind: "impact",
+    impact,
+    fx: target.fx,
+    fy: target.fy,
+    tx: source?.fx ?? target.fx,
+    ty: source?.fy ?? target.fy,
+    radius: impact === "block" ? 0.62 : impact === "miss" ? 0.48 : crit ? 0.72 : 0.52,
+    angle: source ? Math.atan2(target.fy - source.fy, target.fx - source.fx) : 0,
+    life: impact === "block" ? 260 : 180,
+    color,
+  });
+}
+
+function spawnStatusFx(
+  target: Cat,
+  status: CombatStatusKind,
+  label: string,
+  ending = false,
+): void {
+  const color = status === "shield" ? FX_SHIELD : status === "stun" ? FX_STUN : FX_DOT;
+  pushFx({
+    kind: "status",
+    status,
+    ending,
+    label,
+    fx: target.fx,
+    fy: target.fy,
+    tx: target.fx,
+    ty: target.fy,
+    radius: 0.72,
+    angle: 0,
+    life: ending ? 260 : 420,
+    color,
+  });
 }
 
 export const BURST_LIFE_MS = 320;
@@ -311,7 +460,7 @@ export function skillName(cat: Cat): string {
 }
 
 function pop(target: Cat, text: string, crit: boolean, heal = false): void {
-  if (damagePops.length > 16) damagePops.shift();
+  if (damagePops.length >= POP_CAP) damagePops.shift();
   // 같은 자리에 아직 떠 있는 숫자를 센다. 같은 프레임만 세면 보스처럼 여럿에게
   // 연달아 맞는 대상에서 전부 step 0으로 겹쳤다(실제로 그랬다 — 보스 털 위에
   // 38이 다섯 개 쌓였다). 난수가 아니라 이 개수로 계단을 만들므로 같은 시드는
@@ -363,8 +512,18 @@ function comboSpeed(cat: Cat): number {
   return 1 + Math.min(COMBO_MAX, cat.combo) * COMBO_STEP;
 }
 
-/** 실제 피해 적용. 보호막을 먼저 깎는다. */
-function damage(target: Cat, amount: number, crit: boolean): void {
+type DamageCue = {
+  kind: "basic" | "skill" | "dot" | "hazard";
+  source?: Cat;
+};
+
+/** 실제 피해 적용. 보호막을 먼저 깎고, 판정과 분리된 충돌 스탬프만 함께 남긴다. */
+function damage(
+  target: Cat,
+  amount: number,
+  crit: boolean,
+  cue: DamageCue = { kind: "hazard" },
+): void {
   /**
    * 순간이동 부재("gone") 중인 보스는 아예 없는 것으로 친다.
    *
@@ -386,10 +545,14 @@ function damage(target: Cat, amount: number, crit: boolean): void {
    */
   if (target.finalPhase?.stage === "channel") return;
   let left = Math.round(amount);
+  const shieldBefore = target.shield;
   if (target.shield > 0) {
     const absorbed = Math.min(target.shield, left);
     target.shield -= absorbed;
     left -= absorbed;
+  }
+  if (shieldBefore > 0 && target.shield <= 0) {
+    spawnStatusFx(target, "shield", "보호막 파괴", true);
   }
   /**
    * 피격 반응은 **보호막이 전부 막았을 때도** 일어난다.
@@ -410,10 +573,14 @@ function damage(target: Cat, amount: number, crit: boolean): void {
     target.mana = Math.min(MANA_MAX, target.mana + MANA_ON_HIT_WARRIOR);
   }
   if (left <= 0) {
+    feedbackTotals.hits.blocked += 1;
+    spawnImpactFx(cue.source ?? null, target, "block");
     pop(target, "막힘", false);
     return;
   }
   target.hp -= left;
+  feedbackTotals.hits.damage += 1;
+  if (cue.kind === "basic") spawnImpactFx(cue.source ?? null, target, "hit", crit);
   pop(target, String(left), crit);
   if (target.hp <= 0) {
     target.hp = 0;
@@ -569,12 +736,14 @@ function castSkill(
   caster.castFlash = 700;
   caster.pose = "wink";
   caster.poseTimer = POSE_WINK_MS;
+  const skill = caster.breed.skill;
+  if (skill) feedbackTotals.skills[skill] = (feedbackTotals.skills[skill] ?? 0) + 1;
 
-  spawnSkillFx(caster, target, res);
+  spawnSkillFx(caster, target, res, born);
 
   for (const h of res.hits) {
     if (!h.target.alive) continue;
-    damage(h.target, caster.atk * h.mul, true);
+    damage(h.target, caster.atk * h.mul, true, { kind: "skill", source: caster });
     // 맞은 자리마다 불똥. 몇 명이 맞았는지 눈으로 세어진다.
     pushFx({
       kind: "spark",
@@ -590,11 +759,18 @@ function castSkill(
   }
   for (const s of res.stuns) {
     if (!s.target.alive) continue;
-    s.target.stun = Math.max(s.target.stun, s.ms);
+    const before = s.target.stun;
+    s.target.stun = Math.max(before, s.ms);
+    if (s.target.stun > before) {
+      feedbackTotals.statuses.stun += 1;
+      spawnStatusFx(s.target, "stun", "기절");
+    }
   }
   for (const d of res.dots) {
     if (!d.target.alive) continue;
     d.target.dot = { dps: d.dps, remain: d.ms };
+    feedbackTotals.statuses.dot += 1;
+    spawnStatusFx(d.target, "dot", "지속 피해");
   }
   for (const h of res.heals) {
     if (!h.target.alive) continue;
@@ -604,6 +780,7 @@ function castSkill(
     const got = Math.round(h.target.hp - before);
     // 0이면 띄우지 않는다. 만피인 고양이 위로 "+0"이 뜨면 스킬이 헛돈 것처럼 보인다.
     if (got > 0) {
+      feedbackTotals.statuses.heal += 1;
       pop(h.target, `+${got}`, false, true);
       pushFx({
         kind: "ring",
@@ -622,21 +799,31 @@ function castSkill(
     if (!sh.target.alive) continue;
     // 쌓지 않고 **더 큰 쪽으로 덮는다.** 쌓이면 전사 둘이 감싸기를 번갈아 써서
     // 보호막만으로 판을 버티게 된다.
-    sh.target.shield = Math.max(sh.target.shield, sh.amount);
-    pushFx({
-      kind: "ring",
-      fx: sh.target.fx,
-      fy: sh.target.fy,
-      tx: sh.target.fx,
-      ty: sh.target.fy,
-      radius: 0.68,
-      angle: 0,
-      life: 460,
-      color: "#9ED0F0",
-    });
+    const before = sh.target.shield;
+    sh.target.shield = Math.max(before, sh.amount);
+    if (sh.target.shield > before) {
+      feedbackTotals.statuses.shield += 1;
+      spawnStatusFx(sh.target, "shield", "보호막");
+      pushFx({
+        kind: "ring",
+        fx: sh.target.fx,
+        fy: sh.target.fy,
+        tx: sh.target.fx,
+        ty: sh.target.fy,
+        radius: 0.68,
+        angle: 0,
+        life: 460,
+        color: "#9ED0F0",
+      });
+    }
   }
 
   for (const sm of born) {
+    feedbackTotals.statuses.summon += 1;
+    if (sm.shield > 0) {
+      feedbackTotals.statuses.shield += 1;
+      spawnStatusFx(sm, "shield", "보호막");
+    }
     pushFx({
       kind: "ring",
       fx: sm.fx,
@@ -662,19 +849,21 @@ function castSkill(
  * 아무도 모른다. 지금은 여기를 안 채우면 컴파일이 안 된다.
  */
 const CLASS_FX: Record<ClassKind, string> = {
-  warrior: "#FF9E5A",
-  rogue: "#D98BE8",
-  archer: "#FFC46B",
-  mage: "#8FD4FF",
-  summoner: "#8E9BFF",
+  warrior: "#C4715A",
+  rogue: "#A97CC4",
+  archer: "#C9A05C",
+  mage: "#6E97C4",
+  summoner: "#5C6BB8",
 };
 
 /** 스킬마다 다른 연출을 뿌린다. 무엇이 터졌는지 색과 모양으로 구분되게. */
-function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
+function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly Cat[]): void {
   const color = CLASS_FX[caster.breed.cls];
   const base = { fx: caster.fx, fy: caster.fy, tx: target.fx, ty: target.fy, angle: 0, color };
+  const skill = caster.breed.skill;
+  if (skill === null) return;
 
-  switch (caster.breed.skill) {
+  switch (skill) {
     case "whirlwind": {
       // 두 겹 고리 + 회전하는 참격 넷
       pushFx({ ...base, kind: "ring", radius: 1.7, life: 420 });
@@ -743,6 +932,75 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult): void {
       }
       break;
     }
+    case "guard": {
+      // 시전자에게서 시작한 방패 문양이 실제 보호막 대상의 status Fx로 이어진다.
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 1.45, life: 420 });
+      pushFx({ ...base, kind: "impact", impact: "block", tx: caster.fx, ty: caster.fy, radius: 0.78, life: 320 });
+      break;
+    }
+    case "gouge": {
+      // 짧은 찌르기 한 줄과 대상의 단일 참격. 광역 스킬과 실루엣이 겹치지 않는다.
+      pushFx({ ...base, kind: "streak", radius: 0.34, life: 220 });
+      pushFx({ ...base, kind: "slash", fx: target.fx, fy: target.fy, radius: 0.72, angle: Math.PI * 0.15, life: 240 });
+      break;
+    }
+    case "volley": {
+      // 부채 시작점 하나 뒤 실제 피격 대상까지만 가는 얇은 방향선. 최대 넷이다.
+      pushFx({ ...base, kind: "slash", tx: caster.fx, ty: caster.fy, radius: 0.72, angle: -0.7, life: 260 });
+      for (const hit of res.hits) {
+        pushFx({
+          ...base,
+          kind: "beam",
+          tx: hit.target.fx,
+          ty: hit.target.fy,
+          radius: 0.07,
+          life: 220,
+        });
+      }
+      break;
+    }
+    case "mend": {
+      // 시전자와 실제 회복 대상을 잇고, 도착점의 회복 고리는 결과 적용 루프가 맡는다.
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.62, life: 300, color: "#8FD9A8" });
+      for (const heal of res.heals) {
+        pushFx({
+          ...base,
+          kind: "beam",
+          tx: heal.target.fx,
+          ty: heal.target.fy,
+          radius: 0.08,
+          life: 320,
+          color: "#8FD9A8",
+        });
+      }
+      break;
+    }
+    case "swarm": {
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.82, life: 360 });
+      for (const sm of born) {
+        pushFx({ ...base, kind: "streak", tx: sm.fx, ty: sm.fy, radius: 0.18, life: 300 });
+      }
+      break;
+    }
+    case "bulwark": {
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 1.08, life: 440 });
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.62, life: 300 });
+      for (const sm of born) {
+        pushFx({ ...base, kind: "beam", tx: sm.fx, ty: sm.fy, radius: 0.14, life: 340 });
+      }
+      break;
+    }
+    case "lure": {
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.58, life: 300 });
+      for (const sm of born) {
+        pushFx({ ...base, kind: "slash", fx: sm.fx, fy: sm.fy, radius: 0.82, angle: Math.PI * 0.75, life: 360 });
+      }
+      break;
+    }
+    default: {
+      const exhaustive: never = skill;
+      throw new Error(`시각 피드백이 없는 스킬: ${String(exhaustive)}`);
+    }
   }
 }
 
@@ -750,9 +1008,14 @@ function attack(attacker: Cat, target: Cat): void {
   attacker.pose = "move";
   attacker.poseTimer = POSE_MOVE_MS;
   attacker.lunge = 1;
+  feedbackTotals.attacks[attacker.breed.kind] += 1;
 
+  // 마나는 빗나가도 찬다. TFT도 on-attack 기준이다.
+  attacker.mana = Math.min(MANA_MAX, attacker.mana + attacker.breed.manaPerAttack);
+
+  const missed = rng() < target.evade;
   if (attacker.breed.kind === "ranged") {
-    if (shots.length > 32) shots.shift();
+    if (shots.length >= SHOT_CAP) shots.shift();
     shots.push({
       fromX: attacker.fx,
       fromY: attacker.fy,
@@ -760,13 +1023,13 @@ function attack(attacker: Cat, target: Cat): void {
       toY: target.fy,
       life: SHOT_LIFE_MS,
       ally: attacker.side === "ally",
+      hit: !missed,
     });
   }
 
-  // 마나는 빗나가도 찬다. TFT도 on-attack 기준이다.
-  attacker.mana = Math.min(MANA_MAX, attacker.mana + attacker.breed.manaPerAttack);
-
-  if (rng() < target.evade) {
+  if (missed) {
+    feedbackTotals.hits.miss += 1;
+    if (attacker.breed.kind === "melee") spawnImpactFx(attacker, target, "miss");
     pop(target, "빗나감", false);
     return;
   }
@@ -780,7 +1043,10 @@ function attack(attacker: Cat, target: Cat): void {
     }
   }
 
-  damage(target, attacker.atk, attacker.atk >= target.maxHp * 0.35);
+  damage(target, attacker.atk, attacker.atk >= target.maxHp * 0.35, {
+    kind: "basic",
+    source: attacker,
+  });
 
   if (!target.alive) {
     attacker.pose = "wink";
@@ -808,7 +1074,7 @@ function ricochet(attacker: Cat, target: Cat, foes: Cat[]): void {
       life: 220,
       color: CLASS_FX.archer,
     });
-    damage(f, attacker.atk * RICOCHET_MUL, false);
+    damage(f, attacker.atk * RICOCHET_MUL, false, { kind: "skill", source: attacker });
   }
 }
 
@@ -1591,6 +1857,13 @@ function clampToField(c: Cat): void {
   else if (c.fy > BOARD_ROWS - 1) c.fy = BOARD_ROWS - 1;
 }
 
+const DOT_TICK_MS = 100;
+const DOT_BOUNDARY_EPSILON_MS = 0.000001;
+
+function dotBoundaries(remain: number): number {
+  return Math.max(0, Math.ceil((remain - DOT_BOUNDARY_EPSILON_MS) / DOT_TICK_MS));
+}
+
 function tickEffects(cats: (Cat | null)[], dt: number): void {
   for (const c of cats) {
     if (!c) continue;
@@ -1608,13 +1881,25 @@ function tickEffects(cats: (Cat | null)[], dt: number): void {
       continue;
     }
 
-    if (c.stun > 0) c.stun = Math.max(0, c.stun - dt);
+    if (c.stun > 0) {
+      c.stun = Math.max(0, c.stun - dt);
+      if (c.stun === 0) spawnStatusFx(c, "stun", "기절 해제", true);
+    }
     if (c.dot) {
-      // 지속 피해는 보호막을 무시하지 않는다. 평타와 같은 경로로 들어간다.
-      const slice = (c.dot.dps * Math.min(dt, c.dot.remain)) / 1000;
-      c.dot.remain -= dt;
-      if (slice > 0.5) damage(c, slice, false);
-      if (c.dot.remain <= 0) c.dot = null;
+      // 100ms 판정 경계를 누적해 적용한다. 브라우저의 0.5배 60fps 스텝에서도
+      // 작은 조각을 버리지 않으면서 헤드리스의 기존 100ms 피해 순서를 보존한다.
+      const before = c.dot.remain;
+      const after = before - dt;
+      const ticks = dotBoundaries(before) - dotBoundaries(after);
+      c.dot.remain = after;
+      const tickDamage = (c.dot.dps * DOT_TICK_MS) / 1000;
+      for (let i = 0; i < ticks && c.alive; i++) {
+        if (tickDamage > 0.5) damage(c, tickDamage, false, { kind: "dot" });
+      }
+      if (c.dot.remain <= 0) {
+        c.dot = null;
+        if (c.alive) spawnStatusFx(c, "dot", "지속 피해 종료", true);
+      }
     }
     if (c.poseTimer > 0) {
       c.poseTimer -= dt;
@@ -3012,8 +3297,15 @@ function tickBoss(boss: Cat, foes: Cat[], dt: number, tally: RunState): void {
   boss.thresholdIdx += 1;
 }
 
-/** 한 프레임 분량을 고정 스텝으로 시뮬레이션한다. */
-export function stepBattle(state: RunState, dtMs: number): void {
+/**
+ * 한 프레임 분량을 고정 스텝으로 시뮬레이션한다.
+ *
+ * `feedbackDtMs`는 판정과 무관한 팝업·tracer·FX의 실시간 수명이다. 브라우저는
+ * `dtMs = rawDt * battleSpeed`, `feedbackDtMs = rawDt`를 넘겨 반속 전투에서도
+ * 잔상이 두 배 쌓이지 않게 한다. 헤드리스 호출은 세 번째 인자를 생략하므로
+ * 기존 고정 스텝과 완전히 같다.
+ */
+export function stepBattle(state: RunState, dtMs: number, feedbackDtMs = dtMs): void {
   tickEffects(state.ally, dtMs);
   tickEffects(state.enemy, dtMs);
   tickEffects(state.summons, dtMs);
@@ -3021,19 +3313,19 @@ export function stepBattle(state: RunState, dtMs: number): void {
   for (let i = damagePops.length - 1; i >= 0; i--) {
     const p = damagePops[i];
     if (!p) continue;
-    p.life -= dtMs;
+    p.life -= feedbackDtMs;
     if (p.life <= 0) damagePops.splice(i, 1);
   }
   for (let i = shots.length - 1; i >= 0; i--) {
     const s = shots[i];
     if (!s) continue;
-    s.life -= dtMs;
+    s.life -= feedbackDtMs;
     if (s.life <= 0) shots.splice(i, 1);
   }
   for (let i = fxs.length - 1; i >= 0; i--) {
     const f = fxs[i];
     if (!f) continue;
-    f.life -= dtMs;
+    f.life -= feedbackDtMs;
     if (f.life <= 0) fxs.splice(i, 1);
   }
 
