@@ -24,6 +24,7 @@ import {
   captureMapChoiceFeedback,
   clearOfferPurchaseFailure,
   render,
+  renderCacheObservation,
   spriteFallbackDrawCount,
   spawnBuyTween,
   spawnMapChoiceFeedback,
@@ -33,6 +34,8 @@ import {
   setRaidContractFocusIndex,
   type DragState,
 } from "./game/render.ts";
+import { backdropCacheObservation } from "./game/backdrop.ts";
+import { createFramePerformanceObserver } from "./game/performance.ts";
 import {
   buyOffer,
   chooseNode,
@@ -83,6 +86,7 @@ if (RAID_CONTRACT_POOL_STATUS.usingFallback) {
 let layout: Layout = computeLayout(800, 600);
 const initialUrl = new URL(location.href);
 const debugEnabled = initialUrl.searchParams.get("debug") === "1";
+const framePerformance = debugEnabled ? createFramePerformanceObserver() : null;
 const initialRaidRaw = initialUrl.searchParams.get("raid");
 const initialSeedRaw = initialUrl.searchParams.get("seed");
 const initialRaid = parseRaidShareCode(initialRaidRaw);
@@ -799,6 +803,15 @@ if (debugEnabled) {
       },
     }),
   });
+  Object.defineProperty(window, "nyangPerformance", {
+    get: () => ({
+      frames: framePerformance!.snapshot(),
+      caches: {
+        backdrop: backdropCacheObservation(),
+        ...renderCacheObservation(),
+      },
+    }),
+  });
 }
 
 let last = 0;
@@ -812,6 +825,7 @@ function scheduleFrame(): void {
 }
 
 function frame(now: number): void {
+  const workStartedAt = framePerformance ? performance.now() : 0;
   // 이 콜백이 소비한 예약을 먼저 비운다. 이후 경로는 scheduleFrame 하나만 쓴다.
   rafId = null;
   // visibilitychange와 같은 태스크 경계에서 이미 실행 대기 중이던 콜백도
@@ -843,7 +857,8 @@ function frame(now: number): void {
     phaseChangedAt = now;
     if (wasBattle !== (state.phase === "battle")) resize();
   }
-  const dt = last === 0 ? 16 : Math.min(100, now - last);
+  const rawDt = last === 0 ? 16 : now - last;
+  const dt = Math.min(100, rawDt);
   last = now;
   if (debugEnabled) {
     runtimeObservation.frameCount += 1;
@@ -868,6 +883,11 @@ function frame(now: number): void {
   setBed(musicFor(state));
   syncAccessibility();
   render(ctx!, layout, state, drag, hoverCell, performance.now() - phaseChangedAt < PHASE_LOCK_MS);
+  framePerformance?.observe({
+    phase: state.phase,
+    frameWorkMs: performance.now() - workStartedAt,
+    rafTimestampMs: now,
+  });
   /**
    * 탭이 숨겨지면 루프를 세운다. 브라우저는 숨은 탭의 rAF를 1fps 안팎으로 줄이는데, 그 틈에
    * `dt`가 100ms로 잘려 게임 시간이 10분의 1 속도로 기어가고 배터리는 계속 쓴다. 세워 두면

@@ -1,3 +1,5 @@
+import { BoundedLru } from "./lru.ts";
+
 /**
  * 픽셀 배경 씬.
  *
@@ -22,6 +24,8 @@ export type Scene = "forest" | "stone" | "alley" | "frost" | "ember" | "blight" 
 
 /** 최종 화면 픽셀 몇 개가 씬 픽셀 하나인가. 클수록 굵고 거칠다. */
 const PIXEL = 4;
+const observeBackdropCache = typeof location !== "undefined"
+  && new URLSearchParams(location.search).get("debug") === "1";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -504,9 +508,49 @@ interface Cached {
   canvas: HTMLCanvasElement;
 }
 
-const cache = new Map<string, Cached>();
 /** 창 크기 몇 개 × 시각 몇 단계면 충분하다. 넘으면 가장 오래된 것을 버린다. */
 const CACHE_MAX = 14;
+/** 4배 축소 배경 버퍼 전체의 상한. RGBA 환산 약 16MB다. */
+const CACHE_MAX_PIXELS = 4_000_000;
+const cache = new BoundedLru<string, Cached>({
+  maxEntries: CACHE_MAX,
+  maxWeight: CACHE_MAX_PIXELS,
+  weight: (entry) => entry.canvas.width * entry.canvas.height,
+});
+let cacheHits = 0;
+let cacheMisses = 0;
+let cachePeakEntries = 0;
+let cachePeakPixels = 0;
+
+function cachedPixels(): number {
+  return cache.weight;
+}
+
+export interface BackdropCacheObservation {
+  entries: number;
+  peakEntries: number;
+  maxEntries: number;
+  pixels: number;
+  peakPixels: number;
+  maxPixels: number;
+  hits: number;
+  misses: number;
+}
+
+/** debug 하네스가 읽는 캐시 상한·사용량. 렌더 결과에는 관여하지 않는다. */
+export function backdropCacheObservation(): BackdropCacheObservation {
+  const pixels = cachedPixels();
+  return {
+    entries: cache.size,
+    peakEntries: cachePeakEntries,
+    maxEntries: CACHE_MAX,
+    pixels,
+    peakPixels: cachePeakPixels,
+    maxPixels: CACHE_MAX_PIXELS,
+    hits: cacheHits,
+    misses: cacheMisses,
+  };
+}
 
 /**
  * 시각을 몇 단계로 끊는가.
@@ -546,12 +590,16 @@ export function drawScene(ctx: CanvasRenderingContext2D, w: number, h: number, s
 
   let hit = cache.get(key);
   if (!hit) {
+    if (observeBackdropCache) cacheMisses += 1;
     hit = { canvas: build(scene, bw, bh, tq / DAY_STEPS) };
-    cache.set(key, hit);
-    if (cache.size > CACHE_MAX) {
-      const oldest = cache.keys().next().value;
-      if (oldest !== undefined) cache.delete(oldest);
+    if (cache.set(key, hit)) {
+      if (observeBackdropCache) {
+        cachePeakEntries = Math.max(cachePeakEntries, cache.size);
+        cachePeakPixels = Math.max(cachePeakPixels, cache.weight);
+      }
     }
+  } else {
+    if (observeBackdropCache) cacheHits += 1;
   }
 
   const prev = ctx.imageSmoothingEnabled;

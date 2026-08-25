@@ -742,6 +742,98 @@ async function main() {
     );
     console.log("browser-runtime pointer route PASS · reward→battle");
 
+    const battlePerformance = await waitFor(
+      "battle 프레임 예산 표본",
+      () => evaluate(cdp, sessionId, `(() => {
+        const observation = window.nyangPerformance;
+        return {
+          phase: window.nyang.phase,
+          frames: observation?.frames?.phases?.battle ?? null,
+          caches: observation?.caches ?? null,
+        };
+      })()`),
+      (value) => value?.frames?.sampleCount >= 105 && value.frames.elapsedMs >= 1_700,
+      10_000,
+    );
+    assert(battlePerformance.frames.frameWorkMs.p95Ms <= 16.7,
+      `battle frame-work p95가 16.7ms를 넘었습니다 (${battlePerformance.frames.frameWorkMs.p95Ms}ms)`);
+    const allowedLongFrames = Math.floor(battlePerformance.frames.sampleCount * 0.01);
+    assert(battlePerformance.frames.frameWorkMs.longCount <= allowedLongFrames,
+      `battle long-frame이 1% 허용 개수를 넘었습니다 (${battlePerformance.frames.frameWorkMs.longCount}/${allowedLongFrames})`);
+    assert(battlePerformance.frames.cadenceHz >= 45,
+      `battle rAF cadence가 45Hz보다 낮습니다 (${battlePerformance.frames.cadenceHz}Hz)`);
+    const performanceResult = {
+      browser: basename(browserPath),
+      product: browserVersion.product,
+      viewport: "1280x800@1x",
+      phase: "battle",
+      sampleCount: battlePerformance.frames.sampleCount,
+      elapsedMs: battlePerformance.frames.elapsedMs,
+      cadenceHz: battlePerformance.frames.cadenceHz,
+      frameWorkMs: battlePerformance.frames.frameWorkMs,
+      rafIntervalMs: battlePerformance.frames.rafIntervalMs,
+      allowedLongFrames,
+      caches: battlePerformance.caches,
+    };
+    console.log(`PERFORMANCE_RESULT ${JSON.stringify(performanceResult)}`);
+    console.log(
+      `browser-runtime performance PASS · battle ${performanceResult.sampleCount} frames · p95 ${performanceResult.frameWorkMs.p95Ms.toFixed(2)}ms · long ${(performanceResult.frameWorkMs.longRate * 100).toFixed(2)}% · ${performanceResult.cadenceHz.toFixed(1)}Hz`,
+    );
+    const tintCache = battlePerformance.caches.tintedSprites;
+    const tintHitRate = tintCache.hits / Math.max(1, tintCache.hits + tintCache.misses);
+    assert(tintHitRate >= 0.75,
+      `색조 sprite 캐시 적중률이 75%보다 낮습니다 (${(tintHitRate * 100).toFixed(2)}%, ${tintCache.hits}/${tintCache.misses})`);
+
+    const viewportChurn = [
+      { width: 640, height: 480, deviceScaleFactor: 1 },
+      { width: 720, height: 900, deviceScaleFactor: 1 },
+      { width: 900, height: 600, deviceScaleFactor: 2 },
+      { width: 1100, height: 700, deviceScaleFactor: 1 },
+      { width: 1280, height: 800, deviceScaleFactor: 1 },
+    ];
+    for (const viewport of viewportChurn) {
+      const before = await evaluate(cdp, sessionId, `window.nyang.runtime.resizeCount`);
+      await cdp.send("Emulation.setDeviceMetricsOverride", {
+        ...viewport,
+        mobile: false,
+      }, sessionId);
+      await waitFor(
+        `${viewport.width}x${viewport.height}@${viewport.deviceScaleFactor}x 캐시 churn`,
+        () => evaluate(cdp, sessionId, `(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+          runtime: window.nyang.runtime,
+          phase: window.nyang.phase,
+          caches: window.nyangPerformance?.caches ?? null,
+        })))))()`),
+        (value) => value?.phase === "battle"
+          && value.runtime?.resizeCount > before
+          && value.runtime.lastResize?.width === viewport.width
+          && value.runtime.lastResize?.height === viewport.height,
+      );
+    }
+    const boundedCaches = await evaluate(cdp, sessionId, `window.nyangPerformance.caches`);
+    for (const name of ["backdrop", "boardGrid", "tintedSprites", "fxBuffer"]) {
+      const cache = boundedCaches[name];
+      assert(cache, `${name} 캐시 관찰값이 없습니다`);
+      assert(cache.entries <= cache.maxEntries,
+        `${name} 현재 엔트리가 상한을 넘었습니다 (${cache.entries}/${cache.maxEntries})`);
+      assert(cache.peakEntries <= cache.maxEntries,
+        `${name} 최대 엔트리가 상한을 넘었습니다 (${cache.peakEntries}/${cache.maxEntries})`);
+      assert(cache.pixels <= cache.maxPixels,
+        `${name} 현재 픽셀이 상한을 넘었습니다 (${cache.pixels}/${cache.maxPixels})`);
+      assert(cache.peakPixels <= cache.maxPixels,
+        `${name} 최대 픽셀이 상한을 넘었습니다 (${cache.peakPixels}/${cache.maxPixels})`);
+    }
+    for (const name of ["ramps", "chipTrails"]) {
+      const cache = boundedCaches[name];
+      assert(cache.entries <= cache.maxEntries,
+        `${name} 현재 엔트리가 상한을 넘었습니다 (${cache.entries}/${cache.maxEntries})`);
+    }
+    assert(
+      boundedCaches.boardGrid.peakEntries === boundedCaches.boardGrid.maxEntries,
+      "board grid LRU가 엔트리 상한까지 실제로 채워지지 않았습니다",
+    );
+    console.log("browser-runtime cache budget PASS · 6 battle viewports · entry/pixel caps sealed");
+
     const beforeResize = await evaluate(cdp, sessionId, `window.nyang.runtime`);
     await cdp.send("Emulation.setDeviceMetricsOverride", {
       width: 800,
@@ -791,7 +883,9 @@ async function main() {
     assert(resized.runtime.lastResize.width === 800 && resized.runtime.lastResize.height === 1280, "마지막 resize 관찰값이 다릅니다");
     // CDP의 native orientation 이벤트 전달 여부와 별개로 실제 리스너·120ms
     // debounce·resize 연결을 결정론적으로 검증한다. 연속 두 이벤트는 한 번만 센다.
-    await delay(180);
+    // 앞선 battle viewport churn의 마지막 native orientation 이벤트까지
+    // 120ms debounce 밖으로 완전히 밀어낸 뒤 수동 연속 이벤트만 계수한다.
+    await delay(320);
     const beforeOrientation = await evaluate(cdp, sessionId, `window.nyang.runtime`);
     await evaluate(cdp, sessionId, `(() => {
       window.dispatchEvent(new Event("orientationchange"));
@@ -810,6 +904,45 @@ async function main() {
       "연속 orientationchange가 하나로 합쳐지지 않았습니다",
     );
     console.log("browser-runtime resize PASS · 1280x800→800x1280 @2x · orientation debounce");
+
+    const backdropStress = Array.from({ length: 12 }, (_, index) => ({
+      width: 820 + index * 17,
+      height: 1180 - index * 19,
+      deviceScaleFactor: index % 2 === 0 ? 1 : 2,
+    }));
+    for (const viewport of [...backdropStress, { width: 800, height: 1280, deviceScaleFactor: 2 }]) {
+      const before = await evaluate(cdp, sessionId, `window.nyang.runtime.resizeCount`);
+      await cdp.send("Emulation.setDeviceMetricsOverride", { ...viewport, mobile: false }, sessionId);
+      await waitFor(
+        `${viewport.width}x${viewport.height}@${viewport.deviceScaleFactor}x backdrop churn`,
+        () => evaluate(cdp, sessionId, `(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+          runtime: window.nyang.runtime,
+          caches: window.nyangPerformance.caches,
+        })))))()`),
+        (value) => value?.runtime?.resizeCount > before
+          && value.runtime.lastResize?.width === viewport.width
+          && value.runtime.lastResize?.height === viewport.height,
+      );
+    }
+    const stressedCaches = await evaluate(cdp, sessionId, `window.nyangPerformance.caches`);
+    assert(
+      stressedCaches.backdrop.peakEntries === stressedCaches.backdrop.maxEntries,
+      "backdrop LRU가 엔트리 상한까지 실제로 채워지지 않았습니다",
+    );
+    for (const name of ["backdrop", "boardGrid", "tintedSprites", "fxBuffer"]) {
+      const cache = stressedCaches[name];
+      assert(cache.entries <= cache.maxEntries && cache.peakEntries <= cache.maxEntries,
+        `${name} stress 엔트리 상한을 넘었습니다 (${cache.entries}/${cache.peakEntries}/${cache.maxEntries})`);
+      assert(cache.pixels <= cache.maxPixels && cache.peakPixels <= cache.maxPixels,
+        `${name} stress 픽셀 상한을 넘었습니다 (${cache.pixels}/${cache.peakPixels}/${cache.maxPixels})`);
+    }
+    console.log(`CACHE_RESULT ${JSON.stringify({
+      browser: basename(browserPath),
+      product: browserVersion.product,
+      viewports: 1 + viewportChurn.length + 1 + backdropStress.length + 1,
+      caches: stressedCaches,
+    })}`);
+    console.log("browser-runtime cache stress PASS · board/backdrop LRU caps exercised");
 
     const baselineStart = await evaluate(cdp, sessionId, `window.nyang.runtime.frameCount`);
     await delay(350);

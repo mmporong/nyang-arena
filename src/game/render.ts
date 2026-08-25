@@ -28,6 +28,7 @@ import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./
 import { isMuted, playUiCue } from "./audio.ts";
 import { BALANCE } from "./balance.ts";
 import { cellRect, fieldToScreen, hitCell, uiSpace, type Layout, type Rect } from "./layout.ts";
+import { BoundedLru } from "./lru.ts";
 import { SPRITE_CROP, spriteDrawRect } from "./sprite-atlas.ts";
 import { spriteFor, type SpriteFrame } from "./sprites.ts";
 import {
@@ -57,6 +58,7 @@ import type { RaidContract } from "../validate/raid-contract-schema.ts";
 
 const debugSpriteFallback = typeof location !== "undefined"
   && new URLSearchParams(location.search).get("debug") === "1";
+const debugRenderObservation = debugSpriteFallback;
 let spriteFallbackDraws = 0;
 
 /** production 판정에는 관여하지 않는 debug 전용 누적 관찰값이다. */
@@ -797,7 +799,22 @@ function drawMute(ctx: CanvasRenderingContext2D, L: Layout, muted: boolean): voi
  * 분석). 레이아웃·진영·DPR이 같으면 한 번 구운 그림을 붙이고, 하이라이트 칸만 위에 덧그린다.
  * 노드 하네스는 이 함수를 부르지 않으므로 `document`는 호출 시점에만 만진다.
  */
-const boardGridCache = new Map<string, { canvas: HTMLCanvasElement; x: number; y: number; w: number; h: number }>();
+const BOARD_GRID_CACHE_MAX = 8;
+const BOARD_GRID_CACHE_MAX_PIXELS = 8_000_000;
+type BoardGridCacheEntry = { canvas: HTMLCanvasElement; x: number; y: number; w: number; h: number };
+const boardGridCache = new BoundedLru<string, BoardGridCacheEntry>({
+  maxEntries: BOARD_GRID_CACHE_MAX,
+  maxWeight: BOARD_GRID_CACHE_MAX_PIXELS,
+  weight: (entry) => entry.canvas.width * entry.canvas.height,
+});
+let boardGridCacheHits = 0;
+let boardGridCacheMisses = 0;
+let boardGridCachePeakEntries = 0;
+let boardGridCachePeakPixels = 0;
+
+function boardGridCachePixels(): number {
+  return boardGridCache.weight;
+}
 
 function boardGridImage(L: Layout, side: Side): { canvas: HTMLCanvasElement; x: number; y: number; w: number; h: number } | null {
   if (typeof document === "undefined") return null;
@@ -812,9 +829,11 @@ function boardGridImage(L: Layout, side: Side): { canvas: HTMLCanvasElement; x: 
   const h = Math.ceil(Math.max(first.y + first.h, last.y + last.h) + pad) - y;
   const key = `${side}|${x},${y},${w},${h}|${L.cell}|${L.gap}|${dpr}`;
   const hit = boardGridCache.get(key);
-  if (hit) return hit;
-  // 레이아웃이 자주 바뀌진 않지만(리사이즈·국면 전환) 무한히 쌓이지 않게 한다.
-  if (boardGridCache.size > 8) boardGridCache.clear();
+  if (hit) {
+    if (debugRenderObservation) boardGridCacheHits += 1;
+    return hit;
+  }
+  if (debugRenderObservation) boardGridCacheMisses += 1;
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(w * dpr));
   canvas.height = Math.max(1, Math.round(h * dpr));
@@ -832,7 +851,12 @@ function boardGridImage(L: Layout, side: Side): { canvas: HTMLCanvasElement; x: 
     c.stroke();
   }
   const entry = { canvas, x, y, w, h };
-  boardGridCache.set(key, entry);
+  if (boardGridCache.set(key, entry)) {
+    if (debugRenderObservation) {
+      boardGridCachePeakEntries = Math.max(boardGridCachePeakEntries, boardGridCache.size);
+      boardGridCachePeakPixels = Math.max(boardGridCachePeakPixels, boardGridCache.weight);
+    }
+  }
   return entry;
 }
 
@@ -973,7 +997,7 @@ function drawVulnerableRing(
 
 /** 고양이 몸 크기. 반경 있는 것(보스·저격수)은 셀 격자를 벗어나 크게 그린다. */
 /**
- * 스테이지 색조를 입힌 스프라이트를 만드는 재사용 버퍼.
+ * 스테이지 색조를 입힌 스프라이트의 작은 LRU 캐시.
  *
  * 메인 캔버스에서 `source-atop`을 걸면 안 된다 — 그 합성이 자르는 것은
  * 스프라이트의 알파가 아니라 **목적지 캔버스의 알파**인데, 배경이 이미
@@ -981,18 +1005,33 @@ function drawVulnerableRing(
  * 26×26 사각형 통째로 찍혔다(리뷰 실측 Δ99). 알파가 실루엣과 일치하는 곳은
  * 이 오프스크린 버퍼 안뿐이다.
  */
-let tintBuf: HTMLCanvasElement | null = null;
+const TINT_CACHE_MAX = 24;
+const TINT_CACHE_ENTRY_PIXELS = SPRITE_CROP.w * SPRITE_CROP.h;
+const TINT_CACHE_MAX_PIXELS = TINT_CACHE_MAX * TINT_CACHE_ENTRY_PIXELS;
+const tintCache = new BoundedLru<string, HTMLCanvasElement>({
+  maxEntries: TINT_CACHE_MAX,
+  maxWeight: TINT_CACHE_MAX_PIXELS,
+  weight: (canvas) => canvas.width * canvas.height,
+});
+let tintCacheHits = 0;
+let tintCacheMisses = 0;
+let tintCachePeakEntries = 0;
+let tintCachePeakPixels = 0;
 
 function tintedSprite(frame: SpriteFrame, tint: string): CanvasImageSource {
   const w = SPRITE_CROP.w;
   const h = SPRITE_CROP.h;
-  if (!tintBuf) {
-    tintBuf = document.createElement("canvas");
-    tintBuf.width = w;
-    tintBuf.height = h;
+  const key = `${frame.atlas}|${frame.sx},${frame.sy}|${tint}`;
+  const hit = tintCache.get(key);
+  if (hit) {
+    if (debugRenderObservation) tintCacheHits += 1;
+    return hit;
   }
-  const g = tintBuf.getContext("2d")!;
-  g.clearRect(0, 0, w, h);
+  if (debugRenderObservation) tintCacheMisses += 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const g = canvas.getContext("2d")!;
   g.drawImage(frame.image, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
   g.save();
   g.globalCompositeOperation = "source-atop";
@@ -1002,7 +1041,11 @@ function tintedSprite(frame: SpriteFrame, tint: string): CanvasImageSource {
   g.fillStyle = tint;
   g.fillRect(0, 0, w, h);
   g.restore();
-  return tintBuf;
+  if (tintCache.set(key, canvas) && debugRenderObservation) {
+    tintCachePeakEntries = Math.max(tintCachePeakEntries, tintCache.size);
+    tintCachePeakPixels = Math.max(tintCachePeakPixels, tintCache.weight);
+  }
+  return canvas;
 }
 
 /** atlas crop과 원본 197px 여백 보정을 모든 렌더 경로에 똑같이 적용한다. */
@@ -1492,9 +1535,49 @@ function drawSeizeMark(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): v
  * 방해가 되는지 측정하기 전에는 넣을 수 없다.
  */
 const FX_PIXEL = 3;
+const FX_BUFFER_MAX_PIXELS = 1_000_000;
+
+export interface FxBufferDimensions {
+  width: number;
+  height: number;
+  pixels: number;
+  scaleX: number;
+  scaleY: number;
+}
+
+/** 화면 비율을 유지하며 FX offscreen 버퍼를 명시적 픽셀 예산 안에 맞춘다. */
+export function fxBufferDimensions(width: number, height: number): FxBufferDimensions {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new RangeError("FX buffer dimensions must be finite positive numbers");
+  }
+  const desiredWidth = Math.max(8, Math.round(width / FX_PIXEL));
+  const desiredHeight = Math.max(8, Math.round(height / FX_PIXEL));
+  let bufferWidth = desiredWidth;
+  let bufferHeight = desiredHeight;
+  const constrained = bufferWidth * bufferHeight > FX_BUFFER_MAX_PIXELS;
+  if (constrained) {
+    const shrink = Math.sqrt(FX_BUFFER_MAX_PIXELS / (bufferWidth * bufferHeight));
+    bufferWidth = Math.max(8, Math.floor(bufferWidth * shrink));
+    bufferHeight = Math.max(8, Math.floor(bufferHeight * shrink));
+    if (bufferWidth * bufferHeight > FX_BUFFER_MAX_PIXELS) {
+      if (bufferWidth >= bufferHeight) bufferWidth = Math.max(8, Math.floor(FX_BUFFER_MAX_PIXELS / bufferHeight));
+      else bufferHeight = Math.max(8, Math.floor(FX_BUFFER_MAX_PIXELS / bufferWidth));
+    }
+  }
+  return {
+    width: bufferWidth,
+    height: bufferHeight,
+    pixels: bufferWidth * bufferHeight,
+    // 상한 안에서는 기존 1/3 좌표를 그대로 보존한다. 반올림된 canvas 크기를
+    // 좌표 배율로 역산하면 보통 화면에서도 픽셀이 미세하게 이동한다.
+    scaleX: constrained ? bufferWidth / width : 1 / FX_PIXEL,
+    scaleY: constrained ? bufferHeight / height : 1 / FX_PIXEL,
+  };
+}
 
 let fxBuf: HTMLCanvasElement | null = null;
 let fxCtx: CanvasRenderingContext2D | null = null;
+let fxBufferPeakPixels = 0;
 
 interface Particle {
   /** 화면 좌표(px). 버퍼 좌표로 두면 창 크기가 바뀔 때 전부 어긋난다. */
@@ -1529,7 +1612,8 @@ let fxLast = 0;
  * 픽셀 아트에 없는 것이라 그것만으로도 다른 그림처럼 보인다. 벡터 겹의 색에서
  * 자동으로 뽑으므로 두 겹이 어긋날 수 없다.
  */
-const rampCache = new Map<string, readonly string[]>();
+const RAMP_CACHE_MAX = 64;
+const rampCache = new BoundedLru<string, readonly string[]>({ maxEntries: RAMP_CACHE_MAX });
 
 function hexToRgb(h: string): [number, number, number] {
   return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
@@ -1718,13 +1802,15 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
   fxLast = now;
   const reduce = reducedMotion();
 
-  const bw = Math.max(8, Math.round(L.w / FX_PIXEL));
-  const bh = Math.max(8, Math.round(L.h / FX_PIXEL));
+  const dimensions = fxBufferDimensions(L.w, L.h);
+  const bw = dimensions.width;
+  const bh = dimensions.height;
   if (!fxBuf || fxBuf.width !== bw || fxBuf.height !== bh) {
     fxBuf = document.createElement("canvas");
     fxBuf.width = bw;
     fxBuf.height = bh;
     fxCtx = fxBuf.getContext("2d");
+    if (debugRenderObservation) fxBufferPeakPixels = Math.max(fxBufferPeakPixels, bw * bh);
   }
   const b = fxCtx;
   if (!b) return;
@@ -1744,7 +1830,7 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
   if (reduce) particles.length = 0;
   else stepParticles(dt);
 
-  drawFxVectors(b, L);
+  drawFxVectors(b, L, dimensions.scaleX, dimensions.scaleY);
 
   // 파티클 — 하나가 fillRect 한 번이다. 알파 대신 색 램프로 식는다.
   if (!reduce) {
@@ -1752,7 +1838,12 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
       const k = 1 - p.life / p.max;
       const col = p.ramp[Math.min(p.ramp.length - 1, Math.floor(k * p.ramp.length + p.jit))]!;
       b.fillStyle = col;
-      b.fillRect(Math.round(p.x / FX_PIXEL), Math.round(p.y / FX_PIXEL), p.size, p.size);
+      b.fillRect(
+        Math.round(p.x * dimensions.scaleX),
+        Math.round(p.y * dimensions.scaleY),
+        Math.max(1, Math.round(p.size * FX_PIXEL * dimensions.scaleX)),
+        Math.max(1, Math.round(p.size * FX_PIXEL * dimensions.scaleY)),
+      );
     }
   }
 
@@ -1768,14 +1859,14 @@ function qa(a: number): number {
   return Math.max(0, Math.ceil(Math.min(1, a) * 4) / 4);
 }
 
-function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
-  const S = 1 / FX_PIXEL;
+function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout, scaleX: number, scaleY: number): void {
+  const S = Math.min(scaleX, scaleY);
   const pitch = (L.cell + L.gap) * S;
 
   for (const f of fxs) {
     const t = 1 - f.life / f.maxLife; // 0 → 1
     const raw = fieldToScreen(L, f.fx, f.fy);
-    const p = { x: raw.x * S, y: raw.y * S };
+    const p = { x: raw.x * scaleX, y: raw.y * scaleY };
     ctx.save();
     ctx.lineJoin = "miter";
     ctx.lineCap = "butt";
@@ -1804,7 +1895,7 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
       }
       case "beam": {
         const raw2 = fieldToScreen(L, f.tx, f.ty);
-        const q = { x: raw2.x * S, y: raw2.y * S };
+        const q = { x: raw2.x * scaleX, y: raw2.y * scaleY };
         ctx.globalAlpha = qa(0.9 * (1 - t) ** 0.7);
         ctx.strokeStyle = f.color;
         ctx.lineWidth = Math.max(1, f.radius * pitch * (1 - t * 0.5));
@@ -1817,7 +1908,7 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
       case "streak": {
         // 시작점에서 목표까지 순식간에 지나간 자국
         const raw2 = fieldToScreen(L, f.tx, f.ty);
-        const q = { x: raw2.x * S, y: raw2.y * S };
+        const q = { x: raw2.x * scaleX, y: raw2.y * scaleY };
         const head = {
           x: p.x + (q.x - p.x) * Math.min(1, t * 1.8),
           y: p.y + (q.y - p.y) * Math.min(1, t * 1.8),
@@ -1908,8 +1999,8 @@ function drawFxVectors(ctx: CanvasRenderingContext2D, L: Layout): void {
             fieldToScreen(L, nearX, BOARD_ROWS - 0.5),
           ];
           ctx.beginPath();
-          ctx.moveTo(corners[0]!.x * S, corners[0]!.y * S);
-          for (const cpt of corners.slice(1)) ctx.lineTo(cpt.x * S, cpt.y * S);
+          ctx.moveTo(corners[0]!.x * scaleX, corners[0]!.y * scaleY);
+          for (const cpt of corners.slice(1)) ctx.lineTo(cpt.x * scaleX, cpt.y * scaleY);
           ctx.closePath();
           ctx.fill();
         } else {
@@ -5503,7 +5594,8 @@ function drawButtonFace(
  * 따라오면 한 방의 크기가 눈에 남는다. uid로 기억하되 보스는 한 번에 하나라
  * 이 맵은 항목 두엇을 넘지 않는다.
  */
-const chipTrail = new Map<string, number>();
+const CHIP_TRAIL_MAX = 16;
+const chipTrail = new BoundedLru<string, number>({ maxEntries: CHIP_TRAIL_MAX });
 
 /**
  * 보스 전용 체력 배너.
@@ -5588,7 +5680,8 @@ function drawBossBanner(
   if (barW <= 4) return;
 
   const frac = Math.max(0, Math.min(1, boss.hp / boss.maxHp));
-  const prev = chipTrail.get(boss.uid) ?? frac;
+  const storedChip = chipTrail.get(boss.uid);
+  const prev = storedChip ?? frac;
   // 위로는 즉시 따라붙고(부활·회복) 아래로만 천천히 따라온다.
   const chip = frac > prev ? frac : prev + (frac - prev) * 0.08;
   chipTrail.set(boss.uid, chip);
@@ -6319,6 +6412,49 @@ function drawFinalPhaseOverlay(ctx: CanvasRenderingContext2D, L: Layout, s: RunS
   ctx.fillStyle = g;
   ctx.fill();
   ctx.restore();
+}
+
+/** debug 브라우저 하네스가 읽는 렌더 캐시·버퍼 상한. */
+export function renderCacheObservation() {
+  const tintPixels = tintCache.weight;
+  const fxPixels = fxBuf ? fxBuf.width * fxBuf.height : 0;
+  return {
+    boardGrid: {
+      entries: boardGridCache.size,
+      peakEntries: boardGridCachePeakEntries,
+      maxEntries: BOARD_GRID_CACHE_MAX,
+      pixels: boardGridCachePixels(),
+      peakPixels: boardGridCachePeakPixels,
+      maxPixels: BOARD_GRID_CACHE_MAX_PIXELS,
+      hits: boardGridCacheHits,
+      misses: boardGridCacheMisses,
+    },
+    tintedSprites: {
+      entries: tintCache.size,
+      peakEntries: tintCachePeakEntries,
+      maxEntries: TINT_CACHE_MAX,
+      pixels: tintPixels,
+      peakPixels: tintCachePeakPixels,
+      maxPixels: TINT_CACHE_MAX_PIXELS,
+      hits: tintCacheHits,
+      misses: tintCacheMisses,
+    },
+    fxBuffer: {
+      entries: fxBuf ? 1 : 0,
+      peakEntries: fxBuf ? 1 : 0,
+      maxEntries: 1,
+      pixels: fxPixels,
+      peakPixels: fxBufferPeakPixels,
+      maxPixels: FX_BUFFER_MAX_PIXELS,
+    },
+    ramps: { entries: rampCache.size, maxEntries: RAMP_CACHE_MAX },
+    chipTrails: { entries: chipTrail.size, maxEntries: CHIP_TRAIL_MAX },
+    transient: {
+      particles: particles.length,
+      maxParticles: 520,
+      buyTweens: buyTweens.length,
+    },
+  };
 }
 
 export function render(
