@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "productCommit": "6982c40ff0dc8ff260a0543365ec61ed2cea5858",
-  "generatedAt": "2026-08-25T16:37:21.0958002Z",
+  "productCommit": "4fb124c078d72dee95f039a47c37ed5998dcbee4",
+  "generatedAt": "2026-08-25T17:51:17.251Z",
   "node": "v24.12.0",
   "constraints": {
     "runtimeDependencies": 0,
@@ -11,31 +11,31 @@
   "browsers": {
     "chrome": {
       "product": "Chrome/151.0.7922.172",
-      "sampleCount": 106,
-      "frameWorkP95Ms": 1.199999988079071,
+      "sampleCount": 105,
+      "frameWorkP95Ms": 1.5,
       "longFrameCount": 0,
-      "cadenceHz": 58.88290713324361,
-      "tintedSpriteHits": 357,
-      "tintedSpriteMisses": 4
+      "cadenceHz": 56.22229430208671,
+      "tintedSpriteHits": 356,
+      "tintedSpriteMisses": 5
     },
     "edge": {
       "product": "Edg/151.0.4129.107",
-      "sampleCount": 105,
-      "frameWorkP95Ms": 1.2999999821186066,
+      "sampleCount": 109,
+      "frameWorkP95Ms": 1.0999999940395355,
       "longFrameCount": 0,
-      "cadenceHz": 57.77777777777778,
-      "tintedSpriteHits": 358,
+      "cadenceHz": 60.00333351852882,
+      "tintedSpriteHits": 364,
       "tintedSpriteMisses": 4
     }
   },
   "fxStress": {
     "chrome": {
-      "desktop1488x832": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 3.0, "cadenceHz": 57.7 },
-      "mobile390x844Dpr2": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.8, "cadenceHz": 47.5 }
+      "desktop1488x832": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 3.1, "cadenceHz": 54.9 },
+      "mobile390x844Dpr2": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.4, "cadenceHz": 42.5 }
     },
     "edge": {
       "desktop1488x832": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.8, "cadenceHz": 59.2 },
-      "mobile390x844Dpr2": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.4, "cadenceHz": 49.4 }
+      "mobile390x844Dpr2": { "effects": 90, "artCells": 48, "frameWorkP95Ms": 2.4, "cadenceHz": 51.2 }
     }
   },
   "cacheStress": {

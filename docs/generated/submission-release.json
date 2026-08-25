@@ -2,7 +2,7 @@
   "schema": 1,
   "status": "candidate",
   "scope": "game-release-g006",
-  "gameProductCommit": "6982c40ff0dc8ff260a0543365ec61ed2cea5858",
+  "gameProductCommit": "4fb124c078d72dee95f039a47c37ed5998dcbee4",
   "evidenceCommit": null,
   "ci": null,
   "publicBuild": {
