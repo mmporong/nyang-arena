@@ -161,11 +161,11 @@ Codex는 위 기반을 분석한 뒤 다음 범위를 새로 설계·구현·검
 
 ## 5. 공개 검증 증거
 
-<!-- SUBMISSION_EVIDENCE_CANDIDATE -->
+<!-- SUBMISSION_EVIDENCE_REQUIRED -->
 
 - 게임 출고 기준 제품 커밋: `4fb124c078d72dee95f039a47c37ed5998dcbee4`
-- 출고 후보 CI: 대기 — 후보 커밋의 전체 `npm run verify`와 Pages 배포 성공 뒤
-  증거·배포 커밋 및 GitHub Actions 실행을 결박한다
+- 게임 출고 기준 증거·배포 커밋: `7aa4e1c81821bd7b9bfa843626585d23f2b2a5c8`
+- 출고 CI: [Deploy to GitHub Pages #32881591960](https://github.com/mmporong/nyang-arena/actions/runs/32881591960) — `completed/success`
 - 6축 `sim`, `decisions`, `placement`, `intervention`, `map`, `relics` 전부 PASS,
   clean product provenance MATCH
 - 정규화 metrics SHA-256:
@@ -187,7 +187,7 @@ Codex는 위 기반을 분석한 뒤 다음 범위를 새로 설계·구현·검
 |---|---|---|
 | 제목 | 준비 완료 | 80자 이하를 기계 검증 |
 | 200자 소개 | 준비 완료 | 공식 폼과 같은 JavaScript UTF-16 길이로 기계 검증 |
-| 플레이 URL | 재배포 검증 중 | 후보 CI 성공 뒤 최신 main의 HTTP 200을 다시 봉인 |
+| 플레이 URL | 배포 완료 | 최신 main HTML·JS·배경·전투 아틀라스·Maplestory 폰트 HTTP 200 확인 |
 | 썸네일 | 기술 조건 충족 | 16:9 PNG·10MB 이하, 계약 중심 구성은 아님 |
 | Codex 과정 | 준비 완료 | 5,000자 이하, 기존/신규/사람 결정 분리 |
 | 데모 영상 URL | 미확정 | 로컬 52.672초 파일은 있으나 바로 재생되는 공개 URL 없음 |

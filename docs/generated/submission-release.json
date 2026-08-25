@@ -1,10 +1,20 @@
 {
   "schema": 1,
-  "status": "candidate",
+  "status": "released",
   "scope": "game-release-g006",
   "gameProductCommit": "4fb124c078d72dee95f039a47c37ed5998dcbee4",
-  "evidenceCommit": null,
-  "ci": null,
+  "evidenceCommit": "7aa4e1c81821bd7b9bfa843626585d23f2b2a5c8",
+  "ci": {
+    "provider": "github-actions",
+    "workflow": "Deploy to GitHub Pages",
+    "runId": 32881591960,
+    "url": "https://github.com/mmporong/nyang-arena/actions/runs/32881591960",
+    "headSha": "7aa4e1c81821bd7b9bfa843626585d23f2b2a5c8",
+    "status": "completed",
+    "conclusion": "success",
+    "createdAt": "2026-08-25T18:04:07Z",
+    "updatedAt": "2026-08-25T18:24:09Z"
+  },
   "publicBuild": {
     "url": "https://mmporong.github.io/nyang-arena/"
   }
