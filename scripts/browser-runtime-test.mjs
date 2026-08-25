@@ -271,23 +271,32 @@ async function evaluate(cdp, sessionId, expression) {
   return result.result?.value;
 }
 
-async function connectCdpWhenReady(url, browserProcess, timeoutMs = 4_000) {
+async function connectCdpWhenReady(url, browserProcess, timeoutMs = 15_000) {
+  const startedAt = Date.now();
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
+  let attempts = 0;
   while (Date.now() < deadline) {
-    if (browserProcess.exitCode !== null) {
-      throw new Error(`CDP 연결 전 브라우저가 조기 종료했습니다 (${browserProcess.exitCode})`);
+    if (browserProcess.exitCode !== null || browserProcess.signalCode !== null) {
+      throw new Error(
+        `CDP 연결 전 브라우저가 조기 종료했습니다 (${browserProcess.exitCode ?? browserProcess.signalCode})`,
+      );
     }
     try {
       // DevToolsActivePort는 WebSocket accept보다 아주 조금 먼저 생길 수 있다.
-      // 전체 테스트를 재시도하지 않고 이 readiness 경계만 짧게 다시 확인한다.
-      return await CdpConnection.connect(url, 750);
+      // 부하가 큰 CI에서는 accept가 수 초 늦을 수 있으므로 이 readiness 경계만 유한 재시도한다.
+      attempts += 1;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      return await CdpConnection.connect(url, Math.min(2_000, remainingMs));
     } catch (error) {
       lastError = error;
-      await delay(100);
+      await delay(Math.min(100, Math.max(0, deadline - Date.now())));
     }
   }
-  throw new Error(`CDP readiness ${timeoutMs}ms 시간 초과: ${lastError?.message ?? "알 수 없는 오류"}`);
+  throw new Error(
+    `CDP readiness ${Date.now() - startedAt}ms/${attempts}회 시간 초과: ${lastError?.message ?? "알 수 없는 오류"}`,
+  );
 }
 
 async function pressKey(cdp, sessionId, { key, code, keyCode, text = "" }) {
