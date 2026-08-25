@@ -4,6 +4,7 @@ import {
   hazardZones,
   queueIntervention,
   spawnArrivalFx,
+  spawnFxStressFixture,
   spawnLevelUpFx,
   stepBattle,
 } from "./game/battle.ts";
@@ -838,6 +839,19 @@ if (debugEnabled) {
       caches: {
         backdrop: backdropCacheObservation(),
         ...renderCacheObservation(),
+      },
+    }),
+  });
+  Object.defineProperty(window, "nyangQa", {
+    value: Object.freeze({
+      startFxStress: () => {
+        clearBattleFx();
+        framePerformance!.clear();
+        return spawnFxStressFixture();
+      },
+      stopFxStress: () => {
+        clearBattleFx();
+        framePerformance!.clear();
       },
     }),
   });

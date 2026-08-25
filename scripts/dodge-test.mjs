@@ -36,6 +36,11 @@ function check(name, ok, detail = "") {
   console.log(`  ${ok ? "OK  " : "실패"} ${name}${detail ? `  — ${detail}` : ""}`);
 }
 
+/** 지도 전이를 검증 대상 밖으로 두는 전투 단위 픽스처도 첫 영입 계약은 지킨다. */
+function seedFirstRecruit(s) {
+  s.ally[0] = makeCat(breedById(1), "ally", 0);
+}
+
 /** 보스 웨이브를 만들고 예고가 뜰 때까지 돌린다. */
 /**
  * `bossBreedId` — 보스를 특정 품종으로 강제한다. 첫 보스 걸음의 킷이 avoid만
@@ -76,6 +81,7 @@ function bossFightWithTelegraph(arrange, seed = 1, bossBreedId = null, want = ()
   s.raidContract = null;
   s.raidTargetBossIndex = -1;
   // 길을 고르면 상점이 열린다. 이 테스트는 사는 것을 재지 않으므로 그냥 나선다.
+  seedFirstRecruit(s);
   leaveShop(s);
   if (currentKind(s) !== "boss") throw new Error("보스 걸음을 못 찾았다");
   s.ally = emptyBoard();
@@ -113,8 +119,11 @@ function bossFightWithTelegraph(arrange, seed = 1, bossBreedId = null, want = ()
 
 /** 아군 다섯을 한 칸에 몰아 둔다 — 어떤 예고든 대부분이 걸린다. */
 function clustered(s) {
+  // 기본 스킬로 먼저 돌진하는 도적은 제외한다. 여기서 dash는 회피 입력이
+  // 안전한 고양이까지 옮겼는지만 나타내야 하며 직업 스킬과 섞이면 안 된다.
+  const breedIds = [1, 7, 8, 6, 2];
   [10, 11, 12, 16, 6].forEach((cell, i) => {
-    s.ally[cell] = makeCat(breedById((i % 8) + 1), "ally", cell);
+    s.ally[cell] = makeCat(breedById(breedIds[i]), "ally", cell);
   });
 }
 
@@ -512,6 +521,7 @@ console.log("회피 동작 검사\n");
     walkMap(s);
     s.raidContract = null;
     s.raidTargetBossIndex = -1;
+    seedFirstRecruit(s);
     leaveShop(s);
     if (currentKind(s) !== "boss") continue;
     s.ally = emptyBoard();
@@ -640,6 +650,7 @@ console.log("회피 동작 검사\n");
       walkMap(s);
       s.raidContract = null;
       s.raidTargetBossIndex = -1;
+      seedFirstRecruit(s);
       leaveShop(s);
       if (currentKind(s) !== "boss") continue;
       s.ally = emptyBoard();

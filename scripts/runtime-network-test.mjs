@@ -26,6 +26,7 @@ const CSP_DIRECTIVES = new Map([
   ["default-src", ["'none'"]],
   ["script-src", ["'self'"]],
   ["style-src", ["'unsafe-inline'"]],
+  ["font-src", ["'self'"]],
   ["img-src", ["'self'", "data:"]],
   ["media-src", ["'self'"]],
   ["connect-src", ["'self'"]],

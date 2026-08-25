@@ -167,7 +167,7 @@ export interface Shot {
 }
 
 export const POP_LIFE_MS = 520;
-export const SHOT_LIFE_MS = 220;
+export const SHOT_LIFE_MS = 300;
 export const POP_CAP = 16;
 export const SHOT_CAP = 32;
 export const FX_CAP = 90;
@@ -195,6 +195,15 @@ export type FxKind =
   | "bossdeath" // 보스가 죽는 순간의 확장 링 3겹
   | "phaseShift"; // 우두머리가 페이즈 2로 갈아타는 순간 (1회성). render.ts가 충격파 링과 플래시로 그린다.
 
+export interface FxArt {
+  atlas: "combat" | "magic" | "defense";
+  cell: number;
+  /** 큰 이미지 악센트가 붙는 의미 좌표. */
+  anchor?: "source" | "target" | "mid";
+  scale?: number;
+  rotate?: boolean;
+}
+
 export interface Fx {
   kind: FxKind;
   fx: number;
@@ -207,6 +216,8 @@ export interface Fx {
   life: number;
   maxLife: number;
   color: string;
+  /** ImageGen 아틀라스 악센트. 벡터·파티클 위에만 겹치며 판정과 무관하다. */
+  art?: FxArt;
   /** `impact` 전용. hit는 X, block은 방패 괄호, miss는 갈라진 선으로 그린다. */
   impact?: "hit" | "block" | "miss";
   /** `status` 전용. 실제 Cat 상태 필드와 일대일로 대응한다. */
@@ -346,6 +357,46 @@ function pushFx(f: Omit<Fx, "maxLife"> & { maxLife?: number }): void {
   fxs.push({ ...f, maxLife: f.maxLife ?? f.life });
 }
 
+/**
+ * `?debug=1` 브라우저 QA가 최악 밀도의 생성 이펙트 렌더 비용을 재현하는 픽스처.
+ * 판정에는 손대지 않고 3개 전투 아틀라스의 48셀을 모두 한 번 이상 그린다.
+ */
+export function spawnFxStressFixture(count = FX_CAP): { count: number; artCells: number } {
+  const safeCount = Math.max(0, Math.min(FX_CAP, Math.floor(count)));
+  const atlases = ["combat", "magic", "defense"] as const;
+  const kinds: FxKind[] = ["slash", "beam", "streak", "spark", "impact", "status", "ember", "frost", "ring"];
+  const colors = ["#FF6B6B", "#FFD166", "#62D8FF", "#70DFC1", "#C99BFF"];
+  for (let i = 0; i < safeCount; i++) {
+    const kind = kinds[i % kinds.length]!;
+    const atlas = atlases[i % atlases.length]!;
+    const cell = Math.floor(i / atlases.length) % 16;
+    pushFx({
+      kind,
+      fx: i % 5,
+      fy: Math.floor(i / 5) % 5,
+      tx: 6 + ((i * 3) % 5),
+      ty: 4 - (Math.floor(i / 3) % 5),
+      radius: 0.45 + (i % 4) * 0.18,
+      angle: (i % 8) * (Math.PI / 4),
+      life: 5_000,
+      color: colors[i % colors.length]!,
+      art: {
+        atlas,
+        cell,
+        anchor: i % 3 === 0 ? "source" : i % 3 === 1 ? "mid" : "target",
+        scale: 0.9 + (i % 3) * 0.18,
+        rotate: kind === "slash" || kind === "beam" || kind === "streak",
+      },
+      ...(kind === "impact" ? { impact: "hit" as const } : {}),
+      ...(kind === "status" ? { status: "shield" as const } : {}),
+    });
+  }
+  return {
+    count: fxs.length,
+    artCells: new Set(fxs.flatMap((fx) => fx.art ? [`${fx.art.atlas}:${fx.art.cell}`] : [])).size,
+  };
+}
+
 const FX_ALLY_HIT = "#F4E3C1";
 const FX_ENEMY_HIT = "#C4715A";
 const FX_SHIELD = "#6E97C4";
@@ -371,8 +422,14 @@ function spawnImpactFx(source: Cat | null, target: Cat, impact: "hit" | "block" 
     ty: source?.fy ?? target.fy,
     radius: impact === "block" ? 0.62 : impact === "miss" ? 0.48 : crit ? 0.72 : 0.52,
     angle: source ? Math.atan2(target.fy - source.fy, target.fx - source.fx) : 0,
-    life: impact === "block" ? 260 : 180,
+    life: impact === "block" ? 340 : impact === "miss" ? 280 : crit ? 360 : 300,
     color,
+    art: {
+      atlas: "combat",
+      cell: impact === "block" ? 11 : impact === "miss" ? 12 : crit ? 10 : 8,
+      anchor: "source",
+      scale: impact === "block" ? 1.2 : crit ? 1.35 : 1,
+    },
   });
 }
 
@@ -396,6 +453,12 @@ function spawnStatusFx(
     angle: 0,
     life: ending ? 260 : 420,
     color,
+    art: {
+      atlas: "defense",
+      cell: status === "shield" ? 8 : status === "stun" ? 10 : 9,
+      anchor: "source",
+      scale: status === "shield" ? 1.2 : 1,
+    },
   });
 }
 
@@ -755,6 +818,7 @@ function castSkill(
       angle: Math.random() * Math.PI * 2,
       life: 260,
       color: CLASS_FX[caster.breed.cls],
+      art: { atlas: "combat", cell: 9, scale: 0.86 },
     });
   }
   for (const s of res.stuns) {
@@ -792,6 +856,7 @@ function castSkill(
         angle: 0,
         life: 520,
         color: "#8FD9A8",
+        art: { atlas: "magic", cell: 10, scale: 0.92 },
       });
     }
   }
@@ -814,6 +879,7 @@ function castSkill(
         angle: 0,
         life: 460,
         color: "#9ED0F0",
+        art: { atlas: "magic", cell: 11, scale: 1.02 },
       });
     }
   }
@@ -834,6 +900,7 @@ function castSkill(
       angle: 0,
       life: 480,
       color: CLASS_FX.summoner,
+      art: { atlas: "magic", cell: 13, scale: 0.92 },
     });
   }
 
@@ -853,7 +920,7 @@ const CLASS_FX: Record<ClassKind, string> = {
   rogue: "#A97CC4",
   archer: "#C9A05C",
   mage: "#6E97C4",
-  summoner: "#5C6BB8",
+  summoner: "#70DFC1",
 };
 
 /** 스킬마다 다른 연출을 뿌린다. 무엇이 터졌는지 색과 모양으로 구분되게. */
@@ -866,7 +933,7 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
   switch (skill) {
     case "whirlwind": {
       // 두 겹 고리 + 회전하는 참격 넷
-      pushFx({ ...base, kind: "ring", radius: 1.7, life: 420 });
+      pushFx({ ...base, kind: "ring", radius: 1.7, life: 420, art: { atlas: "combat", cell: 3, scale: 1.45 } });
       pushFx({ ...base, kind: "ring", radius: 1.2, life: 300 });
       for (let i = 0; i < 4; i++) {
         pushFx({ ...base, kind: "slash", radius: 1.5, angle: (Math.PI / 2) * i, life: 340 });
@@ -875,14 +942,14 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
     }
     case "shockwave": {
       // 두껍고 느린 고리. 땅이 갈라지는 느낌
-      pushFx({ ...base, kind: "ring", radius: 2.0, life: 560 });
+      pushFx({ ...base, kind: "ring", radius: 2.0, life: 560, art: { atlas: "defense", cell: 12, scale: 1.7 } });
       pushFx({ ...base, kind: "ring", radius: 1.1, life: 380 });
       break;
     }
     case "shadow_strike": {
       const prey = res.hits[0]?.target ?? target;
-      pushFx({ ...base, kind: "streak", tx: prey.fx, ty: prey.fy, radius: 0.5, life: 260 });
-      pushFx({ ...base, kind: "ring", fx: prey.fx, fy: prey.fy, radius: 0.9, life: 320 });
+      pushFx({ ...base, kind: "streak", tx: prey.fx, ty: prey.fy, radius: 0.5, life: 260, art: { atlas: "defense", cell: 2, scale: 1.15, rotate: true } });
+      pushFx({ ...base, kind: "ring", fx: prey.fx, fy: prey.fy, radius: 0.9, life: 320, art: { atlas: "magic", cell: 5, scale: 1.05 } });
       break;
     }
     case "pierce": {
@@ -897,10 +964,14 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
         ty: caster.fy + (dy / len) * 9,
         radius: 0.34,
         life: 320,
+        art: { atlas: "combat", cell: 1, scale: 1.15, rotate: true },
       });
       break;
     }
     case "ember": {
+      // 시전자 점화 → 전달선 → 대상 화염. 불꽃이 적에게서 갑자기 생기지 않는다.
+      pushFx({ ...base, kind: "spark", tx: caster.fx, ty: caster.fy, radius: 0.52, life: 260, art: { atlas: "magic", cell: 0, scale: 1.05 } });
+      pushFx({ ...base, kind: "beam", radius: 0.12, life: 300, color: "#FF865C", art: { atlas: "combat", cell: 7, anchor: "mid", scale: 0.72, rotate: true } });
       // 떠오르는 불티 여러 개
       for (let i = 0; i < 7; i++) {
         pushFx({
@@ -911,12 +982,13 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
           radius: 0.12 + Math.random() * 0.1,
           life: 620 + Math.random() * 320,
           color: "#D08A4A",
+          art: i === 0 ? { atlas: "magic", cell: 1, scale: 1.2 } : undefined,
         });
       }
       break;
     }
     case "frost_nova": {
-      pushFx({ ...base, kind: "ring", fx: target.fx, fy: target.fy, radius: 1.5, life: 460, color: "#8FB6D0" });
+      pushFx({ ...base, kind: "ring", fx: target.fx, fy: target.fy, radius: 1.5, life: 460, color: "#8FB6D0", art: { atlas: "magic", cell: 3, scale: 1.35 } });
       for (const h of res.hits) {
         pushFx({
           kind: "frost",
@@ -928,25 +1000,26 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
           angle: Math.random() * Math.PI,
           life: 900,
           color: "#A9CBDE",
+          art: { atlas: "magic", cell: 2, scale: 0.88 },
         });
       }
       break;
     }
     case "guard": {
       // 시전자에게서 시작한 방패 문양이 실제 보호막 대상의 status Fx로 이어진다.
-      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 1.45, life: 420 });
-      pushFx({ ...base, kind: "impact", impact: "block", tx: caster.fx, ty: caster.fy, radius: 0.78, life: 320 });
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 1.45, life: 420, art: { atlas: "magic", cell: 11, scale: 1.25 } });
+      pushFx({ ...base, kind: "impact", impact: "block", tx: caster.fx, ty: caster.fy, radius: 0.78, life: 320, art: { atlas: "defense", cell: 8, scale: 1.15 } });
       break;
     }
     case "gouge": {
       // 짧은 찌르기 한 줄과 대상의 단일 참격. 광역 스킬과 실루엣이 겹치지 않는다.
-      pushFx({ ...base, kind: "streak", radius: 0.34, life: 220 });
-      pushFx({ ...base, kind: "slash", fx: target.fx, fy: target.fy, radius: 0.72, angle: Math.PI * 0.15, life: 240 });
+      pushFx({ ...base, kind: "streak", radius: 0.34, life: 220, art: { atlas: "combat", cell: 1, scale: 0.9, rotate: true } });
+      pushFx({ ...base, kind: "slash", fx: target.fx, fy: target.fy, radius: 0.72, angle: Math.PI * 0.15, life: 240, art: { atlas: "combat", cell: 0, scale: 0.92 } });
       break;
     }
     case "volley": {
       // 부채 시작점 하나 뒤 실제 피격 대상까지만 가는 얇은 방향선. 최대 넷이다.
-      pushFx({ ...base, kind: "slash", tx: caster.fx, ty: caster.fy, radius: 0.72, angle: -0.7, life: 260 });
+      pushFx({ ...base, kind: "slash", tx: caster.fx, ty: caster.fy, radius: 0.72, angle: -0.7, life: 260, art: { atlas: "combat", cell: 4, scale: 0.9 } });
       for (const hit of res.hits) {
         pushFx({
           ...base,
@@ -955,13 +1028,14 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
           ty: hit.target.fy,
           radius: 0.07,
           life: 220,
+          art: { atlas: "combat", cell: 4, anchor: "mid", scale: 0.58, rotate: true },
         });
       }
       break;
     }
     case "mend": {
       // 시전자와 실제 회복 대상을 잇고, 도착점의 회복 고리는 결과 적용 루프가 맡는다.
-      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.62, life: 300, color: "#8FD9A8" });
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.62, life: 300, color: "#8FD9A8", art: { atlas: "magic", cell: 10, scale: 0.9 } });
       for (const heal of res.heals) {
         pushFx({
           ...base,
@@ -976,14 +1050,14 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
       break;
     }
     case "swarm": {
-      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.82, life: 360 });
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.82, life: 360, art: { atlas: "magic", cell: 12, scale: 1.15 } });
       for (const sm of born) {
-        pushFx({ ...base, kind: "streak", tx: sm.fx, ty: sm.fy, radius: 0.18, life: 300 });
+        pushFx({ ...base, kind: "streak", tx: sm.fx, ty: sm.fy, radius: 0.18, life: 300, art: { atlas: "magic", cell: 13, anchor: "target", scale: 0.82 } });
       }
       break;
     }
     case "bulwark": {
-      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 1.08, life: 440 });
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 1.08, life: 440, art: { atlas: "magic", cell: 11, scale: 1.2 } });
       pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.62, life: 300 });
       for (const sm of born) {
         pushFx({ ...base, kind: "beam", tx: sm.fx, ty: sm.fy, radius: 0.14, life: 340 });
@@ -991,7 +1065,7 @@ function spawnSkillFx(caster: Cat, target: Cat, res: SkillResult, born: readonly
       break;
     }
     case "lure": {
-      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.58, life: 300 });
+      pushFx({ ...base, kind: "ring", tx: caster.fx, ty: caster.fy, radius: 0.58, life: 300, art: { atlas: "magic", cell: 14, scale: 1.05 } });
       for (const sm of born) {
         pushFx({ ...base, kind: "slash", fx: sm.fx, fy: sm.fy, radius: 0.82, angle: Math.PI * 0.75, life: 360 });
       }
@@ -1014,7 +1088,28 @@ function attack(attacker: Cat, target: Cat): void {
   attacker.mana = Math.min(MANA_MAX, attacker.mana + attacker.breed.manaPerAttack);
 
   const missed = rng() < target.evade;
-  if (attacker.breed.kind === "ranged") {
+  if (attacker.breed.kind === "melee") {
+    // 검·발톱은 피격점이 아니라 공격자에서 시작한다. 대상에는 아래 damage가
+    // 별도의 impact를 남겨 출발과 도착의 인과가 한 컷에 분리된다.
+    pushFx({
+      kind: "slash",
+      fx: attacker.fx,
+      fy: attacker.fy,
+      tx: target.fx,
+      ty: target.fy,
+      radius: 0.78,
+      angle: Math.atan2(target.fy - attacker.fy, target.fx - attacker.fx),
+      life: 320,
+      color: CLASS_FX[attacker.breed.cls],
+      art: {
+        atlas: "combat",
+        cell: attacker.breed.cls === "rogue" ? 2 : attacker.breed.cls === "warrior" ? 0 : 1,
+        anchor: "source",
+        scale: 1.1,
+        rotate: true,
+      },
+    });
+  } else {
     if (shots.length >= SHOT_CAP) shots.shift();
     shots.push({
       fromX: attacker.fx,
@@ -1334,7 +1429,25 @@ function startDash(
   c.poseTimer = 0;
   // 출발 자리에 잔상을 남긴다. 어디서 어디로 갔는지가 한 컷에 읽힌다.
   if (color) {
-    pushFx({ kind: "spark", fx: c.fx, fy: c.fy, tx: 0, ty: 0, radius: 0.5, angle: 0, life: 260, color });
+    const gathering = color === "#6E97C4";
+    pushFx({
+      kind: "spark",
+      fx: c.fx,
+      fy: c.fy,
+      tx,
+      ty,
+      radius: 0.5,
+      angle: Math.atan2(ty - c.fy, tx - c.fx),
+      life: 300,
+      color,
+      art: {
+        atlas: "defense",
+        cell: gathering ? 7 : ty >= c.fy ? 0 : 1,
+        anchor: "source",
+        scale: gathering ? 0.85 : 1.05,
+        rotate: !gathering,
+      },
+    });
   }
 }
 

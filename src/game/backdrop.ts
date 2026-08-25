@@ -1,4 +1,5 @@
 import { BoundedLru } from "./lru.ts";
+import { drawGeneratedBackground } from "./generated-art.ts";
 
 /**
  * 픽셀 배경 씬.
@@ -605,5 +606,9 @@ export function drawScene(ctx: CanvasRenderingContext2D, w: number, h: number, s
   const prev = ctx.imageSmoothingEnabled;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(hit.canvas, 0, 0, w, h);
+  // 기본 무대는 생성한 달빛 다방을 완성 배경으로 쓴다. 절차 숲과 반씩 섞었더니
+  // 달이 두 개 겹치고 밝은 원반이 HUD를 덮었다. 보스 무대도 생성 배경을 주인공으로
+  // 두고 절차 색조만 18% 남겨 무대 정체성을 보존한다.
+  drawGeneratedBackground(ctx, w, h, scene === "forest" ? 1 : 0.82);
   ctx.imageSmoothingEnabled = prev;
 }

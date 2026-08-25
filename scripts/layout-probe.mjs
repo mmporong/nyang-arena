@@ -41,6 +41,7 @@ import {
   raidContractChipGeometry,
   raidContractTitleText,
   raidContractUsesViewportFooter,
+  classRowFontSize,
   splitButton,
   splitButtonChoice,
 } from "../src/game/render.ts";
@@ -57,6 +58,7 @@ const DEVICES = [
   ["Galaxy S20 세로", 360, 680],
   ["iPad 세로", 768, 1024],
   ["데스크톱", 1440, 800],
+  ["제출 화면", 1488, 832],
   ["데스크톱 와이드", 1920, 1080],
   ["사용자 캡처", 1901, 891],
   ["극단 세로", 320, 900],
@@ -179,6 +181,30 @@ for (const [name, w, h] of DEVICES) {
       `${String(Math.round(L.mute.w)).padStart(5)}  ` +
       `${(L.columns ? "세로줄" : L.stacked ? "쌓음" : "눕힘").padEnd(6)}` +
       (ok ? "OK" : "실패"),
+  );
+}
+
+// 사용자가 제출 화면에서 지적한 세 열의 축·거터와 직업명 크기를 숫자로 잠근다.
+// CSS/Canvas를 눈대중으로 옮겨도 이 계약이 깨지면 probe가 바로 실패한다.
+{
+  const L = computeLayout(1488, 832, true);
+  // 왼쪽 콘텐츠는 패널 안쪽 15px inset을 포함해 중앙 열까지 35px,
+  // 중앙 열과 오른쪽 패널 사이는 순수 20px 거터다.
+  const leftToBoard = L.button.x - (L.offers.x + L.offers.w);
+  const boardToShop = L.offersPanel.x - (L.button.x + L.button.w);
+  const actionAligned = Math.abs(
+    L.button.x + L.button.w / 2 - (L.enemyBoard.x + L.enemyBoard.w / 2),
+  ) < 0.01;
+  const classFont = classRowFontSize(L.offers.h / 6);
+  const contractOk = L.columns
+    && leftToBoard >= 35 - 0.01
+    && boardToShop >= 20 - 0.01
+    && actionAligned
+    && classFont >= 15;
+  if (!contractOk) failed++;
+  console.log(
+    `제출 1488×832 계약 · 좌/중 ${leftToBoard.toFixed(1)}px · 중/우 ${boardToShop.toFixed(1)}px · ` +
+      `행동축 ${actionAligned ? "일치" : "불일치"} · 직업 ${classFont.toFixed(1)}px ${contractOk ? "OK" : "실패"}`,
   );
 }
 

@@ -157,9 +157,17 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
    * 둘 중 하나라도 못 지키면 접는다 — 폰 가로(667×375)가 여기 걸린다.
    */
   const COL_MIN_W = 168;
-  const colW = Math.round(Math.min(340, Math.max(COL_MIN_W, w * 0.26)));
-  const colGap = Math.round(pad * 1.2);
-  const columns = !portrait && colW >= COL_MIN_W && w - (pad + colW + colGap) * 2 >= 320;
+  const stageW = Math.min(w - pad * 2, 1320);
+  const stageX = Math.round((w - stageW) / 2);
+  // 세 열을 같은 폭으로 억지로 맞추지 않는다. 상점은 설명 두 줄을 품어야 하고,
+  // 왼쪽 목표판은 짧은 수치 위주다. 대신 위·아래 축과 거터를 정확히 맞춘다.
+  const colGap = Math.max(uiSpace(scale, 4), Math.round(pad * 0.65));
+  const leftColW = Math.round(Math.min(360, Math.max(COL_MIN_W, stageW * 0.28)));
+  const rightColW = Math.round(Math.min(400, Math.max(COL_MIN_W, stageW * 0.31)));
+  const centerColW = stageW - leftColW - rightColW - colGap * 2;
+  const columns = !portrait && centerColW >= 300;
+  // 접힌 경로의 기존 계산은 한 열 폭만 참조한다.
+  const colW = leftColW;
 
   let button: Rect = {
     x: portrait || !columns ? pad : pad + colW + colGap,
@@ -178,7 +186,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
   let notice: Rect = { x: pad, y: hud.y + hud.h, w: w - pad * 2 - noticeInset, h: noticeH };
 
   // 보드 위 진영 라벨("우리 편"/"상대")이 안내 문구와 겹치지 않도록 자리를 뗀다.
-  const labelH = Math.round(Math.max(h < 360 ? 6 : tight ? 9 : 14, Math.min(w, h) * 0.032));
+  const labelH = Math.round(Math.max(h < 360 ? 12 : tight ? 16 : 20, Math.min(w, h) * 0.04));
 
   const cardGap = Math.max(8, Math.round(Math.min(w, h) * 0.016));
   const fieldTop = notice.y + notice.h + labelH;
@@ -203,7 +211,8 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
     const colTop = fieldTop;
     const colBottom = bottomY - actionGap;
     const colH = Math.max(120, colBottom - colTop);
-    const rightX = w - pad - colW;
+    const rightX = stageX + leftColW + colGap + centerColW + colGap;
+    const panelInset = uiSpace(scale, 3);
 
     /**
      * 직업 카운터 다섯 줄. 목표 칩은 그 아래.
@@ -214,7 +223,7 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
      */
     const stripH = Math.round(Math.min(colH * 0.3, Math.max(110, colW * 0.62)));
     const stripGap = uiSpace(scale, 3);
-    offers = { x: pad, y: colTop, w: colW, h: stripH };
+    offers = { x: stageX + panelInset, y: colTop + panelInset, w: leftColW - panelInset * 2, h: stripH };
 
     /**
      * 목표 칩은 **필요한 만큼만** 차지한다. 남는 높이는 비운다.
@@ -227,30 +236,42 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
     const chipGap = Math.max(uiSpace(scale, 2), colW * 0.04);
     const chipH = Math.max(
       52,
-      Math.min(colW * 0.23, (barAvail - chipGap * (SYNERGY_SLOTS - 1)) / SYNERGY_SLOTS),
+      Math.min(leftColW * 0.23, (barAvail - chipGap * (SYNERGY_SLOTS - 1)) / SYNERGY_SLOTS),
     );
     const barH2 = Math.min(barAvail, chipH * SYNERGY_SLOTS + chipGap * (SYNERGY_SLOTS - 1));
-    synergyBar = { x: pad, y: colTop + stripH + stripGap, w: colW, h: barH2 };
+    synergyBar = {
+      x: stageX + panelInset,
+      y: colTop + panelInset + stripH + stripGap,
+      w: leftColW - panelInset * 2,
+      h: barH2,
+    };
 
     // 오른쪽 줄 위쪽은 머리줄(안내 한 줄 + 다시 뽑기) 몫으로 뗀다.
     const head = Math.round(Math.max(34, Math.min(48, colH * 0.1)));
-    const cardTop = colTop + head;
+    const cardTop = colTop + panelInset + head;
     // 극저높이 세로줄도 카드 세 장의 44px 터치 높이와 8px 간격은 지킨다.
-    // 중앙 행동 버튼과 x축이 겹치지 않으므로 옆줄은 버튼 위끝까지 사용할 수 있다.
+    // 중앙 행동 버튼과 x축이 겹치지 않으므로 부족한 몇 px은 옆줄의 화면 바닥
+    // 여백까지 쓸 수 있다. 카드 높이를 43px로 깎아 터치 계약을 깨지 않는다.
     const minimumCardsH = 44 * OFFER_SLOTS + cardGap * (OFFER_SLOTS - 1);
-    const cardsH = Math.min(bottomY - cardTop, Math.max(colH - head, minimumCardsH));
-    offerCards = { x: rightX, y: cardTop, w: colW, h: cardsH };
+    const availableCardsH = colBottom - panelInset - cardTop;
+    const cardsH = Math.min(h - pad - cardTop, Math.max(availableCardsH, minimumCardsH));
+    offerCards = {
+      x: rightX + panelInset,
+      y: cardTop,
+      w: rightColW - panelInset * 2,
+      h: cardsH,
+    };
     offersPanel = {
-      x: rightX - pad * 0.5,
-      y: colTop - pad * 0.4,
-      w: colW + pad,
-      h: Math.max(colH + pad * 0.8, cardTop + cardsH - (colTop - pad * 0.4) + pad * 0.4),
+      x: rightX,
+      y: colTop,
+      w: rightColW,
+      h: Math.max(colH, cardTop + cardsH - colTop + panelInset),
     };
     // 카드가 판을 덮지 않는다. 보상 단계가 모달이 될 일이 없다.
     roomy = true;
     fieldBottom = colBottom;
-    fieldLeft = pad + colW + colGap;
-    fieldW = w - fieldLeft * 2;
+    fieldLeft = stageX + leftColW + colGap;
+    fieldW = centerColW;
   } else {
     /**
      * 접힌 구성(세로 화면·폰 가로). 정보가 판 아래에 띠로 쌓인다.
@@ -308,6 +329,14 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
     fieldW = w - pad * 2;
   }
 
+  if (columns) {
+    const stageR = stageX + stageW;
+    hud = { x: stageX, y: hud.y, w: stageW - muteS - muteGap, h: hud.h };
+    mute = { ...mute, x: stageR - muteS };
+    notice = { x: stageX, y: notice.y, w: stageW - noticeInset, h: notice.h };
+    button = { x: fieldLeft, y: button.y, w: centerColW, h: button.h };
+  }
+
   const fieldH = Math.max(80, fieldBottom - fieldTop);
   /** 두 보드 사이 간격. 셀 사이 간격보다 훨씬 커야 진영이 구분된다. */
   const midGap = Math.round(Math.min(w, h) * (Math.min(w, h) < 420 ? 0.05 : 0.09));
@@ -360,35 +389,6 @@ export function computeLayout(w: number, h: number, shop = true): Layout {
      *
      * 화면 밖으로는 안 나간다. 판이 넓은 화면에서는 원래 자리(`pad`)로 되돌아온다.
      */
-    if (columns) {
-      const hug = Math.round(colGap * 1.1);
-      const leftX = Math.max(pad, Math.round(cx - hug - colW));
-      const rightX2 = Math.min(w - pad - colW, Math.round(cx + bw + hug));
-      offers = { ...offers, x: leftX };
-      synergyBar = { ...synergyBar, x: leftX };
-      offerCards = { ...offerCards, x: rightX2 };
-      offersPanel = { ...offersPanel, x: rightX2 - pad * 0.5 };
-
-      /**
-       * **한 판(plate).** 행동하는 모든 것을 잰 사각형 하나 안에 넣는다.
-       *
-       * 문제는 화면에 기준선이 둘이었다는 것이다 — HUD는 화면 가장자리에,
-       * 나머지는 판에 붙어 있었다. 1669px 화면에서 그 둘이 320px씩 벌어져
-       * 눈이 두 번 움직였고, 바깥 여백이 화면에서 가장 넓은 물건이 됐다.
-       *
-       * 세로줄 왼쪽 끝부터 오른쪽 끝까지를 하나의 판으로 보고 HUD·안내·버튼을
-       * 전부 그 폭에 맞춘다. 판 안이 아레나이고 밖은 골목 풍경이다 —
-       * 배경이 남는 게 아니라 **바깥에 있는 것**이 된다.
-       */
-      const stageX = leftX;
-      const stageR = rightX2 + colW;
-      hud = { x: stageX, y: hud.y, w: stageR - stageX - muteS - muteGap, h: hud.h };
-      mute = { ...mute, x: stageR - muteS };
-      notice = { x: stageX, y: notice.y, w: stageR - stageX - noticeInset, h: notice.h };
-      // 주 행동 버튼은 판 가운데 — 두 세로줄 사이, 곧 보드 폭에 맞춘다.
-      const btnX = leftX + colW + colGap;
-      button = { x: btnX, y: button.y, w: rightX2 - colGap - btnX, h: button.h };
-    }
   } else {
     const cy = fieldTop + fieldH / 2 - bh / 2;
     const mid = fieldLeft + fieldW / 2;

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 
 import { bossForIndex, bossKit, raidRiskPower } from "../src/game/bosses.ts";
 import { BALANCE } from "../src/game/balance.ts";
+import { breedById } from "../src/game/breeds.ts";
 import { openLanes } from "../src/game/map.ts";
 import { stepBattle } from "../src/game/battle.ts";
 import {
@@ -14,6 +15,7 @@ import {
   finishWave,
   leaveShop,
   mapStep,
+  makeCat,
   newRun,
   raidBossPower,
   raidPrepMatched,
@@ -36,6 +38,10 @@ import {
   shopStep,
   walkMap,
 } from "./bot-policy.mjs";
+
+function seedTestCat(state, cell = 12) {
+  state.ally[cell] = makeCat(breedById(1), "ally", cell);
+}
 
 function chooseBattleNode(state) {
   const step = mapStep(state);
@@ -106,6 +112,7 @@ assert.notEqual(firstMapIdx, undefined);
 assert.equal(chooseNode(first, firstMapIdx), false, "계약 선택 전 지도 입력이 새면 안 된다");
 
 assert.equal(chooseRaidContract(first, 0), true);
+seedTestCat(first);
 const picked = first.raidContract;
 assert(picked, "선택한 계약이 상태에 남아야 한다");
 assert.equal(first.raidOffers.length, 0);
@@ -136,6 +143,7 @@ assert.throws(
 
 function reachHighRiskBoss(prepRoute) {
   const state = newRun(7007);
+  seedTestCat(state);
   assert.equal(chooseSharedRaidContract(state, "spreading_dark"), true);
   const step = mapStep(state);
   const row = state.map.steps[step] ?? [];

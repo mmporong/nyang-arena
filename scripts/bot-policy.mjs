@@ -265,18 +265,35 @@ export const RAID_CONTRACT_POLICIES = {
    */
   "팀 읽고 고름": (offers, state) => {
     const cats = livingCats(state.ally);
+    // 첫 계약에는 아직 읽을 로스터가 없다. 이때 gather/spread 적합도를 억지로
+    // 계산하면 0 대 0 동률이 근접 팀으로 취급되어 위험 1을 임의 선택한다.
+    // 시작 생선으로 감당 가능한 위험 2 중 보상이 큰 계약을 고른다.
+    if (cats.length === 0) {
+      let best = -1;
+      for (let i = 0; i < offers.length; i++) {
+        if (offers[i].risk > 2) continue;
+        if (
+          best < 0 ||
+          offers[i].risk > offers[best].risk ||
+          (offers[i].risk === offers[best].risk && offers[i].rewardFish > offers[best].rewardFish)
+        ) best = i;
+      }
+      if (best >= 0) return best;
+    }
     const melee = cats.filter((cat) => cat.breed.kind === "melee").length;
     const ranged = cats.length - melee;
     const strength = cats.reduce((sum, cat) => sum + cat.level, 0) + state.relics.length * 1.5;
-    // 시작 3마리면 위험 1, 팀이 자라고 유물이 붙을수록 2·3을 감당한다.
-    const affordableRisk = strength >= 13 ? 3 : strength >= 7 ? 2 : 1;
+    // 빈 팀에서도 시작 생선으로 첫 영입이 보장되므로 첫 계약은 위험 2까지
+    // 감당한다. 이후에는 실제 로스터·레벨·유물만 보고 1→2→3을 올린다.
+    const affordableRisk = cats.length === 0 ? 2 : strength >= 13 ? 3 : strength >= 7 ? 2 : 1;
     const score = (contract) => {
       const patterns = [...contract.patterns, ...(contract.phase2Patterns ?? [])];
       const gatherish = patterns.filter((p) => p === "gather" || p === "hearth" || p === "seize").length;
       const spreadish = patterns.filter((p) => p === "stomp" || p === "quake" || p === "sweep" || p === "circle").length;
       const rosterFit = melee >= ranged ? gatherish : spreadish;
       const overreach = Math.max(0, contract.risk - affordableRisk);
-      return rosterFit * 3 - overreach * 20 + contract.rewardFish * 0.25 - contract.risk * 0.4;
+      const underreach = Math.max(0, affordableRisk - contract.risk);
+      return rosterFit * 3 - overreach * 20 - underreach * 2 + contract.rewardFish * 0.25 - contract.risk * 0.4;
     };
     let best = 0;
     for (let i = 1; i < offers.length; i++) if (score(offers[i]) > score(offers[best])) best = i;

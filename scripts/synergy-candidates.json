@@ -1,45 +1,5 @@
 [
   {
-    "id": "night_pack",
-    "name": "야행성",
-    "desc": "같은 색 셋이 어둠 속에서 발톱을 세운다",
-    "trigger": "same_color_3",
-    "effect": {
-      "key": "atk_mul",
-      "value": 1.35
-    }
-  },
-  {
-    "id": "shadow_veil",
-    "name": "그림자막",
-    "desc": "같은 털빛이 겹쳐 윤곽이 흐려진다",
-    "trigger": "same_color_3",
-    "effect": {
-      "key": "evade_add",
-      "value": 0.16
-    }
-  },
-  {
-    "id": "clan_pride",
-    "name": "한핏줄",
-    "desc": "같은 색 셋이 서로를 지키며 버틴다",
-    "trigger": "same_color_3",
-    "effect": {
-      "key": "hp_mul",
-      "value": 1.28
-    }
-  },
-  {
-    "id": "same_hue_rush",
-    "name": "동색 돌격",
-    "desc": "같은 색끼리 박자를 맞춰 달려든다",
-    "trigger": "same_color_3",
-    "effect": {
-      "key": "atkspd_mul",
-      "value": 1.25
-    }
-  },
-  {
     "id": "litter_bond",
     "name": "한배 형제",
     "desc": "같은 품종 둘이 서로 등을 맡긴다",
@@ -177,6 +137,66 @@
     "effect": {
       "key": "atkspd_mul",
       "value": 1.32
+    }
+  },
+  {
+    "id": "arcane_heist",
+    "name": "비전 강탈단",
+    "desc": "마법사 셋의 주문을 도적 셋이 적진에 꽂는다",
+    "trigger": "mage_3_rogue_3",
+    "effect": {
+      "key": "atk_mul",
+      "value": 1.48
+    }
+  },
+  {
+    "id": "phantom_circuit",
+    "name": "환영 회로",
+    "desc": "도적의 발놀림이 마법사의 주문을 연쇄시킨다",
+    "trigger": "mage_3_rogue_3",
+    "effect": {
+      "key": "atkspd_mul",
+      "value": 1.42
+    }
+  },
+  {
+    "id": "starfront",
+    "name": "철별 전선",
+    "desc": "전사 셋이 세운 전선 뒤로 궁수 셋이 쏜다",
+    "trigger": "warrior_3_archer_3",
+    "effect": {
+      "key": "hp_mul",
+      "value": 1.5
+    }
+  },
+  {
+    "id": "crossfire_oath",
+    "name": "십자 포화",
+    "desc": "전사 셋의 봉쇄가 궁수 셋의 화망을 완성한다",
+    "trigger": "warrior_3_archer_3",
+    "effect": {
+      "key": "atk_mul",
+      "value": 1.46
+    }
+  },
+  {
+    "id": "dream_choir",
+    "name": "꿈의 합창",
+    "desc": "소환사 셋의 메아리에 마법사 셋이 주문을 얹는다",
+    "trigger": "summoner_3_mage_3",
+    "effect": {
+      "key": "evade_add",
+      "value": 0.24
+    }
+  },
+  {
+    "id": "astral_pride",
+    "name": "별무리 의식",
+    "desc": "소환수의 별빛이 마법 진을 단단하게 묶는다",
+    "trigger": "summoner_3_mage_3",
+    "effect": {
+      "key": "hp_mul",
+      "value": 1.48
     }
   }
 ]

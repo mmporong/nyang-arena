@@ -15,10 +15,12 @@ import {
   finishWave,
   leaveShop,
   mapStep,
+  makeCat,
   newRun,
   scoutDodgeReward,
   startBattle,
 } from "../src/game/run.ts";
+import { breedById } from "../src/game/breeds.ts";
 import { openLanes } from "../src/game/map.ts";
 import { raidContractById, raidPrepRoute } from "../src/game/raid.ts";
 import { ARRANGERS, BUY_POLICIES, makeBossBot, shopStep } from "./bot-policy.mjs";
@@ -49,6 +51,9 @@ function exercisePrep(seed, contract) {
   if (!chooseNode(state, idx)) throw new Error(`준비 경로 진입 실패: ${contract.id}`);
   let won = true;
   if (state.phase === "reward") {
+    // 보상 전달만 격리하는 단위 픽스처도 첫 고양이를 영입해야 전투로 나간다.
+    // 실제 구매 정책의 차이는 아래 fightFirstBoss 표본에서 별도로 측정한다.
+    if (route !== "shop") state.ally[0] = makeCat(breedById(1), "ally", 0);
     leaveShop(state);
     // 전투 승패 난수만 제거하고 실제 국면 전이는 생략하지 않는다. 준비에서
     // 전투로 못 넘어가는 회귀도 이 관문이 잡아야 하므로 startBattle을 반드시

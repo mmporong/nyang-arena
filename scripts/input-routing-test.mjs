@@ -51,6 +51,11 @@ const idleDrag = () => ({
 const center = (rect) => ({ x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 });
 const actionOf = (outcome) => outcome.action;
 const ctx = (state, layout, drag = idleDrag(), phaseLocked = false) => ({ state, layout, drag, phaseLocked });
+const seedTestCat = (state, cell = 12) => {
+  const cat = makeCat(breedById(1), "ally", cell);
+  state.ally[cell] = cat;
+  return cat;
+};
 
 assert.equal(normalizeRaidContractFocusIndex(0), 0, "첫 계약 focus가 사라졌다");
 assert.equal(normalizeRaidContractFocusIndex(2), 2, "셋째 계약 focus가 사라졌다");
@@ -145,6 +150,7 @@ function pointerDown(state, layout, rect, drag = idleDrag(), phaseLocked = false
 
 const desktop = computeLayout(1280, 800, true);
 const state = newRun(424242);
+seedTestCat(state);
 
 const failureVisual = offerPurchaseFeedbackDescriptor(desktop, 1, "insufficient-fish", 40, false);
 assert.ok(failureVisual, "생선 부족 카드의 국소 실패 descriptor가 사라졌다");
@@ -357,6 +363,7 @@ for (const fixture of parityFixtures) {
 // 버튼의 pulse는 쿨다운 동안 꺼져도 입력은 큐에 남아야 한다. 포인터와 Space가
 // 같은 intent를 만들고 battle.ts가 잠금 해제 때까지 버리지 않는 기존 계약이다.
 const queuedBattle = newRun(192003);
+seedTestCat(queuedBattle);
 queuedBattle.phase = "battle";
 queuedBattle.dodgeCharges = 2;
 queuedBattle.actCooldown = 500;
@@ -526,6 +533,7 @@ assert.deepEqual(actionOf(mutedPointer), actionOf(mutedKey), "잠금 중 mute의
 
 // 의미 DOM도 좌표 입력과 같은 dispatcher를 지나며 stale phase와 phase lock을 우회하지 않는다.
 const directState = newRun(707070);
+seedTestCat(directState);
 const directRaid = identifyGameInputAction(directState, { kind: "raid-contract", index: 1 });
 assert.equal(gameInputActionAvailable(directState, directRaid), true, "현재 계약 DOM action이 유효하지 않다");
 assert.equal(
@@ -654,6 +662,7 @@ assert.equal(executeRunAction(state, { kind: "offer", index: 2 }).offer, 2);
 // 일반 전투의 Space/G repeat는 늦은 예고를 놓치지 않게 유지한다. 취약 창의
 // 결정타만은 한 번 길게 누른 입력이 두 차지를 모두 쓰지 않도록 별도로 막는다.
 const battleState = newRun(222222);
+seedTestCat(battleState);
 battleState.phase = "battle";
 battleState.dodgeCharges = 2;
 const battleStarter = battleState.ally.find((cat) => cat !== null);
@@ -688,6 +697,7 @@ assert.equal(repeatedSpace.action.kind, "intent", "반복 Space가 전투 의도
 assert.equal(repeatedGather.action.kind, "intent", "반복 G가 전투 의도에 연결되지 않았다");
 
 const vulnerableState = newRun(232323);
+seedTestCat(vulnerableState);
 vulnerableState.phase = "battle";
 vulnerableState.dodgeCharges = 2;
 const starter = vulnerableState.ally.find((cat) => cat !== null);

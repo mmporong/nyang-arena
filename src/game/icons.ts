@@ -1,3 +1,5 @@
+import { drawGeneratedAtlasCell } from "./generated-art.ts";
+
 /**
  * 아이콘.
  *
@@ -456,7 +458,9 @@ export function drawFish(
   color: string,
 ): void {
   ctx.save();
-  drawFishPath(ctx, cx, cy, size, color);
+  if (!drawGeneratedAtlasCell(ctx, 0, cx, cy, size * 1.32)) {
+    drawFishPath(ctx, cx, cy, size, color);
+  }
   ctx.restore();
 }
 
@@ -591,7 +595,7 @@ function drawPaw(
   drawPawClaw(ctx, cx, cy, u, 6, -2.2, 2);
 }
 
-/** 생선뼈 — 숨 돌리기. 아무것도 안 오는 자리라는 뜻이다. */
+/** 생선뼈 — 정찰 보급. 전투 없이 자원을 얻는 자리라는 뜻이다. */
 function drawBone(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -675,6 +679,8 @@ export function drawNodeIcon(
   size: number,
   color: string,
 ): void {
+  const generatedCell = kind === "battle" ? 1 : kind === "elite" ? 10 : kind === "shop" ? 0 : 14;
+  if (drawGeneratedAtlasCell(ctx, generatedCell, cx, cy, size * 1.12)) return;
   if (kind === "shop") drawBone(ctx, cx, cy, size, color);
   else if (kind === "boss") {
     drawPaw(ctx, cx, cy + size * 0.1, size * 0.82, color, true);

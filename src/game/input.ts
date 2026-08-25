@@ -12,7 +12,7 @@ import {
   splitButtonChoice,
   uiInteractionDescriptor,
 } from "./render.ts";
-import { mapStep, type NextChoice, type Offer, type RunState } from "./run.ts";
+import { canStartBattle, mapStep, type NextChoice, type Offer, type RunState } from "./run.ts";
 import type { Intervention } from "./types.ts";
 
 export interface InputDragState {
@@ -327,7 +327,11 @@ export function gameInputActionAvailable(state: RunState, action: GameInputActio
     case "mute":
       return true;
     case "primary":
-      return state.phase !== "map" && state.phase !== "battle";
+      if (state.phase === "reward") {
+        return state.relicDraftActive || state.nodeKind === "shop" || canStartBattle(state);
+      }
+      if (state.phase === "prepare") return canStartBattle(state);
+      return state.phase === "gameover";
     case "intent": {
       if (state.phase !== "battle") return false;
       const dual = dualChoiceActive(state);

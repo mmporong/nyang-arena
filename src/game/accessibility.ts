@@ -11,6 +11,7 @@ import { identifyGameInputAction, type GameInputAction } from "./input.ts";
 import { nodeInfo, openLanes } from "./map.ts";
 import { raidRiskLabel } from "./raid.ts";
 import {
+  canStartBattle,
   mapStep,
   REROLL_COST,
   type Offer,
@@ -185,9 +186,15 @@ function rewardControls(state: RunState): AccessibilityControl[] {
   });
   controls.push(control(
     "reward:primary",
-    state.relicDraftActive ? "유물 건너뛰기" : state.nodeKind === "shop" ? "길 고르기" : "전투 시작",
+    state.relicDraftActive
+      ? "유물 건너뛰기"
+      : state.nodeKind === "shop"
+        ? "길 고르기"
+        : canStartBattle(state)
+          ? "전투 시작"
+          : "고양이를 먼저 데려오세요",
     { kind: "primary" },
-    false,
+    !state.relicDraftActive && state.nodeKind !== "shop" && !canStartBattle(state),
     "Enter",
   ));
   return controls;
@@ -235,7 +242,13 @@ function phaseControls(state: RunState): AccessibilityControl[] {
     case "reward":
       return rewardControls(state);
     case "prepare":
-      return [control("prepare:primary", "전투 시작", { kind: "primary" }, false, "Enter")];
+      return [control(
+        "prepare:primary",
+        canStartBattle(state) ? "전투 시작" : "고양이를 먼저 데려오세요",
+        { kind: "primary" },
+        !canStartBattle(state),
+        "Enter",
+      )];
     case "battle":
       return battleControls(state);
     case "gameover":

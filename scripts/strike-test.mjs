@@ -24,7 +24,10 @@ function bossFight(seed = 1, open = true) {
   let bossStep = 0;
   for (let i = 0; i < STAGE_STEPS; i += 1) if (isBossStep(i)) { bossStep = i; break; }
   state.step = bossStep; state.wave = bossStep + 1;
-  walkMap(state); state.raidContract = null; state.raidTargetBossIndex = -1; leaveShop(state);
+  walkMap(state); state.raidContract = null; state.raidTargetBossIndex = -1;
+  // 전투 단위 픽스처도 빈 팀으로 상점을 이탈할 수 없다는 첫 영입 계약을 지킨다.
+  state.ally[0] = makeCat(breedById(1), "ally", 0);
+  leaveShop(state);
   if (currentKind(state) !== "boss") throw new Error("보스 걸음을 만들지 못했다");
   state.ally = emptyBoard();
   [10, 11, 12, 16, 6].forEach((cell, i) => { state.ally[cell] = makeCat(breedById((i % 8) + 1), "ally", cell); });

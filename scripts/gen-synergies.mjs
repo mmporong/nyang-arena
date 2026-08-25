@@ -39,7 +39,8 @@ ${EFFECT_KEYS.map((k) => `  - ${k}: ${EFFECT_RANGE[k][0]} ~ ${EFFECT_RANGE[k][1]
   "effect": { "key": "...", "value": 숫자 } }
 
 규칙:
-- trigger마다 최소 3개씩, 총 24개를 만들어라.
+- trigger마다 최소 2개씩, 총 20개를 만들어라.
+- mage_3_rogue_3 같은 복합 trigger는 두 직업이 힘을 합치는 장면을 이름과 설명에 모두 드러내라.
 - id는 영문 소문자로 시작하고 중복되면 안 된다.
 - 이름과 설명은 고양이답고 짧게. 수치를 설명에 쓰지 마라.`;
 

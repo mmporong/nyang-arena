@@ -1,11 +1,9 @@
 /**
  * 시각 토큰과 텍스트 렌더링.
  *
- * 방향: "한밤의 고양이 다방 결투장".
- * 색은 캐릭터 시트 자체에서 가져왔다 — 시트 배경의 베이지(#F0E4D2)와 제목 띠의
- * 테라코타(#B85C38). UI가 아트와 같은 물건에서 나온 것처럼 보이게 하기 위해서다.
- * 이전 팔레트는 남보라 배경에 민트·핑크 네온이었는데, 둥글고 따뜻한 픽셀 고양이와
- * 붙여 놓으면 서로 다른 게임의 부품처럼 보였다.
+ * 방향: "달빛 아래 색이 번지는 악몽 다방".
+ * 인디고·플럼 공간 위에 코랄 조명, 시안 달빛, 크림 종이를 얹는다. 캐릭터의
+ * 따뜻함은 유지하되 거의 검은 갈색 면이 전체 화면을 먹지 않게 색상 층을 넓혔다.
  *
  * 생선(자원)만 찬 색인 것은 의도적이다. 온기 일색에서 딱 하나 온도를 깨서 자원이
  * 눈에 들어오게 했고, 마침 생선이라 문자 그대로도 맞다.
@@ -29,12 +27,12 @@ import type { CatColor } from "./types.ts";
  * 집합은 동심원, 취약은 채워진 고리). `drawTelegraphs`를 볼 것.
  */
 export const T = {
-  ink: "#17110E",
-  inkDeep: "#0E0A08",
-  floor: "#241A14",
-  floorEdge: "rgba(239,224,198,0.10)",
-  paper: "#EFE0C6",
-  paperDim: "#C9B896",
+  ink: "#120E2A",
+  inkDeep: "#09071C",
+  floor: "#211743",
+  floorEdge: "rgba(255,241,214,0.18)",
+  paper: "#FFF1D6",
+  paperDim: "#D7C4DE",
 
   // 신호 — 판 위에서 채도를 독점한다.
   danger: "#FF3F6E",
@@ -42,26 +40,26 @@ export const T = {
   vuln: "#FFE24A",
 
   // 진영 — 저채도. 신호가 뜨면 확실히 뒤로 물러나야 한다.
-  ally: "#F4E3C1",
-  enemy: "#9C4A3A",
+  ally: "#FFE3A3",
+  enemy: "#FF7B74",
   /** 보스 체력. 적 계열이되 한 단계 밝다 — 배너에만 뜨므로 판 위 신호와 공간이 갈린다. */
-  bossHp: "#C4584A",
+  bossHp: "#FF766D",
 
   // 화폐 — HUD와 상점에만. 판 위에는 안 나온다.
-  fish: "#7CC9E8",
-  gold: "#F0BA4A",
+  fish: "#65D9FF",
+  gold: "#FFD166",
   /** 마나. 생선색을 판 위에 올리면 뭉침 신호와 겹치므로 저채도 슬레이트로 뺐다. */
-  mana: "#6E8CA8",
+  mana: "#7898C8",
 
-  text: "#F3E8D6",
-  muted: "#9C8B76",
+  text: "#FFF7E8",
+  muted: "#B9A7C9",
   // 상태 표식은 정체성이지 신호가 아니다. 직업색 대역을 그대로 쓴다.
-  melee: "#C9A05C",
-  ranged: "#6E97C4",
+  melee: "#D7A860",
+  ranged: "#7FB7E8",
 
   /** 판 밖 유일한 고채도 주황. 버튼은 신호와 경쟁하지 않는다. */
-  action: "#F5A03C",
-  actionInk: "#2A1608",
+  action: "#FF8A4C",
+  actionInk: "#2B1027",
 } as const;
 
 /**
@@ -177,7 +175,7 @@ export interface UiTextOpts {
   outline?: boolean;
 }
 
-const STACK = `"Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif`;
+const STACK = `"Maplestory", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif`;
 
 /**
  * 타이포 규칙을 한 곳에서 강제한다.

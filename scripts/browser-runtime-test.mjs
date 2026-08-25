@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -8,6 +8,16 @@ import { basename, extname, join, resolve, sep } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..");
 const DIST = join(ROOT, "dist");
 const APP_BASE = "/nyang-arena";
+const INITIAL_VIEWPORT = {
+  width: Number.parseInt(process.env.NYANG_VIEWPORT_WIDTH ?? "1280", 10),
+  height: Number.parseInt(process.env.NYANG_VIEWPORT_HEIGHT ?? "800", 10),
+};
+if (
+  !Number.isFinite(INITIAL_VIEWPORT.width)
+  || !Number.isFinite(INITIAL_VIEWPORT.height)
+  || INITIAL_VIEWPORT.width < 320
+  || INITIAL_VIEWPORT.height < 240
+) throw new Error(`유효하지 않은 초기 viewport: ${INITIAL_VIEWPORT.width}x${INITIAL_VIEWPORT.height}`);
 const MIME = new Map([
   [".html", "text/html; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
@@ -351,6 +361,29 @@ async function main() {
 
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+    const visualCaptureDir = process.env.NYANG_VISUAL_CAPTURE_DIR
+      ? resolve(process.env.NYANG_VISUAL_CAPTURE_DIR)
+      : null;
+    const captureVisual = async (name) => {
+      if (!visualCaptureDir) return;
+      await mkdir(visualCaptureDir, { recursive: true });
+      await cdp.send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: INITIAL_VIEWPORT.width - 2,
+        y: INITIAL_VIEWPORT.height - 2,
+      }, sessionId);
+      await evaluate(cdp, sessionId, `(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        getSelection()?.removeAllRanges();
+        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      })()`);
+      const shot = await cdp.send(
+        "Page.captureScreenshot",
+        { format: "png", captureBeyondViewport: false, fromSurface: true },
+        sessionId,
+      );
+      await writeFile(join(visualCaptureDir, name), Buffer.from(shot.data, "base64"));
+    };
     const faults = {
       exceptions: [],
       consoleErrors: [],
@@ -417,8 +450,8 @@ async function main() {
       cdp.send("Accessibility.enable", {}, sessionId),
     ]);
     await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: 1280,
-      height: 800,
+      width: INITIAL_VIEWPORT.width,
+      height: INITIAL_VIEWPORT.height,
       deviceScaleFactor: 1,
       mobile: false,
       screenOrientation: { type: "landscapePrimary", angle: 90 },
@@ -468,9 +501,18 @@ async function main() {
       console.error("browser-runtime boot diagnostics", JSON.stringify({ requests, faults }, null, 2));
       throw error;
     }
-    assert(bootState.inner.width === 1280 && bootState.inner.height === 800, "초기 viewport가 1280x800이 아닙니다");
-    assert(bootState.css.width === 1280 && bootState.css.height === 800, "캔버스 CSS 크기가 viewport와 다릅니다");
-    assert(bootState.backing.width === 1280 && bootState.backing.height === 800, "캔버스 backing 크기가 DPR과 다릅니다");
+    assert(
+      bootState.inner.width === INITIAL_VIEWPORT.width && bootState.inner.height === INITIAL_VIEWPORT.height,
+      `초기 viewport가 ${INITIAL_VIEWPORT.width}x${INITIAL_VIEWPORT.height}가 아닙니다`,
+    );
+    assert(
+      bootState.css.width === INITIAL_VIEWPORT.width && bootState.css.height === INITIAL_VIEWPORT.height,
+      "캔버스 CSS 크기가 viewport와 다릅니다",
+    );
+    assert(
+      bootState.backing.width === INITIAL_VIEWPORT.width && bootState.backing.height === INITIAL_VIEWPORT.height,
+      "캔버스 backing 크기가 DPR과 다릅니다",
+    );
     assert(bootState.uniqueColors >= 4, `캔버스가 단색에 가깝습니다 (${bootState.uniqueColors}색)`);
     assert(bootState.phase === "map" && bootState.raidOffers === 3, "초기 계약 세 장이 열리지 않았습니다");
     assert(bootState.a11yButtons === 4, `접근성 계약 3개와 음소거 버튼이 준비되지 않았습니다 (${bootState.a11yButtons})`);
@@ -481,6 +523,19 @@ async function main() {
     assert(happyAtlasRequests.length === 2, `정상 sprite 요청이 정확히 2회가 아닙니다 (${happyAtlasRequests.length})`);
     assert(new Set(happyAtlasRequests.map((url) => new URL(url).pathname)).size === 2, "같은 atlas가 중복 요청됐습니다");
     assert(happyLegacyRequests.length === 0, `legacy 개별 sprite 요청 ${happyLegacyRequests.length}회`);
+    const generatedArtFiles = [
+      "nyang-icon-vfx-atlas.png",
+      "nyang-vfx-combat-atlas.png",
+      "nyang-vfx-magic-atlas.png",
+      "nyang-vfx-defense-atlas.png",
+      "nyang-ui-token-atlas.png",
+    ];
+    for (const file of generatedArtFiles) {
+      const matches = pageRequests.filter((url) => new URL(url).pathname.endsWith(`/ui/${file}`));
+      assert(matches.length === 1, `${file}이 브라우저에서 정확히 한 번 로드되지 않았습니다 (${matches.length})`);
+    }
+    if (visualCaptureDir) await delay(1_700);
+    await captureVisual("01-contract.png");
     console.log(
       `browser-runtime boot PASS · ${browserVersion.product} · protocol ${browserVersion.protocolVersion} · ${basename(browserPath)} · colors ${bootState.uniqueColors}`,
     );
@@ -567,6 +622,7 @@ async function main() {
       "계약 결과 공지에 다음 지도 과업이 함께 전달되지 않았습니다",
     );
     await delay(400);
+    await captureVisual("02-map.png");
     const mapControl = await evaluate(cdp, sessionId, `(() => {
       const button = document.querySelector('[data-focus-key^="map-node:"]');
       button?.focus();
@@ -588,6 +644,8 @@ async function main() {
         && rewardState.runtime.accessibility.politeText.includes("상점과 배치"),
       "지도 결과 공지에 다음 상점·배치 과업이 함께 전달되지 않았습니다",
     );
+    await delay(450);
+    await captureVisual("03-first-shop.png");
     const rewardAccessibility = await evaluate(cdp, sessionId, `(() => {
       const runtime = window.nyang.runtime.accessibility;
       const grid = document.querySelector('.game-a11y-board[role="grid"]');
@@ -597,9 +655,11 @@ async function main() {
         const rect = button.getBoundingClientRect();
         return { width: rect.width, height: rect.height };
       });
+      const primary = document.querySelector('[data-focus-key="reward:primary"]');
       return {
         phaseKey: runtime.phaseKey,
         controlKeys: runtime.controlKeys,
+        primary: primary ? { disabled: primary.disabled, label: primary.textContent } : null,
         rows: rows.length,
         rowCellCounts: rows.map((row) => row.querySelectorAll(':scope > [role="gridcell"]').length),
         cells: cells.length,
@@ -608,7 +668,13 @@ async function main() {
       };
     })()`);
     assert(rewardAccessibility.phaseKey.startsWith("reward:"), "reward 접근성 phase model이 동기화되지 않았습니다");
-    assert(rewardAccessibility.controlKeys.includes("reward:reroll") && rewardAccessibility.controlKeys.includes("reward:primary"), "reward 재추첨/주 행동 컨트롤이 없습니다");
+    assert(rewardAccessibility.controlKeys.includes("reward:reroll"), "reward 재추첨 컨트롤이 없습니다");
+    assert(
+      rewardAccessibility.primary?.disabled
+        && rewardAccessibility.primary.label.includes("고양이를 먼저")
+        && !rewardAccessibility.controlKeys.includes("reward:primary"),
+      "빈 팀의 주 행동이 비활성 안내로 노출되지 않았습니다",
+    );
     assert(rewardAccessibility.controlKeys.some((key) => key.startsWith("reward:offer:")), "reward 구매 컨트롤이 없습니다");
     assert(rewardAccessibility.controlKeys.includes("global:mute"), "reward 음소거 컨트롤이 없습니다");
     assert(
@@ -630,7 +696,7 @@ async function main() {
 
     await delay(450);
     const shortcutState = await evaluate(cdp, sessionId, `(() => {
-      const button = document.querySelector('[data-focus-key="reward:primary"]');
+      const button = document.querySelector('[data-focus-key="reward:reroll"]');
       button.focus();
       const offer = [...document.querySelectorAll('[data-focus-key^="reward:offer:"]')][0];
       return {
@@ -639,7 +705,7 @@ async function main() {
         counts: window.nyang.runtime.actionCounts,
       };
     })()`);
-    assert(shortcutState.focusKey === "reward:primary", "단축키 회귀용 native 버튼에 focus하지 못했습니다");
+    assert(shortcutState.focusKey === "reward:reroll", "단축키 회귀용 native 버튼에 focus하지 못했습니다");
     await pressKey(cdp, sessionId, { key: "g", code: "KeyG", keyCode: 71, text: "g" });
     const routedG = await evaluate(cdp, sessionId, `window.nyang.runtime.lastInput`);
     assert(routedG?.kind === "key-down" && routedG.code === "KeyG", "native 버튼 focus 중 G가 공용 입력 경계에 도달하지 않았습니다");
@@ -742,6 +808,68 @@ async function main() {
     );
     console.log("browser-runtime pointer route PASS · reward→battle");
 
+    // 새 생성 이펙트는 희소 평타가 아니라 실제 큐 상한에서 검증한다. 데스크톱
+    // 제출 해상도와 모바일 DPR2를 모두 같은 48셀/90 FX 장면으로 재현한다.
+    const fxStressViewports = [
+      { width: 1488, height: 832, deviceScaleFactor: 1, label: "1488x832@1x" },
+      { width: 390, height: 844, deviceScaleFactor: 2, label: "390x844@2x" },
+    ];
+    for (const viewport of fxStressViewports) {
+      await cdp.send("Emulation.setDeviceMetricsOverride", {
+        width: viewport.width,
+        height: viewport.height,
+        deviceScaleFactor: viewport.deviceScaleFactor,
+        mobile: false,
+      }, sessionId);
+      await waitFor(
+        `${viewport.label} FX 포화 resize`,
+        () => evaluate(cdp, sessionId, `window.nyang.runtime.lastResize`),
+        (value) => value?.width === viewport.width
+          && value.height === viewport.height
+          && value.dpr === viewport.deviceScaleFactor,
+      );
+      const fixture = await evaluate(cdp, sessionId, `window.nyangQa?.startFxStress()`);
+      assert(fixture?.count === 90 && fixture.artCells === 48,
+        `${viewport.label} FX 포화 픽스처가 90개/48셀을 만들지 못했습니다 (${JSON.stringify(fixture)})`);
+      const stressPerformance = await waitFor(
+        `${viewport.label} FX 포화 프레임 예산`,
+        () => evaluate(cdp, sessionId, `({
+          phase: window.nyang.phase,
+          frames: window.nyangPerformance.frames.phases.battle ?? null,
+          active: window.nyang.combat.active.fxs.count,
+        })`),
+        (value) => value?.phase === "battle"
+          && value.active >= 80
+          && value.frames?.sampleCount >= 75
+          && value.frames.elapsedMs >= 1_100,
+        10_000,
+      );
+      assert(stressPerformance.frames.frameWorkMs.p95Ms <= 16.7,
+        `${viewport.label} FX 포화 p95가 16.7ms를 넘었습니다 (${stressPerformance.frames.frameWorkMs.p95Ms}ms)`);
+      const stressLongAllowance = Math.ceil(stressPerformance.frames.sampleCount * 0.01);
+      assert(stressPerformance.frames.frameWorkMs.longCount <= stressLongAllowance,
+        `${viewport.label} FX 포화 long-frame이 1% 허용 개수를 넘었습니다 (${stressPerformance.frames.frameWorkMs.longCount}/${stressLongAllowance})`);
+      assert(stressPerformance.frames.cadenceHz >= 30,
+        `${viewport.label} FX 포화 cadence가 30Hz 아래입니다 (${stressPerformance.frames.cadenceHz.toFixed(1)}Hz)`);
+      console.log(
+        `browser-runtime FX stress PASS · ${viewport.label} · 90 FX/48 cells · p95 ${stressPerformance.frames.frameWorkMs.p95Ms.toFixed(2)}ms · scheduler ${stressPerformance.frames.cadenceHz.toFixed(1)}Hz`,
+      );
+      await evaluate(cdp, sessionId, `window.nyangQa.stopFxStress()`);
+    }
+
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: INITIAL_VIEWPORT.width,
+      height: INITIAL_VIEWPORT.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    }, sessionId);
+    await waitFor(
+      "기본 viewport 복원",
+      () => evaluate(cdp, sessionId, `window.nyang.runtime.lastResize`),
+      (value) => value?.width === INITIAL_VIEWPORT.width && value.height === INITIAL_VIEWPORT.height && value.dpr === 1,
+    );
+    await evaluate(cdp, sessionId, `window.nyangQa.stopFxStress()`);
+
     const combatTimingStart = await evaluate(cdp, sessionId, `({
       now: performance.now(),
       phase: window.nyang.phase,
@@ -772,7 +900,7 @@ async function main() {
     const performanceResult = {
       browser: basename(browserPath),
       product: browserVersion.product,
-      viewport: "1280x800@1x",
+      viewport: `${INITIAL_VIEWPORT.width}x${INITIAL_VIEWPORT.height}@1x`,
       phase: "battle",
       sampleCount: battlePerformance.frames.sampleCount,
       elapsedMs: battlePerformance.frames.elapsedMs,
@@ -811,12 +939,14 @@ async function main() {
       () => evaluate(cdp, sessionId, `window.nyang.combat`),
       (value) => value?.speed === 0.5
         && value.totals.attacks.melee + value.totals.attacks.ranged > 0
-        && value.totals.hits.damage + value.totals.hits.blocked + value.totals.hits.miss > 0,
+        && value.totals.hits.damage + value.totals.hits.blocked + value.totals.hits.miss > 0
+        && value.active.fxs.count + value.active.shots.count + value.active.pops.count > 0,
       10_000,
     );
     assert(combatFeedback.active.fxs.count <= 90, "실전 FX 큐가 상한을 넘었습니다");
     assert(combatFeedback.active.shots.count <= 32, "실전 tracer 큐가 상한을 넘었습니다");
     assert(combatFeedback.active.pops.count <= 16, "실전 피드백 팝업 큐가 상한을 넘었습니다");
+    await captureVisual("04-battle-fx.png");
     console.log(`browser-runtime combat feedback PASS · attacks ${JSON.stringify(combatFeedback.totals.attacks)} · hits ${JSON.stringify(combatFeedback.totals.hits)}`);
 
     const feedbackBeforeReduced = combatFeedback.totals.attacks.melee + combatFeedback.totals.attacks.ranged;
@@ -961,7 +1091,7 @@ async function main() {
       orientationHandled.orientationCount === beforeOrientation.orientationCount + 1,
       "연속 orientationchange가 하나로 합쳐지지 않았습니다",
     );
-    console.log("browser-runtime resize PASS · 1280x800→800x1280 @2x · orientation debounce");
+    console.log(`browser-runtime resize PASS · ${INITIAL_VIEWPORT.width}x${INITIAL_VIEWPORT.height}→800x1280 @2x · orientation debounce`);
 
     const backdropStress = Array.from({ length: 12 }, (_, index) => ({
       width: 820 + index * 17,

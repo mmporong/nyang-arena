@@ -13,17 +13,29 @@ import { checkRelicTable, RELICS } from "../src/game/relics.ts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { EFFECT_RANGE, validateAll } from "../src/validate/synergy-schema.ts";
+import {
+  COMPOSITE_TRIGGERS,
+  EFFECT_KEYS,
+  EFFECT_RANGE,
+  isTriggered,
+  scaleEffectForDifficulty,
+  synergyProgressLabel,
+  triggerDifficulty,
+  validateAll,
+} from "../src/validate/synergy-schema.ts";
 import { BOSSES_PER_STAGE, checkStage, isBossStep, makeStage, STAGE_STEPS } from "../src/game/map.ts";
 import { BOSS_BREEDS, bossForIndex } from "../src/game/bosses.ts";
 import { BREEDS, NIGHTMARE_BREEDS } from "../src/game/breeds.ts";
 import {
   bossIndexAt,
+  buildEnemyWave,
   buyOffer,
+  canStartBattle,
   chooseNode,
   leaveShop,
   newRun,
   rollOffers,
+  startBattle,
   WAVE_STRIDE,
   UNIT_STRIDE,
   WARRIOR_IDS,
@@ -79,12 +91,117 @@ else if (clamped.effect.value !== EFFECT_RANGE.atk_mul[1]) {
   failures.push(`overshoot: 상한 ${EFFECT_RANGE.atk_mul[1]}로 눌렸어야 하는데 ${clamped.effect.value}`);
 }
 
+// 5) 화면에 함께 뜨는 세 난이도는 효과 종류와 무관하게 엄격히 강해져야 한다.
+for (const key of EFFECT_KEYS) {
+  const [, hi] = EFFECT_RANGE[key];
+  const source = { key, value: hi };
+  const easy = scaleEffectForDifficulty(source, "easy").value;
+  const medium = scaleEffectForDifficulty(source, "medium").value;
+  const hard = scaleEffectForDifficulty(source, "hard").value;
+  const base = key === "evade_add" ? 0 : 1;
+  const bonuses = [easy - base, medium - base, hard - base];
+  if (!(bonuses[0] < bonuses[1] && bonuses[1] < bonuses[2])) {
+    failures.push(`${key}: 입문/도전/악몽 효과가 커지지 않음 (${bonuses.join("/")})`);
+  }
+  if (hard !== hi) failures.push(`${key}: 악몽 효과 ${hard}가 안전 상한 ${hi}가 아님`);
+}
+
+// 6) 악몽은 합계 6마리가 아니라 두 직업을 각각 3마리씩 요구해야 한다.
+const synergyUnit = (cls, breedId) => ({
+  breedId,
+  cls,
+  kind: cls === "rogue" ? "melee" : "ranged",
+  col: cls === "rogue" ? 2 : 0,
+});
+const balancedCombo = [
+  ...[1, 2, 3].map((id) => synergyUnit("mage", id)),
+  ...[4, 5, 6].map((id) => synergyUnit("rogue", id)),
+];
+const lopsidedCombo = [
+  ...[1, 2, 3, 4].map((id) => synergyUnit("mage", id)),
+  ...[5, 6].map((id) => synergyUnit("rogue", id)),
+];
+if (!isTriggered("mage_3_rogue_3", balancedCombo)) {
+  failures.push("mage_3_rogue_3: 마법사 3 + 도적 3이 발동하지 않음");
+}
+if (isTriggered("mage_3_rogue_3", lopsidedCombo)) {
+  failures.push("mage_3_rogue_3: 합계만 6인 마법사 4 + 도적 2가 잘못 발동함");
+}
+if (synergyProgressLabel("mage_3_rogue_3", lopsidedCombo) !== "마법사 3/3 + 도적 2/3") {
+  failures.push("mage_3_rogue_3: 두 직업의 개별 진행도 문구가 틀림");
+}
+for (const trigger of ["mage_3_rogue_3", "warrior_3_archer_3", "summoner_3_mage_3"]) {
+  if (triggerDifficulty(trigger) !== "hard") failures.push(`${trigger}: 악몽 난이도가 아님`);
+}
+
+// 7) 실제 런의 마지막 칸은 모든 시드에서 복합 악몽이어야 한다.
+const compositeTriggers = new Set(COMPOSITE_TRIGGERS);
+for (let seed = 1; seed <= 100; seed++) {
+  const picked = newRun(seed).synergies;
+  const tiers = picked.map((rule) => triggerDifficulty(rule.trigger)).join(",");
+  if (tiers !== "easy,medium,hard") {
+    failures.push(`시드 ${seed}: 시너지 순서가 easy,medium,hard가 아님 (${tiers})`);
+    break;
+  }
+  if (!compositeTriggers.has(picked[2].trigger)) {
+    failures.push(`시드 ${seed}: 마지막 시너지가 복합 직업 조건이 아님 (${picked[2].trigger})`);
+    break;
+  }
+}
+
 if (failures.length > 0) {
   console.log("\n실패:");
   for (const f of failures) console.log(`  ✗ ${f}`);
   process.exit(1);
 }
 console.log("\n전부 통과 — 검증기가 적대 입력을 모두 막거나 안전한 값으로 눌렀다.");
+
+/* ------------------------------------------------------------------ */
+/* 첫 영입 온보딩 계약                                                   */
+/* ------------------------------------------------------------------ */
+
+const onboarding = newRun(7001);
+if (onboarding.ally.some(Boolean) || canStartBattle(onboarding)) {
+  console.log("  실패 새 런이 빈 팀으로 시작하지 않았다");
+  process.exit(1);
+}
+onboarding.raidOffers = [];
+onboarding.phase = "reward";
+onboarding.nodeKind = "battle";
+rollOffers(onboarding);
+if (onboarding.offers.length !== 3 || onboarding.offers.some((offer) => offer?.kind !== "recruit")) {
+  console.log("  실패 첫 상점 세 장이 모두 영입이 아니다");
+  process.exit(1);
+}
+leaveShop(onboarding);
+if (onboarding.phase !== "reward") {
+  console.log("  실패 고양이 없이 첫 전투를 시작했다");
+  process.exit(1);
+}
+const firstRecruit = onboarding.offers[0];
+if (!firstRecruit || !buyOffer(onboarding, firstRecruit) || !canStartBattle(onboarding)) {
+  console.log("  실패 첫 고양이를 영입할 수 없다");
+  process.exit(1);
+}
+leaveShop(onboarding);
+startBattle(onboarding);
+if (onboarding.phase !== "battle") {
+  console.log("  실패 첫 영입 고양이로 전투를 시작하지 못했다");
+  process.exit(1);
+}
+const firstSnipe = newRun(7002);
+firstSnipe.nodeWave = "snipe";
+buildEnemyWave(firstSnipe);
+const firstSnipeCount = firstSnipe.enemy.filter(Boolean).length;
+firstSnipe.wave = 2;
+buildEnemyWave(firstSnipe);
+const secondSnipeCount = firstSnipe.enemy.filter(Boolean).length;
+if (firstSnipeCount !== 1 || secondSnipeCount !== 2) {
+  console.log(`  실패 첫 저격 경로의 적 수가 ${firstSnipeCount}/${secondSnipeCount}마리다`);
+  process.exit(1);
+}
+console.log("\n첫 영입 계약");
+console.log("  OK   빈 팀 시작 · 첫 오퍼 3장 영입 · 영입 전 잠금 · 첫 구매 후 전투 · 초반 1대3 방지");
 
 /* ------------------------------------------------------------------ */
 /* 유물 테이블 계약                                                     */
@@ -252,7 +369,7 @@ if (bossFailures.length === 0) {
  *
  * `cost`와 `color`는 일부러 뺐다. 둘 다 아군 전용 경로(`rollOffers`,
  * `boardUnits`)에서만 읽히고 적 쪽에는 쓰이지 않는다 — 악몽은 cost 0이고
- * 삼색이 자리에는 삼색 스프라이트가 없어 주황이다.
+ * 튕구리 자리에는 삼색 스프라이트가 없어 주황이다.
  */
 const MIRROR = ["cls", "kind", "hp", "atk", "atkInterval", "range", "moveSpeed", "manaPerAttack", "skill", "passive"];
 const mirrorFailures = [];
@@ -456,15 +573,18 @@ if (mirrorFailures.length === 0) {
 
     // 5) 기록: 도전은 전체 최고를 안 건드리고 단계별로, 오늘의 시드는 그날+전체, 기본은 전체
     const c = run.newRun(3, { kind: "challenge", challenge: 1 });
+    c.ally[0] = run.makeCat(BREEDS[0], "ally", 0);
     c.wave = 9;
     run.finishWave(c, false);
     if (run.loadBest() !== 0) failures.push("도전 판이 전체 최고 기록을 건드렸다");
     if (run.loadChallengeBest(1) !== 9 || c.modeBest !== 9 || !c.recordBroken) failures.push("도전 1단계 기록이 9로 남지 않았다");
     const d = run.newRun(3, { kind: "daily", dailyKey: "2026-08-23" });
+    d.ally[0] = run.makeCat(BREEDS[1], "ally", 0);
     d.wave = 6;
     run.finishWave(d, false);
     if (run.loadBest() !== 6 || run.loadDailyBest("2026-08-23") !== 6) failures.push("오늘의 시드 판이 그날 기록과 전체 최고를 둘 다 남기지 않았다");
     const e = run.newRun(3);
+    e.ally[0] = run.makeCat(BREEDS[2], "ally", 0);
     e.wave = 4;
     run.finishWave(e, false);
     if (run.loadBest() !== 6 || e.recordBroken || e.modeBest !== 6) failures.push("기본 판이 더 낮은 웨이브로 기록을 덮거나 갱신으로 표시했다");

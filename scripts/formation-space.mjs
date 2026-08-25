@@ -119,12 +119,12 @@ const SAT_HI = 97;
 
 /** 근접 3 · 원거리 3. 어느 대형이든 같은 팀으로 시작한다. */
 const TEAM = [
-  { id: 1, kind: "melee" }, // 턱시도 전사
-  { id: 7, kind: "melee" }, // 몽실이 전사
-  { id: 3, kind: "melee" }, // 까망이 도적
-  { id: 8, kind: "ranged" }, // 호랑이 궁수
-  { id: 6, kind: "ranged" }, // 삼색이 궁수
-  { id: 5, kind: "ranged" }, // 하양이 마법사
+  { id: 1, kind: "melee" }, // 빙글밤 전사
+  { id: 7, kind: "melee" }, // 쿵실이 전사
+  { id: 3, kind: "melee" }, // 그림콩 도적
+  { id: 8, kind: "ranged" }, // 바늘이 궁수
+  { id: 6, kind: "ranged" }, // 튕구리 궁수
+  { id: 5, kind: "ranged" }, // 서리별 마법사
 ];
 
 const cell = (row, col) => row * BOARD_COLS + col;

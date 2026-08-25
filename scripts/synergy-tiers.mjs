@@ -7,7 +7,7 @@
  * 움직이는데, 라벨은 하드코딩이라 아무도 모르게 어긋난다.
  *
  * 잰다: 전투 시작 시점에 각 난이도의 목표가 활성인 비율(500런).
- * 판정: easy > medium > hard 층이 유지되는가 (경계는 5%p 여유).
+ * 판정: easy > medium > hard 층이 5%p 이상 벌어지고 hard가 실제로 한 번 이상 발동하는가.
  *
  * 실행: npm run tiers  (관문 아님 — measure-all에 안 들어간다. 라벨을 만졌거나
  * 상점·명단·자동 배치를 바꿨을 때 돌려서 주석의 수치를 갱신할 것)
@@ -57,10 +57,11 @@ for (const d of ["easy", "medium", "hard"]) {
 }
 
 const MARGIN = 5; // 잡음 대비 여유(%p). 이보다 좁으면 층이라 부를 수 없다.
-const ok = rate.easy - rate.medium >= MARGIN && rate.medium - rate.hard >= MARGIN;
+const attainable = on.hard > 0;
+const ok = attainable && rate.easy - rate.medium >= MARGIN && rate.medium - rate.hard >= MARGIN;
 console.log(
   ok
-    ? `\n판정: 층이 유지된다 (easy−medium ${(rate.easy - rate.medium).toFixed(1)}%p · medium−hard ${(rate.medium - rate.hard).toFixed(1)}%p)`
-    : "\n판정: 층이 무너졌다 — TRIGGER_DIFFICULTY 라벨이나 원인(상점·명단·배치)을 다시 볼 것",
+    ? `\n판정: 층이 유지되고 악몽이 실제 발동한다 (easy−medium ${(rate.easy - rate.medium).toFixed(1)}%p · medium−hard ${(rate.medium - rate.hard).toFixed(1)}%p)`
+    : `\n판정: ${attainable ? "층이 무너졌다" : "악몽 발동이 0회다"} — 트리거나 상점·명단·배치를 다시 볼 것`,
 );
 process.exit(ok ? 0 : 1);

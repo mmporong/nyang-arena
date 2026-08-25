@@ -283,6 +283,8 @@ export interface Breed {
    */
   readonly id: number;
   readonly name: string;
+  /** 상점에서 이름과 함께 읽는 한 줄 성격. 수치가 아니라 이 고양이가 하는 일을 말한다. */
+  readonly tagline?: string;
   readonly color: CatColor;
   readonly cls: ClassKind;
   readonly kind: AttackKind;

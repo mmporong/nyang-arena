@@ -10,7 +10,7 @@
     "id": "finisher",
     "name": "즉사",
     "desc": "허용되지 않은 효과 키",
-    "trigger": "same_color_3",
+    "trigger": "front_melee_3",
     "effect": { "key": "instant_kill", "value": 1 }
   },
   {
@@ -24,14 +24,14 @@
     "id": "dup_id",
     "name": "중복 원본",
     "desc": "같은 id가 배치 안에 두 번 등장하는 첫 번째",
-    "trigger": "same_color_3",
+    "trigger": "front_melee_3",
     "effect": { "key": "hp_mul", "value": 1.2 }
   },
   {
     "id": "dup_id",
     "name": "중복 사본",
     "desc": "같은 id 두 번째 — 폐기 대상",
-    "trigger": "same_color_3",
+    "trigger": "front_melee_3",
     "effect": { "key": "atk_mul", "value": 1.3 }
   },
   {
@@ -45,7 +45,7 @@
     "id": "no_effect",
     "name": "효과 없음",
     "desc": "effect가 객체가 아님",
-    "trigger": "same_color_3",
+    "trigger": "front_melee_3",
     "effect": "강함"
   },
   {
@@ -66,7 +66,7 @@
     "id": "overshoot",
     "name": "폭주",
     "desc": "범위를 크게 벗어난 배수 — 클램프 대상",
-    "trigger": "same_color_3",
+    "trigger": "front_melee_3",
     "effect": { "key": "atk_mul", "value": 9.9 }
   },
   "이건 객체가 아니라 문자열입니다"

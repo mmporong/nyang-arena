@@ -11,6 +11,7 @@ import {
   fxs,
   shots,
   spawnArrivalFx,
+  spawnFxStressFixture,
   stepBattle,
 } from "../src/game/battle.ts";
 import { BREEDS, NIGHTMARE_BREEDS } from "../src/game/breeds.ts";
@@ -79,8 +80,14 @@ function runBasic(kind, miss = false) {
   const scene = prepareScene(breed, { enemyCount: 1 });
   scene.caster.mana = 0;
   scene.enemies[0].evade = miss ? 1 : 0;
+  const origin = {
+    attackerX: scene.caster.fx,
+    attackerY: scene.caster.fy,
+    targetX: scene.enemies[0].fx,
+    targetY: scene.enemies[0].fy,
+  };
   stepBattle(scene.state, 100);
-  return scene;
+  return { ...scene, origin };
 }
 
 assert.equal(BALANCE.battleSpeed, 0.5, "브라우저 전투 배율은 정확히 0.5여야 합니다");
@@ -108,6 +115,15 @@ let observation = combatFeedbackObservation(melee.state);
 assert.equal(observation.totals.attacks.melee, 1, "근접 평타가 관찰되지 않았습니다");
 assert(observation.totals.hits.damage >= 1, "근접 피해가 관찰되지 않았습니다");
 assert(fxs.some((fx) => fx.kind === "impact" && fx.impact === "hit"), "근접 충돌 X가 생성되지 않았습니다");
+const meleeSlash = fxs.find((fx) => fx.kind === "slash" && fx.art?.atlas === "combat");
+const meleeImpact = fxs.find((fx) => fx.kind === "impact" && fx.impact === "hit");
+assert(meleeSlash && meleeImpact, "근접 공격의 출발 참격과 도착 피격이 분리되지 않았습니다");
+assert.equal(meleeSlash.fx, melee.origin.attackerX, "근접 참격이 공격자에서 시작하지 않았습니다");
+assert.equal(meleeSlash.fy, melee.origin.attackerY, "근접 참격의 세로 원점이 공격자와 다릅니다");
+assert.equal(meleeSlash.tx, melee.origin.targetX, "근접 참격이 실제 대상을 향하지 않습니다");
+assert.equal(meleeSlash.ty, melee.origin.targetY, "근접 참격의 세로 도착점이 대상과 다릅니다");
+assert.equal(meleeImpact.fx, melee.origin.targetX, "피격 이펙트가 대상에서 생기지 않았습니다");
+assert.equal(meleeImpact.fy, melee.origin.targetY, "피격 이펙트의 세로 원점이 대상과 다릅니다");
 assert(damagePops.some((pop) => /^\d+$/.test(pop.text)), "근접 피해 숫자가 생성되지 않았습니다");
 
 const ranged = runBasic("ranged");
@@ -129,6 +145,7 @@ assert.equal(observation.totals.hits.miss, 1, "근접 빗나감 판정이 관찰
 assert(fxs.some((fx) => fx.kind === "impact" && fx.impact === "miss"), "근접 빗나감 갈라진 선이 없습니다");
 
 const skillSignatures = new Map();
+const skillArtCells = new Set();
 for (const skill of activeSkills) {
   const scene = prepareScene(activeBreed(skill), { hurtAlly: skill === "mend" });
   scene.caster.mana = scene.caster.manaMax;
@@ -136,14 +153,30 @@ for (const skill of activeSkills) {
   const skillObservation = combatFeedbackObservation(scene.state);
   assert.equal(skillObservation.totals.skills[skill], 1, `${skill} 시전이 관찰되지 않았습니다`);
   assert(fxs.length > 0, `${skill} 시각 피드백이 비었습니다`);
+  assert(fxs.some((fx) => fx.art), `${skill}에 생성 아틀라스 악센트가 연결되지 않았습니다`);
+  for (const fx of fxs) if (fx.art) skillArtCells.add(`${fx.art.atlas}:${fx.art.cell}`);
   const signature = fxs
-    .map((fx) => [fx.kind, fx.impact ?? "", fx.status ?? "", fx.radius.toFixed(2), fx.label ?? ""].join(":"))
+    .map((fx) => [
+      fx.kind,
+      fx.impact ?? "",
+      fx.status ?? "",
+      fx.radius.toFixed(2),
+      fx.label ?? "",
+      fx.art?.atlas ?? "",
+      fx.art?.cell ?? "",
+      fx.art?.anchor ?? "source",
+      fx.art?.rotate ? "rot" : "fixed",
+    ].join(":"))
     .sort()
     .join("|");
   skillSignatures.set(skill, signature);
 }
 assert.equal(skillSignatures.size, activeSkills.length, "일부 액티브 스킬이 테스트에서 누락됐습니다");
 assert.equal(new Set(skillSignatures.values()).size, activeSkills.length, "서로 다른 스킬 피드백 문법이 겹칩니다");
+assert(skillArtCells.size >= 16, `13개 스킬이 사용하는 생성 아틀라스 변주가 부족합니다 (${skillArtCells.size}/16)`);
+for (const atlas of ["combat", "magic", "defense"]) {
+  assert([...skillArtCells].some((key) => key.startsWith(`${atlas}:`)), `${atlas} 아틀라스가 실제 스킬에 연결되지 않았습니다`);
+}
 
 const guard = prepareScene(activeBreed("guard"));
 guard.caster.mana = guard.caster.manaMax;
@@ -203,11 +236,20 @@ assert(fxs.some((fx) => fx.kind === "status" && fx.status === "stun" && fx.endin
   "기절 해제 피드백이 없습니다");
 
 const dot = prepareScene(activeBreed("ember"));
+const dotOrigin = { x: dot.caster.fx, y: dot.caster.fy };
 dot.caster.mana = dot.caster.manaMax;
 stepBattle(dot.state, 100);
 assert(dot.enemies.some((enemy) => enemy.dot), "지속 피해 상태가 적용되지 않았습니다");
 assert(dot.enemies.some((enemy) => combatStatusVisuals(enemy).some((status) => status.kind === "dot")), "지속 피해 유지 마커가 없습니다");
 assert(fxs.some((fx) => fx.kind === "status" && fx.status === "dot"), "지속 피해 적용 피드백이 없습니다");
+assert(
+  fxs.some((fx) => fx.kind === "spark" && fx.art?.atlas === "magic" && fx.fx === dotOrigin.x && fx.fy === dotOrigin.y),
+  "불씨 스킬의 점화가 시전자에서 시작하지 않았습니다",
+);
+assert(
+  fxs.some((fx) => fx.kind === "beam" && fx.fx === dotOrigin.x && fx.fy === dotOrigin.y),
+  "불씨 스킬의 전달선이 시전자에서 시작하지 않았습니다",
+);
 
 const burning = dot.enemies.find((enemy) => enemy.dot);
 assert(burning, "지속 피해 비교 대상이 없습니다");
@@ -270,6 +312,11 @@ assert.equal(damagePops.length, 0, "피드백 문구가 TTL 뒤 남았습니다"
 clearBattleFx();
 for (let i = 0; i < FX_CAP * 2; i++) spawnArrivalFx(i % 5, Math.floor(i / 5) % 5);
 assert.equal(fxs.length, FX_CAP, `FX 큐가 상한에서 봉인되지 않았습니다 (${fxs.length}/${FX_CAP})`);
+
+clearBattleFx();
+const stressFixture = spawnFxStressFixture();
+assert.equal(stressFixture.count, FX_CAP, "브라우저 FX 포화 픽스처가 큐 상한을 채우지 못했습니다");
+assert.equal(stressFixture.artCells, 48, "브라우저 FX 포화 픽스처가 전투 아틀라스 48셀을 모두 연결하지 못했습니다");
 
 const queueBreed = BREEDS.find((breed) => breed.passive === "ricochet");
 assert(queueBreed, "큐 상한 검사용 원거리 품종이 없습니다");

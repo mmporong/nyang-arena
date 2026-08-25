@@ -477,7 +477,7 @@ export function chooseSharedRaidContract(state: RunState, id: string): boolean {
   state.raidContract = contract;
   state.raidTargetBossIndex = nextRaidBossTarget(state).index;
   state.raidOffers = [];
-  setNotice(state, `공유 악몽 ${contract.name} — 같은 규칙으로 도전합니다`);
+  setNotice(state, `공유 계약 불러옴 · ${contract.name} · 다음 보스 규칙 고정`);
   return true;
 }
 
@@ -508,7 +508,7 @@ export function raidBossPower(state: RunState, breedId: number): number {
  * 정찰 칸이 다음 계약 보스에 가져갈 회피 횟수.
  *
  * 위험한 계약일수록 예고가 세고 길어지는데 모든 정찰이 회피를 주면, 계약을
- * 읽든 말든 지도에서 할 일이 같았다. 그래서 카드가 숨 돌리기를 지시하는
+ * 읽든 말든 지도에서 할 일이 같았다. 그래서 카드가 정찰 보급을 지시하는
  * 고위험 계약에서만 기본 2 + 계약 대비 1, 합계 3회를 준다. 나머지는 0이다.
  */
 export function scoutDodgeReward(state: RunState): number {
@@ -575,7 +575,7 @@ export function chooseNode(state: RunState, idx: number): boolean {
     state.freeRerolls += 1;
     // 환전되지 않는 자원. 이것 때문에 이 길을 고르는 것이지 생선 때문이 아니다.
     const dodgeReward = scoutDodgeReward(state);
-    // 여러 숨 돌리기를 밟아도 중첩하지 않는다. 다음 보스용 준비는 가장 좋은
+    // 여러 정찰 보급을 밟아도 중첩하지 않는다. 다음 보스용 준비는 가장 좋은
     // 하나만 남겨, 경로를 순회해 회피를 무한히 저축하는 전략을 막는다.
     state.bonusDodge = Math.max(state.bonusDodge, dodgeReward);
     // 싸우지 않아도 시간은 흐른다. 웨이브를 그대로 두면 적 성장도 멈춰 정찰이
@@ -641,6 +641,10 @@ export function leaveShop(state: RunState): void {
     setNotice(state, "");
     return;
   }
+  if (!canStartBattle(state)) {
+    setNotice(state, "첫 고양이를 데려오면 바로 출전해요");
+    return;
+  }
   state.phase = "prepare";
   // 이 안내는 이제 화면에 거의 안 뜬다 — UI가 구매·배치를 한 화면으로 합치면서
   // 준비 화면에서 멈추지 않기 때문이다. 헤드리스에서는 여전히 이 자리를 지난다.
@@ -690,7 +694,10 @@ function nextUid(): string {
  */
 export function resolveSynergyPool(): SynergyRule[] {
   const { accepted } = validateAll(generated);
-  if (accepted.length >= SYNERGIES_PER_RUN) return accepted;
+  const tiers = new Set(accepted.map((rule) => triggerDifficulty(rule.trigger)));
+  if (accepted.length >= SYNERGIES_PER_RUN && ["easy", "medium", "hard"].every((tier) => tiers.has(tier as Difficulty))) {
+    return accepted;
+  }
   const byId = new Map(accepted.map((r) => [r.id, r]));
   for (const p of PRESET_SYNERGIES) if (!byId.has(p.id)) byId.set(p.id, p);
   return [...byId.values()];
@@ -702,7 +709,7 @@ export function resolveSynergyPool(): SynergyRule[] {
  * 난이도는 `triggerDifficulty`의 **실측 라벨**이 정한다 — 계산 모형을 두 번
  * 세웠는데 두 번 다 실측이 부정해서 라벨을 측정에 직접 묶었다(그 이력이
  * `synergy-schema.ts`의 주석에 있다). 쉬움은 배치 2마리·같은 품종 2, 중간은
- * 배치 3마리, 어려움은 같은 색 3이다. 등급에 트리거가 여럿이면 판마다
+ * 단일 조건 3마리, 어려움은 서로 다른 두 직업 3마리씩이다. 등급에 트리거가 여럿이면 판마다
  * 무작위로 하나를 고른다.
  *
  * 효과 크기도 `scaleEffectForDifficulty`로 난이도에 비례하게 다시 잰다 — 쉬운
@@ -1003,6 +1010,11 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
+/** 첫 전투를 포함해 출전 가능한 아군이 한 마리 이상 있는가. */
+export function canStartBattle(state: Pick<RunState, "ally">): boolean {
+  return livingCats(state.ally).length > 0;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1202,7 +1214,7 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
     synergyPool: pool,
     activeSynergyIds: new Set(),
     offers: [],
-    notice: `생선 ${BALANCE.startGold}마리로 시작한다`,
+    notice: `첫 고양이는 직접 고르세요 · 생선 ${BALANCE.startGold}`,
     noticeKind: "normal",
     battleElapsed: 0,
     lastBattleOutcome: null,
@@ -1267,22 +1279,6 @@ export function newRun(seed?: number, opts: NewRunOptions = {}): RunState {
   } else if (kind === "retry") {
     setNotice(state, "같은 시드 — 판은 그대로, 선택만 바꿀 수 있다");
   }
-
-  // 시작 3마리. 2마리로 시작하면 웨이브 2를 넘기지 못한다.
-  // 근접 둘과 원거리 하나를 섞어서 두 종류를 처음부터 보여준다.
-  // 전부 근접으로 시작하면 '뒷줄 원거리' 목표가 1웨이브부터 달성 불가로 보인다.
-  // 가운데 줄에 앞·중간·뒤로 하나씩 세운다. 근접이 앞, 원거리가 뒤라는 형태를
-  // 보여주되 배치 목표는 한 칸씩 모자라게 둔다(앞줄 근접 1/2, 뒷줄 원거리 1/2).
-  // 목표가 처음부터 달성돼 있으면 플레이어가 할 일이 없다.
-  // 5x5 가운데 행(row 2)에 뒤·중간·앞으로 하나씩. 근접이 앞, 원거리가 뒤라는
-  // 형태를 보여주되 배치 목표는 한 칸씩 모자라게 둔다.
-  const starters = [BREEDS[0], BREEDS[3], BREEDS[6]].slice(0, BALANCE.starterCount);
-  const startCells = [14, 12, 10];
-  starters.forEach((b, i) => {
-    if (!b) return;
-    const cell = startCells[i] ?? 3 + i;
-    state.ally[cell] = makeCat(b, "ally", cell);
-  });
 
   // 제출 버전의 차별점은 첫 화면에서 보인다. 첫 보스까지 기다리지 않고 지금
   // 계약을 고르게 하되, 실제 적용은 targetBossIndex가 같은 보스에서만 한다.
@@ -1504,7 +1500,7 @@ export function buildEnemyWave(state: RunState): void {
   const w = state.wave;
   // 지도에서 고른 칸이 성격을 정한다. 보스 자리만 웨이브 번호가 정한다.
   const kind = currentKind(state);
-  const scale = Math.pow(BALANCE.enemyScale, w - 1) * challengeMul(state);
+  const scale = Math.pow(BALANCE.enemyScale, Math.max(0, w - 1 - BALANCE.enemyGrowthGrace)) * challengeMul(state);
 
   if (kind === "boss") {
     buildBossWave(state, w, scale);
@@ -1518,7 +1514,9 @@ export function buildEnemyWave(state: RunState): void {
   const speedMul = kind === "rush" ? 1.45 : 1;
   // 돌격대는 전부 근접이라는 것만으로 이미 다른 문제다. 수까지 늘리면 과했다.
   // 저격대는 원거리가 일방적으로 때리는 구간이 있어 같은 수라도 체감이 세다.
-  if (kind === "snipe") count = Math.max(2, count - 1);
+  // 빈 팀으로 시작하는 첫 두 전투에는 저격수 보조 보스까지 얹지 않는다. 첫
+  // 구매 고양이가 규칙을 익히기도 전에 1대3으로 포위되는 시작 시드가 생겼다.
+  if (kind === "snipe") count = w <= 2 ? Math.min(count, w) : Math.max(2, count - 1);
   state.enemy = emptyBoard();
   const order = enemyOrder(kind);
   const ids = enemyBreedIds(kind, count, w);
@@ -1541,7 +1539,7 @@ export function buildEnemyWave(state: RunState): void {
   // 이 웨이브는 통과율로는 두 번째 벽이었는데(88%) 플레이어가 할 수 있는 게
   // 없었다 — 원거리가 많아 일방적으로 맞는 구간일 뿐이었다. 저격수가 서면
   // 세 웨이브 뒤에 올 보스의 동작(예고 → 회피)을 낮은 대가로 먼저 가르친다.
-  if (kind === "snipe") {
+  if (kind === "snipe" && w > 2) {
     const cell = 2 * BOARD_COLS + (BOARD_COLS - 1);
     const sniper = makeCat(SNIPER_BREED, "enemy", cell);
     metBoss(state, SNIPER_BREED.name);
@@ -1556,8 +1554,8 @@ export function buildEnemyWave(state: RunState): void {
 /** 시너지 판정용 보드 스냅샷. 배치(열)까지 포함해야 앞줄/뒷줄 조건을 볼 수 있다. */
 export function boardUnits(state: RunState): BoardUnit[] {
   return livingCats(state.ally).map((c) => ({
-    color: c.breed.color,
     breedId: c.breed.id,
+    cls: c.breed.cls,
     kind: c.breed.kind,
     col: cellCol(c.cell),
   }));
@@ -1621,6 +1619,16 @@ export function applySynergies(state: RunState): void {
     let atk = cat.breed.atk * scale;
     let interval = cat.breed.atkInterval;
     let evade = 0;
+
+    // 빈 팀 시작 뒤 첫 전투는 한 마리뿐이어도 배치가 결정이어야 한다. 같은 직업
+    // 이웃이 필요한 인접 보너스와 달리, 역할에 맞는 끝 열은 즉시 값을 낸다.
+    const col = cellCol(cat.cell);
+    if (cat.breed.kind === "melee" && col === BOARD_COLS - 1) {
+      maxHp *= BALANCE.frontlineMeleeHp;
+    }
+    if (cat.breed.kind === "ranged" && col === 0) {
+      atk *= BALANCE.backlineRangedAtk;
+    }
 
     const apply = (key: EffectKey, value: number) => {
       switch (key) {
@@ -1705,7 +1713,10 @@ export function rollOffers(state: RunState): void {
   const pool = shuffle([...BREEDS]);
 
   if (hasFreeSlot) {
-    for (const b of pool.slice(0, 2)) {
+    // 빈 팀의 첫 상점은 세 장 모두 영입이다. 강화 대상이 없어서 생기던 빈 카드가
+    // 첫 결정의 밀도를 떨어뜨렸고, 첫 구매가 첫 전투를 만든다는 새 온보딩과도 어긋났다.
+    const recruitSlots = owned.length === 0 ? OFFER_SLOTS : 2;
+    for (const b of pool.slice(0, recruitSlots)) {
       offers.push({
         kind: "recruit",
         cost: recruitCost(b.cost, owned.length),
@@ -1715,8 +1726,8 @@ export function rollOffers(state: RunState): void {
         // 그냥 이상한 가격이지, 결정이 아니다.
         sublabel:
           owned.length > BALANCE.recruitFreeUpTo
-            ? `${CLASS_LABEL[b.cls]} 데려오기 · 자리가 좁아 비싸요`
-            : `${CLASS_LABEL[b.cls]} 데려오기`,
+            ? `${b.tagline ?? `${CLASS_LABEL[b.cls]} 데려오기`} · 자리가 좁아 비싸요`
+            : (b.tagline ?? `${CLASS_LABEL[b.cls]} 데려오기`),
       });
     }
   } else {
@@ -1912,8 +1923,8 @@ export function startBattle(state: RunState): void {
   // `leaveShop`은 일반 카드 세 장을 열고 reward에 남는데, 같은 버튼 호출이
   // 이어서 여기까지 들어오더라도 준비 구매를 통째로 건너뛰면 안 된다.
   if (state.phase !== "prepare") return;
-  if (livingCats(state.ally).length === 0) {
-    setNotice(state, "한 마리는 세워주세요");
+  if (!canStartBattle(state)) {
+    setNotice(state, "첫 고양이를 데려오면 바로 출전해요");
     return;
   }
   applySynergies(state);

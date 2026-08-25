@@ -52,7 +52,7 @@ export function raidPrepRoute(contract: Pick<RaidContract, "risk">): RaidPrepRou
 }
 
 export function raidPrepLabel(route: RaidPrepRoute): string {
-  return route === "elite" ? "가위눌림" : route === "battle" ? "얕은 잠" : "숨 돌리기";
+  return route === "elite" ? "유물 정예전" : route === "battle" ? "일반 전투" : "정찰 보급";
 }
 
 /** 주소에 넣어도 안전한, 서버 없는 첫 계약 공유 코드. */

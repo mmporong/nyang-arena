@@ -7,8 +7,8 @@ import type { Breed } from "./types.ts";
  * 3:1로 둔 이유는 액티브가 판을 뒤집는 순간을 만들기 때문이다. 패시브는 그 사이를
  * 채우는 성격이다.
  *
- * 패시브로 돌린 둘은 원래 액티브와 개념이 겹쳤다 — 삼색이의 "3명에게 쏜다"와
- * 도탄, 줄줄이의 "4연타"와 연격. 자연스럽게 전환된다.
+ * 패시브로 돌린 둘은 원래 액티브와 개념이 겹쳤다 — 튕구리의 "3명에게 쏜다"와
+ * 도탄, 실타래의 "4연타"와 연격. 자연스럽게 전환된다.
  *
  * 마나: 공격할 때마다 manaPerAttack만큼 차고, 100이 되면 스킬을 쓰고 0으로 돌아간다.
  * TFT가 역할마다 마나 획득량을 다르게 두는 것과 같은 이유로 직업별로 갈랐다 —
@@ -27,48 +27,48 @@ import type { Breed } from "./types.ts";
 export const BREEDS: readonly Breed[] = [
   // ── 전사 ─────────────────────────────────────────────
   {
-    id: 1, name: "턱시도", color: "black", cls: "warrior", kind: "melee",
+    id: 1, name: "빙글밤", tagline: "밤을 빙글 베는 전사", color: "black", cls: "warrior", kind: "melee",
     hp: 150, atk: 20, atkInterval: 560, range: 0.8, moveSpeed: 1.7,
     manaPerAttack: 28, skill: "whirlwind", passive: null, cost: 3,
   },
   {
-    id: 7, name: "몽실이", color: "gray", cls: "warrior", kind: "melee",
+    id: 7, name: "쿵실이", tagline: "한 발로 골목을 울리는 전사", color: "gray", cls: "warrior", kind: "melee",
     hp: 190, atk: 16, atkInterval: 640, range: 0.9, moveSpeed: 1.4,
     manaPerAttack: 28, skill: "shockwave", passive: null, cost: 4,
   },
 
   // ── 도적 ─────────────────────────────────────────────
   {
-    id: 3, name: "까망이", color: "black", cls: "rogue", kind: "melee",
+    id: 3, name: "그림콩", tagline: "그림자보다 먼저 덮치는 도적", color: "black", cls: "rogue", kind: "melee",
     hp: 95, atk: 29, atkInterval: 430, range: 0.8, moveSpeed: 2.4,
     manaPerAttack: 50, skill: "shadow_strike", passive: null, cost: 4,
   },
   {
-    id: 4, name: "줄줄이", color: "gray", cls: "rogue", kind: "melee",
+    id: 4, name: "실타래", tagline: "싸울수록 손이 빨라지는 도적", color: "gray", cls: "rogue", kind: "melee",
     hp: 110, atk: 22, atkInterval: 440, range: 0.8, moveSpeed: 2.1,
     manaPerAttack: 0, skill: null, passive: "combo", cost: 3,
   },
 
   // ── 궁수 ─────────────────────────────────────────────
   {
-    id: 8, name: "호랑이", color: "orange", cls: "archer", kind: "ranged",
+    id: 8, name: "바늘이", tagline: "한 줄을 끝까지 꿰는 궁수", color: "orange", cls: "archer", kind: "ranged",
     hp: 112, atk: 27, atkInterval: 540, range: 2.8, moveSpeed: 1.2,
     manaPerAttack: 34, skill: "pierce", passive: null, cost: 4,
   },
   {
-    id: 6, name: "삼색이", color: "calico", cls: "archer", kind: "ranged",
+    id: 6, name: "튕구리", tagline: "화살을 둘씩 튕기는 궁수", color: "calico", cls: "archer", kind: "ranged",
     hp: 108, atk: 24, atkInterval: 510, range: 2.8, moveSpeed: 1.2,
     manaPerAttack: 0, skill: null, passive: "ricochet", cost: 4,
   },
 
   // ── 마법사 ───────────────────────────────────────────
   {
-    id: 2, name: "꿀밤이", color: "cream", cls: "mage", kind: "ranged",
+    id: 2, name: "노을이", tagline: "꺼지지 않는 불씨를 심는 마법사", color: "cream", cls: "mage", kind: "ranged",
     hp: 98, atk: 24, atkInterval: 660, range: 3.0, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "ember", passive: null, cost: 4,
   },
   {
-    id: 5, name: "하양이", color: "white", cls: "mage", kind: "ranged",
+    id: 5, name: "서리별", tagline: "발밑에 겨울을 피우는 마법사", color: "white", cls: "mage", kind: "ranged",
     hp: 94, atk: 21, atkInterval: 630, range: 2.9, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "frost_nova", passive: null, cost: 4,
   },
@@ -83,22 +83,22 @@ export const BREEDS: readonly Breed[] = [
   // 도적 둘이 마무리·연타라 셋째는 끊는 쪽, 궁수 둘이 직선·도탄이라 셋째는
   // 흩뿌리는 쪽, 마법사 둘이 지속피해·제어라 셋째는 살리는 쪽이다.
   {
-    id: 21, name: "물결이", color: "teal", cls: "warrior", kind: "melee",
+    id: 21, name: "품이", tagline: "앞줄을 포근히 감싸는 전사", color: "teal", cls: "warrior", kind: "melee",
     hp: 170, atk: 14, atkInterval: 600, range: 0.85, moveSpeed: 1.5,
     manaPerAttack: 28, skill: "guard", passive: null, cost: 4,
   },
   {
-    id: 22, name: "보라돌이", color: "purple", cls: "rogue", kind: "melee",
+    id: 22, name: "콕밤", tagline: "위험한 하나를 정확히 멈추는 도적", color: "purple", cls: "rogue", kind: "melee",
     hp: 100, atk: 25, atkInterval: 450, range: 0.8, moveSpeed: 2.2,
     manaPerAttack: 50, skill: "gouge", passive: null, cost: 4,
   },
   {
-    id: 23, name: "풀잎이", color: "green", cls: "archer", kind: "ranged",
+    id: 23, name: "소나기", tagline: "화살을 비처럼 흩뿌리는 궁수", color: "green", cls: "archer", kind: "ranged",
     hp: 105, atk: 22, atkInterval: 520, range: 2.7, moveSpeed: 1.2,
     manaPerAttack: 34, skill: "volley", passive: null, cost: 3,
   },
   {
-    id: 24, name: "복숭이", color: "pink", cls: "mage", kind: "ranged",
+    id: 24, name: "토닥이", tagline: "가장 다친 친구를 살리는 마법사", color: "pink", cls: "mage", kind: "ranged",
     hp: 92, atk: 18, atkInterval: 680, range: 2.9, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "mend", passive: null, cost: 3,
   },
@@ -113,17 +113,17 @@ export const BREEDS: readonly Breed[] = [
   //
   // 마나는 원거리와 같은 34(3타)다. 소환이 늦으면 이미 진 뒤에 나온다.
   {
-    id: 29, name: "부르미", color: "navy", cls: "summoner", kind: "ranged",
+    id: 29, name: "와글이", tagline: "작은 그림자 셋을 부르는 소환사", color: "navy", cls: "summoner", kind: "ranged",
     hp: 96, atk: 16, atkInterval: 700, range: 2.6, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "swarm", passive: null, cost: 4,
   },
   {
-    id: 30, name: "깃들이", color: "gold", cls: "summoner", kind: "ranged",
+    id: 30, name: "든든이", tagline: "큰 그림자를 벽처럼 세우는 소환사", color: "gold", cls: "summoner", kind: "ranged",
     hp: 102, atk: 18, atkInterval: 720, range: 2.5, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "bulwark", passive: null, cost: 4,
   },
   {
-    id: 31, name: "허깨비", color: "crimson", cls: "summoner", kind: "ranged",
+    id: 31, name: "초롱이", tagline: "적의 눈을 미끼로 홀리는 소환사", color: "crimson", cls: "summoner", kind: "ranged",
     hp: 90, atk: 15, atkInterval: 680, range: 2.7, moveSpeed: 1.0,
     manaPerAttack: 34, skill: "lure", passive: null, cost: 3,
   },
@@ -133,8 +133,8 @@ export const BREEDS: readonly Breed[] = [
  * 악몽이 쓰는 여덟 마리. **우리 고양이와 한 마리도 겹치지 않는다.**
  *
  * 전에는 적도 `BREEDS`에서 뽑았다. "악몽은 형체가 없어서 잠든 사람이 아는 모습을
- * 빌려 쓴다"는 설정으로 정당화했지만, 실제로는 난전 한가운데서 **내 하양이와 적
- * 하양이가 같은 그림**이었다. 발밑 고리 색과 좌우 반전만으로 갈라야 했는데,
+ * 빌려 쓴다"는 설정으로 정당화했지만, 실제로는 난전 한가운데서 **내 서리별과 적
+ * 입김이가 같은 그림**이었다. 발밑 고리 색과 좌우 반전만으로 갈라야 했는데,
  * 셋이 겹쳐 있으면 그 고리가 서로를 가린다.
  *
  * 시트에 20종이 있는데 우리가 8종, 보스가 9~12번을 쓰고 13~20번이 놀고 있었다.
@@ -169,7 +169,7 @@ export const BREEDS: readonly Breed[] = [
  */
 export const NIGHTMARE_BREEDS: readonly Breed[] = [
   // ── 전사 ─────────────────────────────────────────────
-  // 문틈으로 들어온 것. 검은 등에 흰 배라 우리 턱시도와 헷갈릴 뻔했지만
+  // 문틈으로 들어온 것. 검은 등에 흰 배라 우리 빙글밤과 헷갈릴 뻔했지만
   // 무늬가 뒤집혀 있다.
   {
     id: 20, name: "문틈이", color: "black", cls: "warrior", kind: "melee",
@@ -184,7 +184,7 @@ export const NIGHTMARE_BREEDS: readonly Breed[] = [
   },
 
   // ── 도적 ─────────────────────────────────────────────
-  // 감아도 보이는 눈. 우리 까망이와 같은 검정이지만 눈테가 노랗다.
+  // 감아도 보이는 눈. 우리 그림콩과 같은 검정이지만 눈테가 노랗다.
   {
     id: 19, name: "뜬눈이", color: "black", cls: "rogue", kind: "melee",
     hp: 95, atk: 29, atkInterval: 430, range: 0.8, moveSpeed: 2.4,

@@ -8,12 +8,12 @@
  * 이 파일은 빌드타임 생성 스크립트(scripts/gen-synergies.mjs)와 런타임이
  * 공유한다. 8/26 런타임 프록시로 승격할 때도 같은 검증기를 그대로 쓴다.
  */
-import { BOARD_COLS, type CatColor } from "../game/types.ts";
+import { BOARD_COLS, CLASS_LABEL, type ClassKind } from "../game/types.ts";
 
 /**
  * 시너지 조건.
  *
- * 넷 다 **동시에 성립할 수 있어야 한다.** 예전에는 all_different_5(전부 다른 색 5)가
+ * 모든 조건은 **동시에 성립할 수 있어야 한다.** 예전에는 all_different_5(전부 다른 색 5)가
  * 있었는데, 색이 전부 달라야 하므로 same_color_3·same_breed_2와 수학적으로 배타였다.
  * 그런데 UI는 셋을 나란히 놓아 다 모으라는 것처럼 보여줬다. 게다가 그 조건이 켜진
  * 상태에서 중복 색을 영입하면 팀 전력이 영구히 깎이는 함정이기도 했다.
@@ -21,15 +21,22 @@ import { BOARD_COLS, type CatColor } from "../game/types.ts";
  * front/back 조건은 배치를 요구한다. 구성(무엇을 사는가)과 배치(어디에 놓는가)가
  * 따로 놀지 않게 하려는 것이다.
  */
+export const COMPOSITE_TRIGGERS = [
+  "mage_3_rogue_3",
+  "warrior_3_archer_3",
+  "summoner_3_mage_3",
+] as const;
+export type CompositeTrigger = (typeof COMPOSITE_TRIGGERS)[number];
+
 export const TRIGGERS = [
-  "same_color_3",
   "same_breed_2",
   "front_melee_2",
   "back_ranged_2",
   // 중간 난이도를 위해 신설했다. 2마리 배치 조건은 자동 배치가 거의 채워
-  // 주지만(실측 78.7%), 3마리째부터는 그 직업군을 실제로 사 모아야 한다.
+  // 주지만(빈 팀 시작 뒤 easy 합산 실측 77.2%), 3마리째부터는 그 직업군을 실제로 사 모아야 한다.
   "front_melee_3",
   "back_ranged_3",
+  ...COMPOSITE_TRIGGERS,
 ] as const;
 export type Trigger = (typeof TRIGGERS)[number];
 
@@ -150,11 +157,11 @@ export function validateAll(raws: unknown): ValidationResult {
 /** 검증기가 전부 폐기했거나 데이터가 비었을 때 쓰는 최후 폴백. AC-12. */
 export const PRESET_SYNERGIES: readonly SynergyRule[] = [
   {
-    id: "night_pack",
-    name: "야행성",
-    desc: "같은 색 3마리가 어둠 속에서 발톱을 세운다",
-    trigger: "same_color_3",
-    effect: { key: "atk_mul", value: 1.35 },
+    id: "iron_line",
+    name: "철벽 대열",
+    desc: "앞줄 근접 셋이 어깨를 맞대 벽이 된다",
+    trigger: "front_melee_3",
+    effect: { key: "hp_mul", value: 1.42 },
   },
   {
     id: "litter_bond",
@@ -177,12 +184,19 @@ export const PRESET_SYNERGIES: readonly SynergyRule[] = [
     trigger: "back_ranged_2",
     effect: { key: "atk_mul", value: 1.3 },
   },
+  {
+    id: "arcane_heist",
+    name: "비전 강탈단",
+    desc: "마법사 셋의 주문을 도적 셋이 적진에 꽂는다",
+    trigger: "mage_3_rogue_3",
+    effect: { key: "atk_mul", value: 1.6 },
+  },
 ];
 
 /** 판정에 필요한 아군 한 마리의 정보. Cat 전체를 끌어오지 않으려고 최소 형태만 받는다. */
 export interface BoardUnit {
-  color: CatColor;
   breedId: number;
+  cls: ClassKind;
   kind: "melee" | "ranged";
   /** 열 인덱스. 0이 뒷줄, 2가 앞줄(적에게 가까운 쪽) */
   col: number;
@@ -192,36 +206,76 @@ export interface BoardUnit {
 const FRONT_COL = BOARD_COLS - 1;
 const BACK_COL = 0;
 
+const COMPOSITE_REQUIREMENTS: Record<CompositeTrigger, readonly [ClassKind, ClassKind]> = {
+  mage_3_rogue_3: ["mage", "rogue"],
+  warrior_3_archer_3: ["warrior", "archer"],
+  summoner_3_mage_3: ["summoner", "mage"],
+};
+
+export function isCompositeTrigger(trigger: Trigger): trigger is CompositeTrigger {
+  return (COMPOSITE_TRIGGERS as readonly string[]).includes(trigger);
+}
+
+export interface SynergyProgressPart {
+  label: string;
+  have: number;
+  need: number;
+}
+
+export interface SynergyProgress {
+  have: number;
+  need: number;
+  parts: readonly SynergyProgressPart[];
+}
+
+function singleProgress(label: string, have: number, need: number): SynergyProgress {
+  return { have, need, parts: [{ label, have, need }] };
+}
+
 /**
  * 조건 달성도. "몇 개 중 몇 개"를 그대로 화면에 띄우기 위해 불리언이 아니라 수치를 낸다.
  * 조건만 보여주고 진행도를 감추면 플레이어가 무엇을 더 해야 하는지 알 수 없다.
  */
-export function synergyProgress(trigger: Trigger, units: BoardUnit[]): { have: number; need: number } {
+export function synergyProgress(trigger: Trigger, units: BoardUnit[]): SynergyProgress {
+  if (isCompositeTrigger(trigger)) {
+    const parts = COMPOSITE_REQUIREMENTS[trigger].map((cls) => ({
+      label: CLASS_LABEL[cls],
+      have: units.filter((u) => u.cls === cls).length,
+      need: 3,
+    }));
+    return {
+      have: parts.reduce((sum, part) => sum + Math.min(part.have, part.need), 0),
+      need: parts.reduce((sum, part) => sum + part.need, 0),
+      parts,
+    };
+  }
+
   switch (trigger) {
-    case "same_color_3": {
-      const m = new Map<string, number>();
-      for (const u of units) m.set(u.color, (m.get(u.color) ?? 0) + 1);
-      return { have: Math.max(0, ...m.values()), need: 3 };
-    }
     case "same_breed_2": {
       const m = new Map<number, number>();
       for (const u of units) m.set(u.breedId, (m.get(u.breedId) ?? 0) + 1);
-      return { have: Math.max(0, ...m.values()), need: 2 };
+      return singleProgress("같은 품종", Math.max(0, ...m.values()), 2);
     }
     case "front_melee_2":
-      return { have: units.filter((u) => u.col === FRONT_COL && u.kind === "melee").length, need: 2 };
+      return singleProgress("앞줄 근접", units.filter((u) => u.col === FRONT_COL && u.kind === "melee").length, 2);
     case "back_ranged_2":
-      return { have: units.filter((u) => u.col === BACK_COL && u.kind === "ranged").length, need: 2 };
+      return singleProgress("뒷줄 원거리", units.filter((u) => u.col === BACK_COL && u.kind === "ranged").length, 2);
     case "front_melee_3":
-      return { have: units.filter((u) => u.col === FRONT_COL && u.kind === "melee").length, need: 3 };
+      return singleProgress("앞줄 근접", units.filter((u) => u.col === FRONT_COL && u.kind === "melee").length, 3);
     case "back_ranged_3":
-      return { have: units.filter((u) => u.col === BACK_COL && u.kind === "ranged").length, need: 3 };
+      return singleProgress("뒷줄 원거리", units.filter((u) => u.col === BACK_COL && u.kind === "ranged").length, 3);
   }
 }
 
 export function isTriggered(trigger: Trigger, units: BoardUnit[]): boolean {
-  const { have, need } = synergyProgress(trigger, units);
-  return have >= need;
+  return synergyProgress(trigger, units).parts.every((part) => part.have >= part.need);
+}
+
+/** 복합 조건은 두 직업을 합계로 뭉개지 않고 각각의 진행도를 보여 준다. */
+export function synergyProgressLabel(trigger: Trigger, units: BoardUnit[]): string {
+  return synergyProgress(trigger, units).parts
+    .map((part) => `${part.label} ${Math.min(part.have, part.need)}/${part.need}`)
+    .join(" + ");
 }
 
 /**
@@ -231,21 +285,22 @@ export function isTriggered(trigger: Trigger, units: BoardUnit[]): boolean {
  * 빡빡하다"(요구 마릿수 × 배치 제약)로 봤는데 front/back이 오히려 제일 쉬웠다 —
  * `bestFreeCell`이 근접은 앞줄, 원거리는 뒷줄에 기본으로 앉히기 때문이다.
  * 다음엔 "요구 마릿수 × 매칭 후보군 크기"로 다시 세웠는데(breed 15종이라
- * same_breed_2를 중간으로 예측), 이것도 실측이 부정했다 — 500런에서
- * front/back_2 78.7% ≈ same_breed_2 79.6%로 통계적 동률이었다. 상점 오퍼가
- * 품종을 반복해서 내밀기 때문에 "15종 중 같은 것"이 모형 생각만큼 좁지 않다.
+ * same_breed_2를 중간으로 예측), 이것도 실측이 부정했다. 상점 오퍼가 품종을
+ * 반복해서 내밀기 때문에 "15종 중 같은 것"이 모형 생각만큼 좁지 않다.
  *
  * 그래서 라벨을 실측에 직접 묶는다. Record라 트리거를 늘리면 컴파일러가
  * 누락을 잡고, 수치가 의심되면 리뷰 계측 스크립트로 다시 잰다(500런 ·
  * 전투 시작 시점 활성 기준). 로스터·상점·자동 배치가 바뀌면 재측정할 것.
  */
 const TRIGGER_DIFFICULTY: Record<Trigger, Difficulty> = {
-  front_melee_2: "easy", // 실측 78.7%
-  back_ranged_2: "easy", // 실측 78.7%
-  same_breed_2: "easy", // 실측 79.6% — 두 모형 모두 이걸 중간으로 잘못 예측했다
-  front_melee_3: "medium", // 신설 후 실측 47.6% (500런) — easy와 hard 사이 층
-  back_ranged_3: "medium", // 신설 후 실측 47.6% (front와 합산 표본)
-  same_color_3: "hard", // 실측 34.8%
+  front_melee_2: "easy", // 빈 팀 시작 500런 easy 합산 77.2%
+  back_ranged_2: "easy",
+  same_breed_2: "easy", // 두 모형 모두 이걸 중간으로 잘못 예측했다
+  front_melee_3: "medium", // 단일 3마리 조건 합산 58.0%
+  back_ranged_3: "medium",
+  mage_3_rogue_3: "hard", // 이중 직업 3+3 조건 합산 3.0%
+  warrior_3_archer_3: "hard",
+  summoner_3_mage_3: "hard",
 };
 
 export type Difficulty = "easy" | "medium" | "hard";
@@ -262,36 +317,46 @@ const EFFECT_BASELINE: Record<EffectKey, number> = {
   evade_add: 0,
 };
 
-/** 난이도별 보상 배율. 어려운 목표가 쉬운 목표와 같은 보상이면 어려운 쪽을 볼 이유가 없다. */
-const DIFFICULTY_EFFECT_MUL: Record<Difficulty, number> = {
-  easy: 0.75,
-  medium: 1,
-  hard: 1.3,
+/**
+ * 난이도별 화면 보너스.
+ *
+ * 원본 값을 단순 배율로 키우면 효과 종류가 다른 세 칩에서 `+40% → +21%`처럼
+ * 마지막 악몽 보상이 더 약해 보였다. 입문·도전은 효과 종류와 무관한 고정 퍼센트,
+ * 악몽은 그 효과의 안전 상한을 써 화면과 실제 규칙이 함께 `입문 < 도전 < 악몽`이 된다.
+ */
+const DIFFICULTY_EFFECT_BONUS: Record<Exclude<Difficulty, "hard">, number> = {
+  easy: 0.12,
+  medium: 0.2,
 };
 
 /**
  * 규칙의 효과 크기를 난이도에 맞게 다시 잰다.
  *
- * 기준값에서 벗어난 몫(=진짜 보너스)만 배율을 걸고, `EFFECT_RANGE`로 다시
- * 클램프한다 — 하드 클램프는 LLM 출력 안전장치이므로 난이도 조정이 그 경계를
- * 넘어서는 안 된다.
+ * 입문은 +12%, 도전은 +20%, 악몽은 효과별 허용 상한이다. 배수 효과는 1에서,
+ * 회피는 0에서 더한다. 마지막 클램프는 생성 데이터의 안전 경계를 그대로 지킨다.
  */
 export function scaleEffectForDifficulty(
   effect: SynergyRule["effect"],
   difficulty: Difficulty,
 ): SynergyRule["effect"] {
   const base = EFFECT_BASELINE[effect.key];
-  const mul = DIFFICULTY_EFFECT_MUL[difficulty];
-  const scaled = base + (effect.value - base) * mul;
   const [lo, hi] = EFFECT_RANGE[effect.key];
+  const scaled = difficulty === "hard"
+    ? hi
+    : base + DIFFICULTY_EFFECT_BONUS[difficulty];
   return { key: effect.key, value: Number(clamp(scaled, lo, hi).toFixed(3)) };
+}
+
+/** UI와 접근성 문구가 공유하는 난이도 이름. */
+export function difficultyLabel(difficulty: Difficulty): "입문" | "도전" | "악몽" {
+  if (difficulty === "easy") return "입문";
+  if (difficulty === "medium") return "도전";
+  return "악몽";
 }
 
 /** 화면에 띄울 조건 문구. */
 export function triggerLabel(trigger: Trigger): string {
   switch (trigger) {
-    case "same_color_3":
-      return "같은 색";
     case "same_breed_2":
       return "같은 품종";
     case "front_melee_2":
@@ -302,6 +367,12 @@ export function triggerLabel(trigger: Trigger): string {
       return "앞줄 근접";
     case "back_ranged_3":
       return "뒷줄 원거리";
+    case "mage_3_rogue_3":
+      return "마법사 3 + 도적 3";
+    case "warrior_3_archer_3":
+      return "전사 3 + 궁수 3";
+    case "summoner_3_mage_3":
+      return "소환사 3 + 마법사 3";
   }
 }
 

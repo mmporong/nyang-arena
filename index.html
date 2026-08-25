@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; webrtc 'block'; form-action 'none'; base-uri 'none'; object-src 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; webrtc 'block'; form-action 'none'; base-uri 'none'; object-src 'none'"
     />
     <meta
       name="viewport"
@@ -21,6 +21,20 @@
       content="픽셀 고양이 오토배틀러. 배치하고, 관전하고, 몇 웨이브까지 버티는지 겨루세요."
     />
     <style>
+      @font-face {
+        font-family: "Maplestory";
+        src: url("%BASE_URL%fonts/Maplestory-Light.ttf") format("truetype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Maplestory";
+        src: url("%BASE_URL%fonts/Maplestory-Bold.ttf") format("truetype");
+        font-weight: 800;
+        font-style: normal;
+        font-display: swap;
+      }
       :root {
         color-scheme: dark;
       }
@@ -33,8 +47,8 @@
       body {
         height: 100%;
         overflow: hidden;
-        background: #17110e;
-        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #0b0920;
+        font-family: "Maplestory", "Malgun Gothic", system-ui, sans-serif;
         -webkit-tap-highlight-color: transparent;
       }
       #app {
@@ -72,9 +86,9 @@
         gap: 12px;
         padding: 16px;
         box-sizing: border-box;
-        color: #efe0c6;
-        background: #241a14;
-        border: 2px solid #9c8b76;
+        color: #fff1d6;
+        background: #211743;
+        border: 2px solid #7668aa;
         border-radius: 10px;
         box-shadow: 0 12px 36px rgba(0, 0, 0, 0.48);
       }
@@ -124,9 +138,9 @@
         min-width: 44px;
         min-height: 44px;
         padding: 10px 14px;
-        color: #241a14;
-        background: #efe0c6;
-        border: 2px solid #f5a03c;
+        color: #25102a;
+        background: #fff1d6;
+        border: 2px solid #ff8a4c;
         border-radius: 8px;
         font: inherit;
         line-height: 1.35;
@@ -173,7 +187,7 @@
         color: #9c8b76;
         font-size: 14px;
         letter-spacing: 0.08em;
-        background: #17110e;
+        background: #0b0920;
         transition: opacity 0.3s;
       }
       #boot.gone {
@@ -207,6 +221,12 @@
     </style>
   </head>
   <body>
+    <img id="dreamscape-bg" src="./ui/nightmare-arena-bg.png" alt="" aria-hidden="true" hidden />
+    <img id="generated-icon-atlas" src="./ui/nyang-icon-vfx-atlas.png" alt="" aria-hidden="true" hidden />
+    <img id="generated-combat-atlas" src="./ui/nyang-vfx-combat-atlas.png" alt="" aria-hidden="true" hidden />
+    <img id="generated-magic-atlas" src="./ui/nyang-vfx-magic-atlas.png" alt="" aria-hidden="true" hidden />
+    <img id="generated-defense-atlas" src="./ui/nyang-vfx-defense-atlas.png" alt="" aria-hidden="true" hidden />
+    <img id="generated-ui-atlas" src="./ui/nyang-ui-token-atlas.png" alt="" aria-hidden="true" hidden />
     <div id="app"></div>
     <div id="boot">고양이 부르는 중</div>
     <script type="module" src="/src/main.ts"></script>

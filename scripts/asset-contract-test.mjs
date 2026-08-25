@@ -19,7 +19,19 @@ const ICON_DIR = join(ROOT, "public", "icons");
 const BGM_DIR = join(ROOT, "public", "bgm");
 const SPRITE_DIR = join(ROOT, "public", "sprites");
 const SPRITE_SOURCE_DIR = join(ROOT, "assets", "sprites-src");
+const UI_DIR = join(ROOT, "public", "ui");
 const ICON_SOURCE = join(ROOT, "src", "game", "icons.ts");
+
+const GENERATED_COMBAT_ATLASES = [
+  "nyang-vfx-combat-atlas.png",
+  "nyang-vfx-magic-atlas.png",
+  "nyang-vfx-defense-atlas.png",
+];
+const GENERATED_UI_ATLASES = [
+  "nyang-icon-vfx-atlas.png",
+  ...GENERATED_COMBAT_ATLASES,
+  "nyang-ui-token-atlas.png",
+];
 
 /** UI 아이콘은 공개 재배포 가능한 자체 Canvas 경로만 허용한다. */
 const expectedIcons = [
@@ -203,6 +215,51 @@ for (const atlas of SPRITE_ATLASES) {
 const legacyDecodedBytes = actualSources.length * SPRITE_SOURCE_SIZE * SPRITE_SOURCE_SIZE * 4;
 assert.ok(atlasDecodedBytes < legacyDecodedBytes, "atlas decoded payload가 legacy보다 작아야 한다");
 
+// ImageGen 결과는 코드와 함께 배포되는 투명 4×4 픽셀 아트 시트다. 기존 한 장을
+// 재활용하는 대신 전투용만 세 장(48셀)으로 늘려 최소 3배 변주 계약을 봉인한다.
+assert.equal(GENERATED_COMBAT_ATLASES.length * 16, 48, "전투 이펙트가 기존 16셀의 3배가 아니다");
+let generatedBytes = 0;
+const combatCellDigests = new Set();
+for (const file of GENERATED_UI_ATLASES) {
+  const encoded = readFileSync(join(UI_DIR, file));
+  const decoded = decodePng(encoded, file);
+  assert.ok(decoded.width >= 512 && decoded.width <= 2048, `${file} 폭이 아틀라스 계약 밖이다`);
+  assert.ok(decoded.height >= 512 && decoded.height <= 2048, `${file} 높이가 아틀라스 계약 밖이다`);
+  let transparent = 0;
+  let visible = 0;
+  for (let i = 3; i < decoded.data.length; i += 4) {
+    if (decoded.data[i] === 0) transparent += 1;
+    else visible += 1;
+  }
+  assert.ok(transparent > 0, `${file}에 투명 배경이 없다`);
+  assert.ok(visible > 0, `${file}에 보이는 픽셀이 없다`);
+  if (GENERATED_COMBAT_ATLASES.includes(file)) {
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 4; col++) {
+        const x0 = Math.floor((decoded.width * col) / 4);
+        const x1 = Math.floor((decoded.width * (col + 1)) / 4);
+        const y0 = Math.floor((decoded.height * row) / 4);
+        const y1 = Math.floor((decoded.height * (row + 1)) / 4);
+        const digest = createHash("sha256");
+        let cellVisible = 0;
+        for (let y = y0; y < y1; y++) {
+          const start = (y * decoded.width + x0) * 4;
+          const end = (y * decoded.width + x1) * 4;
+          const line = decoded.data.subarray(start, end);
+          digest.update(line);
+          for (let i = 3; i < line.length; i += 4) if (line[i] > 0) cellVisible += 1;
+        }
+        assert.ok(cellVisible >= 64, `${file} ${row * 4 + col}번 셀이 비어 있다 (${cellVisible}px)`);
+        const cellDigest = digest.digest("hex");
+        assert.ok(!combatCellDigests.has(cellDigest), `${file} ${row * 4 + col}번 셀이 다른 전투 셀과 완전히 같다`);
+        combatCellDigests.add(cellDigest);
+      }
+    }
+  }
+  generatedBytes += encoded.length;
+}
+assert.equal(combatCellDigests.size, 48, "전투 생성 아틀라스 48셀이 모두 고유하지 않다");
+
 console.log(
-  `asset contract passed — 아이콘 ${expectedIcons.length}종 · BGM ${bgmEntries.length}개 · source ${actualSources.length}장/${sourceBytes} bytes/${sourceDigest.digest("hex").slice(0, 16)} · atlas 2장/${atlasBytes} bytes · decoded ${legacyDecodedBytes}→${atlasDecodedBytes}`,
+  `asset contract passed — 아이콘 ${expectedIcons.length}종 · BGM ${bgmEntries.length}개 · source ${actualSources.length}장/${sourceBytes} bytes/${sourceDigest.digest("hex").slice(0, 16)} · sprite atlas 2장/${atlasBytes} bytes · generated ${GENERATED_UI_ATLASES.length}장/${generatedBytes} bytes/전투 48셀 · decoded ${legacyDecodedBytes}→${atlasDecodedBytes}`,
 );

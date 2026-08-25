@@ -24,6 +24,7 @@ import {
 } from "./battle.ts";
 import { bossForIndex, bossKit, BOSS_THRESHOLDS, FINAL_VULNERABLE_MS, SNIPER_BREED } from "./bosses.ts";
 import { drawScene, type Scene } from "./backdrop.ts";
+import { drawGeneratedAtlasCell, drawGeneratedAtlasCellFrom } from "./generated-art.ts";
 import { bossHint, bossOrdinalInStage, isRaidPrepStep, nodeInfo, openLanes, STAGE_STEPS, type NodeKind } from "./map.ts";
 import { drawFish, drawIcon, drawNodeIcon, drawSpeaker, type IconName } from "./icons.ts";
 import { isMuted, playUiCue } from "./audio.ts";
@@ -34,6 +35,7 @@ import { SPRITE_CROP, spriteDrawRect } from "./sprite-atlas.ts";
 import { spriteFor, type SpriteFrame } from "./sprites.ts";
 import {
   boardUnits,
+  canStartBattle,
   OFFER_SLOTS,
   REROLL_COST,
   unitCap,
@@ -80,12 +82,16 @@ import {
   wrapLines,
 } from "./theme.ts";
 import {
+  difficultyLabel,
   effectLabel,
   synergyProgress,
+  triggerDifficulty,
   triggerLabel,
+  type Trigger,
 } from "../validate/synergy-schema.ts";
 import { PASSIVES, SKILLS } from "./skills.ts";
 import {
+  BOARD_COLS,
   BOARD_ROWS,
   BOARD_SIZE,
   CLASS_LABEL,
@@ -136,18 +142,31 @@ function motionPulse(period: number): number {
 /**
  * 직업 색. 뱃지와 카드에서 같은 색을 쓴다.
  *
- * 전부 저채도다. 직업은 **정체성**이지 신호가 아니므로 판 위에서 예고와
- * 경쟁하면 안 된다. 특히 궁수는 원래 액션 버튼과 같은 주황이었는데, 주황을
- * 버튼에 양보하고 청동으로 물러났다.
+ * 전장 신호보다 면적이 작으므로 색상은 또렷하게 갈라 두되, 발광은 쓰지 않는다.
+ * 산호·보라·금색·청록·남색의 다섯 축으로 카드와 뱃지를 빠르게 구분한다.
  */
 const CLASS_COLOR: Record<ClassKind, string> = {
-  warrior: "#C4715A",
-  rogue: "#A97CC4",
-  archer: "#C9A05C",
-  // 소환사는 남색. 마법사의 하늘색과 이웃이라 한 단계 짙게 잡아 갈랐다.
-  mage: "#6E97C4",
-  summoner: "#5C6BB8",
+  warrior: "#FF7B74",
+  rogue: "#C79BFF",
+  archer: "#FFD166",
+  mage: "#65D9FF",
+  summoner: "#70DFC1",
 };
+
+/** ImageGen 재화 토큰. 로드 전에는 기존 벡터 생선으로 안전하게 폴백한다. */
+function drawCurrencyToken(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  active = true,
+): void {
+  ctx.save();
+  ctx.globalAlpha *= active ? 1 : 0.42;
+  const drawn = drawGeneratedAtlasCellFrom(ctx, "generated-ui-atlas", 0, cx, cy, size, 1);
+  if (!drawn) drawFish(ctx, cx, cy, size, active ? T.fish : T.muted);
+  ctx.restore();
+}
 
 /**
  * 직업 아이콘. 7x7 비트맵으로, 각 행의 하위 7비트가 한 줄이다.
@@ -210,11 +229,15 @@ function drawClassIcon(
   }
 }
 
-const TRIGGER_COLOR: Record<string, string> = {
-  same_color_3: "#C9A05C",
-  same_breed_2: "#A97CC4",
-  front_melee_2: "#C4715A",
-  back_ranged_2: "#6E97C4",
+const TRIGGER_COLOR: Record<Trigger, string> = {
+  same_breed_2: "#C79BFF",
+  front_melee_2: "#FF7B74",
+  back_ranged_2: "#65D9FF",
+  front_melee_3: "#FF9A82",
+  back_ranged_3: "#7DE5FF",
+  mage_3_rogue_3: "#FFD166",
+  warrior_3_archer_3: "#FFB067",
+  summoner_3_mage_3: "#D7A5FF",
 };
 
 export interface DragState {
@@ -297,10 +320,10 @@ function drawBackground(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): 
   let hit = bgGradientCache.get(ctx);
   if (!hit || hit.key !== key) {
     const g = ctx.createLinearGradient(0, 0, 0, L.h);
-    g.addColorStop(0, "rgba(9,6,5,0.80)");
-    g.addColorStop(Math.max(0.02, Math.min(0.98, top / L.h)), "rgba(9,6,5,0.30)");
-    g.addColorStop(Math.max(0.03, Math.min(0.99, bottom / L.h)), "rgba(9,6,5,0.42)");
-    g.addColorStop(1, "rgba(9,6,5,0.86)");
+    g.addColorStop(0, "rgba(9,7,28,0.66)");
+    g.addColorStop(Math.max(0.02, Math.min(0.98, top / L.h)), "rgba(18,12,42,0.2)");
+    g.addColorStop(Math.max(0.03, Math.min(0.99, bottom / L.h)), "rgba(18,12,42,0.3)");
+    g.addColorStop(1, "rgba(9,7,28,0.72)");
     hit = { key, g };
     bgGradientCache.set(ctx, hit);
   }
@@ -645,34 +668,36 @@ function hudChip(
    * 상대적으로 작아졌다. 1669x925에서 캡션이 9px, 생선 그림이 18px이라
    * 자원이 자원으로 안 읽혔다. 자원은 매 걸음 보는 숫자라 한눈에 들어와야 한다.
    */
-  const cap = Math.max(11, box.h * 0.30);
-  const px = Math.max(3, Math.round(box.h * 0.075));
-  const valueY = box.y + box.h * 0.70;
-  const iconSize = box.h * 0.62;
-  // 그림이 붙으면 숫자와 그림을 합친 덩어리가 정렬 기준을 따라야 한다.
-  // 숫자만 정렬하면 가운데 정렬에서 덩어리가 그림 폭만큼 왼쪽으로 밀린다.
-  // 그림과 숫자 사이 간격. 0.78이면 붙어 보여서 한 덩어리로 안 읽혔다.
-  const gap = icon ? iconSize * 1.15 : 0;
+  const cap = Math.max(12, Math.min(18, box.h * 0.26));
+  const px = Math.max(3, Math.round(box.h * 0.07));
+  const valueH = numTextHeight(px);
+  const valueY = box.y + box.h - valueH / 2;
+  const iconSize = Math.min(box.h * 0.56, valueH * 1.34);
+  const gap = icon ? Math.max(16, box.h * 0.22) : 0;
   const anchor =
     align === "left"
       ? box.x
       : align === "right"
         ? box.x + box.w
         : box.x + box.w / 2;
-  const x = align === "left" ? anchor + gap : align === "right" ? anchor : anchor + gap / 2;
-
-  uiText(ctx, caption, anchor, box.y + box.h * 0.26, cap, T.muted, {
+  uiText(ctx, caption, anchor, box.y + cap / 2, cap, T.muted, {
     align,
     weight: 700,
   });
-  numText(ctx, value, x, valueY, px, color, align, false);
 
   if (icon) {
     const numW = numTextWidth(ctx, value, px);
-    // 숫자 덩어리의 왼쪽 끝을 구해 거기서 한 칸 더 왼쪽에 놓는다.
-    const numLeft = align === "left" ? x : align === "right" ? x - numW : x - numW / 2;
-    drawFish(ctx, numLeft - gap * 0.62, valueY, iconSize, color);
+    const groupW = iconSize + gap + numW;
+    const left = align === "center"
+      ? anchor - groupW / 2
+      : align === "right"
+        ? anchor - groupW
+        : anchor;
+    drawCurrencyToken(ctx, left + iconSize / 2, valueY, iconSize);
+    numText(ctx, value, left + iconSize + gap, valueY, px, color, "left", false);
+    return;
   }
+  numText(ctx, value, anchor, valueY, px, color, align, false);
 }
 
 /**
@@ -1969,6 +1994,54 @@ function drawFx(ctx: CanvasRenderingContext2D, L: Layout): void {
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(fxBuf, 0, 0, L.w, L.h);
   ctx.imageSmoothingEnabled = prev;
+  drawGeneratedFxAccents(ctx, L, reduce);
+}
+
+/**
+ * 생성 아틀라스는 스킬의 정체성을 한 프레임에 읽게 하는 큰 악센트다.
+ * 기존 벡터·파티클은 방향과 판정 범위를 계속 맡아 게임 정보가 그림에 가려지지 않는다.
+ */
+function drawGeneratedFxAccents(ctx: CanvasRenderingContext2D, L: Layout, reduce: boolean): void {
+  for (const f of fxs) {
+    const source = fieldToScreen(L, f.fx, f.fy);
+    const target = fieldToScreen(L, f.tx, f.ty);
+    const p = f.art?.anchor === "target"
+      ? target
+      : f.art?.anchor === "mid"
+        ? { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 }
+        : source;
+    const t = combatVectorProgress(f.life, f.maxLife, reduce);
+    let cell = 6;
+    if (f.kind === "impact" || f.kind === "slash") cell = 1;
+    else if (f.kind === "status") cell = f.status === "shield" ? 2 : f.status === "stun" ? 10 : 7;
+    else if (f.kind === "ember") cell = 4;
+    else if (f.kind === "frost") cell = 5;
+    else if (f.kind === "streak") cell = 9;
+    else if (f.kind === "bossdeath") cell = 14;
+    else if (f.kind === "phaseShift") cell = 11;
+    const base = f.kind === "bossdeath" || f.kind === "phaseShift"
+      ? 2.2
+      : f.kind === "impact" || f.kind === "spark"
+        ? 1.25
+        : f.kind === "status"
+          ? 1.15
+          : 1.45;
+    const size = Math.max(24, L.cell * base * (f.art?.scale ?? 1) * (0.92 + t * 0.2));
+    const alpha = f.kind === "impact" || f.kind === "spark" ? 0.86 : 0.8;
+    const rotation = f.art?.rotate
+      ? Math.atan2(target.y - source.y, target.x - source.x) + Math.PI / 2
+      : 0;
+    if (f.art) {
+      const atlasId = f.art.atlas === "combat"
+        ? "generated-combat-atlas"
+        : f.art.atlas === "magic"
+          ? "generated-magic-atlas"
+          : "generated-defense-atlas";
+      drawGeneratedAtlasCellFrom(ctx, atlasId, f.art.cell, p.x, p.y, size, Math.max(0, alpha * (1 - t)), rotation);
+    } else {
+      drawGeneratedAtlasCell(ctx, cell, p.x, p.y, size, Math.max(0, alpha * (1 - t)));
+    }
+  }
 }
 
 /** 상태 적용/해제 문구는 저해상도 FX 버퍼 밖에서 그려 한글 획이 뭉개지지 않게 한다. */
@@ -2324,6 +2397,19 @@ function drawShots(ctx: CanvasRenderingContext2D, L: Layout): void {
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(endX, endY);
     ctx.stroke();
+    // 투사체의 큰 악센트도 반드시 공격자에서 출발한다. 선은 전체 인과를,
+    // 이 화살은 누가 쐈는지를 맡는다.
+    const launch = Math.min(len * 0.18, L.cell * 0.28);
+    drawGeneratedAtlasCellFrom(
+      ctx,
+      "generated-combat-atlas",
+      4,
+      from.x + ux * launch,
+      from.y + uy * launch,
+      Math.max(24, L.cell * 0.62),
+      0.82 * fade,
+      Math.atan2(dy, dx) + Math.PI / 2,
+    );
     if (s.hit) {
       // 목표 머리 — 선과 직교하는 마름모라 이동 탄환과 다르게 읽힌다.
       const px = -uy * rad * 1.3;
@@ -2407,7 +2493,8 @@ function drawPops(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
  */
 function drawSideLabels(ctx: CanvasRenderingContext2D, L: Layout): void {
   const a = arenaBox(L);
-  const fs = Math.min(Math.max(9, L.cell * 0.16), L.labelH * 0.8);
+  const floor = L.h < 360 ? 11 : 14;
+  const fs = Math.min(Math.max(floor, L.cell * 0.24), Math.max(floor, L.labelH * 0.84));
   const inset = L.cell * 0.22;
   const put = (
     x: number,
@@ -2416,6 +2503,22 @@ function drawSideLabels(ctx: CanvasRenderingContext2D, L: Layout): void {
     color: string,
     align: CanvasTextAlign,
   ) => {
+    const chipW = fs * (text === "우리 편" ? 4.3 : 3.3);
+    const edgePad = fs * 0.48;
+    const chip: Rect = {
+      x: align === "right" ? x - chipW + edgePad : x - edgePad,
+      y: y - fs * 0.72,
+      w: chipW,
+      h: fs * 1.44,
+    };
+    roundRect(ctx, chip, chip.h * 0.42);
+    ctx.fillStyle = "rgba(18,12,42,0.78)";
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.72;
+    ctx.lineWidth = Math.max(1, fs * 0.08);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
     uiText(ctx, text, x, y, fs, color, {
       align,
       weight: 800,
@@ -2567,17 +2670,28 @@ function drawTeamStrip(
      * (design-brief 4-2가 잡은 위계 역전). 옆으로 나오면서 크기를 줄일 수 있다.
      */
     const rowH = r.h / rows.length;
-    const fs = Math.max(10, Math.min(15, rowH * 0.42));
-    const px = Math.max(1, rowH * 0.062);
+    const fs = classRowFontSize(rowH);
+    const px = Math.max(1, rowH * 0.07);
     const iconSize = Math.min(rowH * 0.62, r.w * 0.13);
     rows.forEach(([label, n, hue, icon], i) => {
       const cy = r.y + rowH * (i + 0.5);
+      const isEnemy = icon === null;
+      if (isEnemy) {
+        const badge = { x: r.x, y: cy - rowH * 0.38, w: r.w, h: rowH * 0.76 };
+        roundRect(ctx, badge, badge.h * 0.3);
+        ctx.fillStyle = "rgba(255,123,116,0.08)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,123,116,0.22)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
       // 아이콘이 있으면 글자를 그만큼 민다. 없는 줄(상대)도 같은 자리에서
       // 시작해야 다섯 줄의 글머리가 어긋나지 않는다.
       const textX = r.x + iconSize * 1.35;
-      if (icon) drawIcon(ctx, icon, r.x + iconSize * 0.5, cy, iconSize, n > 0 ? hue : T.muted);
-      uiText(ctx, label, textX, cy, fs, T.muted, { align: "left", weight: 700 });
-      numText(ctx, String(n), r.x + r.w, cy, px, n > 0 ? hue : T.muted, "right", false);
+      const rowColor = n > 0 || isEnemy ? hue : hexA(hue, 0.68);
+      if (icon) drawIcon(ctx, icon, r.x + iconSize * 0.5, cy, iconSize, rowColor);
+      uiText(ctx, label, textX, cy, fs, rowColor, { align: "left", weight: 800 });
+      numText(ctx, String(n), r.x + r.w, cy, px, rowColor, "right", false);
       if (i < rows.length - 1) {
         const y = Math.round(r.y + rowH * (i + 1)) + 0.5;
         ctx.strokeStyle = "rgba(239,224,198,0.07)";
@@ -2704,7 +2818,57 @@ function drawPortraitWell(
  */
 function costBadgeWidth(ctx: CanvasRenderingContext2D, r: number, cost: number): number {
   const px = Math.max(1, (r * 1.0) / 7);
-  return r * 0.88 + r * 1.24 * 0.86 + r * 0.12 + numTextWidth(ctx, String(cost), px);
+  const fish = r * 1.12;
+  const gap = Math.max(8, r * 0.32);
+  return r * 0.88 + fish + gap + numTextWidth(ctx, String(cost), px);
+}
+
+/** 배치할 때만 보이는 기본 역할 가이드. 첫 고양이부터 어느 끝 열이 값인지 말한다. */
+function drawFormationGuides(ctx: CanvasRenderingContext2D, L: Layout, s: RunState): void {
+  if (!L.columns || (s.phase !== "prepare" && s.phase !== "reward")) return;
+  const room = L.allyBoard.x - L.button.x;
+  const w = Math.min(144, room - 10);
+  if (w < 92) return;
+  const h = 42;
+  const row = Math.floor(BOARD_ROWS / 2);
+  const guides = [
+    {
+      cell: row * BOARD_COLS + (BOARD_COLS - 1),
+      art: 12,
+      color: CLASS_COLOR.warrior,
+      title: "앞줄 근접",
+      effect: `체력 +${Math.round((BALANCE.frontlineMeleeHp - 1) * 100)}%`,
+    },
+    {
+      cell: row * BOARD_COLS,
+      art: 13,
+      color: CLASS_COLOR.archer,
+      title: "뒷줄 원거리",
+      effect: `공격 +${Math.round((BALANCE.backlineRangedAtk - 1) * 100)}%`,
+    },
+  ];
+  for (const guide of guides) {
+    const cell = cellRect(L, "ally", guide.cell);
+    const r = { x: L.allyBoard.x - w - 8, y: cell.y + cell.h / 2 - h / 2, w, h };
+    roundRect(ctx, r, h / 2);
+    ctx.fillStyle = "rgba(18,12,42,0.82)";
+    ctx.fill();
+    ctx.strokeStyle = hexA(guide.color, 0.58);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    drawGeneratedAtlasCellFrom(ctx, "generated-ui-atlas", guide.art, r.x + h * 0.48, r.y + h / 2, h * 0.62, 0.92);
+    const textX = r.x + h * 0.88;
+    uiText(ctx, guide.title, textX, r.y + h * 0.34, 13, guide.color, {
+      align: "left",
+      weight: 800,
+      maxWidth: r.x + r.w - 7 - textX,
+    });
+    uiText(ctx, guide.effect, textX, r.y + h * 0.7, 12, T.text, {
+      align: "left",
+      weight: 700,
+      maxWidth: r.x + r.w - 7 - textX,
+    });
+  }
 }
 
 function drawCostBadge(
@@ -2716,15 +2880,15 @@ function drawCostBadge(
   afford: boolean,
 ): void {
   const hue = afford ? T.fish : T.muted;
-  const fish = r * 1.24;
+  const fish = r * 1.12;
   // 숫자 높이를 뱃지 높이에 맞춘다. 두 자리(유물이 9~12생선)도 같은 크기로 선다 —
   // 옛 원은 자릿수만큼 글자를 줄여야 했지만 알약은 폭이 따라 늘어난다.
   const px = Math.max(1, (r * 1.0) / 7);
   const numW = numTextWidth(ctx, String(cost), px);
-  const gap = r * 0.12;
+  const gap = Math.max(8, r * 0.32);
   const padX = r * 0.44;
   const h = r * 2;
-  const w = padX * 2 + fish * 0.86 + gap + numW;
+  const w = padX * 2 + fish + gap + numW;
   const right = cx + r;
   const box = { x: right - w, y: cy - h / 2, w, h };
 
@@ -2735,7 +2899,7 @@ function drawCostBadge(
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  drawFish(ctx, box.x + padX + fish * 0.43, cy, fish, hue);
+  drawCurrencyToken(ctx, box.x + padX + fish / 2, cy, fish, afford);
   numText(ctx, String(cost), right - padX, cy, px, hue, "right", false);
 }
 
@@ -2978,18 +3142,20 @@ function drawOffers(
      * 설명은 원래 문장이라 가장 긴데 가장 좁은 자리를 받고 있었다. 초상 아래
      * 빈 폭이 그대로 남아 있었으므로 거기로 내린다 — **긴 글에 긴 자리를** 준다.
      */
-    const br = Math.max(12, cr.h * 0.155);
-    const roomy = cr.h >= 84;
-    const headH = roomy ? cr.h * 0.58 : cr.h;
-    const side = Math.min(headH - pad * 1.4, cr.w * 0.19);
+    const br = Math.max(12, cr.h * 0.15);
+    const roomy = cr.h >= 96;
+    const headH = roomy ? cr.h * 0.6 : cr.h;
+    const side = Math.min(headH - pad * 1.7, 78, cr.w * 0.2);
     const well: Rect = { x: cr.x + pad, y: cr.y + pad, w: side, h: side };
     drawPortraitWell(ctx, well, o.breed!.id, o.breed!.id * 7 + i, accent, afford, t);
 
-    const fs = Math.max(13, Math.min(cr.h * 0.2, cr.w * 0.088));
+    const fs = Math.max(22, Math.min(28, cr.w * 0.075));
+    const metaFs = Math.max(14, Math.min(16, cr.h * 0.095));
     const textX = well.x + well.w + pad;
     const textW = cr.x + cr.w - pad - costBadgeWidth(ctx, br, o.cost) - pad * 0.7 - textX;
 
-    uiText(ctx, o.label, textX, cr.y + headH * (roomy ? 0.38 : 0.4), fs, afford ? T.text : T.muted, {
+    const nameY = cr.y + pad + fs * 0.55;
+    uiText(ctx, o.label, textX, nameY, fs, afford ? T.text : T.muted, {
       align: "left",
       weight: 800,
       maxWidth: textW,
@@ -3002,21 +3168,34 @@ function drawOffers(
      * 실려 있었다. 왼쪽 줄 직업 카운터가 이미 같은 그림을 쓰므로, 카드와 카운터가
      * **같은 기호로 같은 것을 가리키게** 된다 — 새 어휘를 안 늘리고 연결만 짓는다.
      */
-    const abilY = cr.y + headH * 0.72;
-    const icoS = fs * 0.72;
-    const hasCls = drawIcon(ctx, `cls-${o.breed!.cls}` as IconName, textX + icoS * 0.5, abilY, icoS, afford ? accent : T.muted);
-    const abilX = textX + (hasCls ? icoS * 1.25 : 0);
-    uiText(ctx, abilityLine, abilX, abilY, fs * 0.62, afford ? accent : T.muted, {
+    const metaY = cr.y + headH * 0.72;
+    const pillH = Math.max(24, metaFs * 1.55);
+    const pillW = Math.max(68, metaFs * 4.3);
+    const classPill = { x: textX, y: metaY - pillH / 2, w: pillW, h: pillH };
+    roundRect(ctx, classPill, pillH / 2);
+    ctx.fillStyle = afford ? hexA(accent, 0.15) : "rgba(255,247,232,0.035)";
+    ctx.fill();
+    ctx.strokeStyle = afford ? hexA(accent, 0.72) : "rgba(255,247,232,0.14)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    const icoS = metaFs * 1.02;
+    drawIcon(ctx, `cls-${o.breed!.cls}` as IconName, classPill.x + pillH * 0.58, metaY, icoS, afford ? accent : T.muted);
+    uiText(ctx, CLASS_LABEL[o.breed!.cls], classPill.x + pillH * 1.05, metaY, metaFs, afford ? accent : T.muted, {
       align: "left",
-      weight: 700,
-      maxWidth: textW - (abilX - textX),
+      weight: 800,
+    });
+    const skillX = classPill.x + classPill.w + 10;
+    uiText(ctx, abilityName, skillX, metaY, metaFs, afford ? T.paperDim : T.muted, {
+      align: "left",
+      weight: 800,
+      maxWidth: Math.max(24, textX + textW - skillX),
     });
 
     // 설명은 카드 폭을 다 쓴다. 두 줄까지 접는다.
     if (roomy) {
-      const dfs = Math.max(11, fs * 0.58);
+      const dfs = Math.max(16, Math.min(18, cr.h * 0.105));
       const dw = cr.w - pad * 2;
-      let dy = cr.y + headH + dfs * 0.9;
+      let dy = cr.y + headH + dfs * 0.85;
       for (const line of wrapLines(ctx, abilityDesc, dfs, 500, dw, 2)) {
         uiText(ctx, line, cr.x + pad, dy, dfs, afford ? T.paperDim : T.muted, {
           align: "left",
@@ -3026,7 +3205,7 @@ function drawOffers(
       }
     }
 
-    drawCostBadge(ctx, cr.x + cr.w - pad - br, cr.y + cr.h / 2, br, o.cost, afford);
+    drawCostBadge(ctx, cr.x + cr.w - pad - br, cr.y + headH * 0.5, br, o.cost, afford);
   });
 }
 
@@ -3080,6 +3259,10 @@ function pointInRect(rect: Rect, x: number, y: number): boolean {
 /** 버튼 얼굴의 pulse와 별개로, 지금 입력을 받아 큐에 보존할 수 있는가. */
 function primaryButtonAcceptsInput(s: RunState): boolean {
   if (s.phase === "map") return false;
+  if (s.phase === "reward") {
+    return s.relicDraftActive || s.nodeKind === "shop" || canStartBattle(s);
+  }
+  if (s.phase === "prepare") return canStartBattle(s);
   if (s.phase !== "battle") return true;
   // 쿨다운 중 입력도 battle.ts의 pending 큐가 보존한다. 여기서 cooldown이나
   // pulse 조건으로 막으면 포인터만 예약 입력을 잃고 Space/G와 갈라진다.
@@ -3480,15 +3663,16 @@ function drawRelicColumn(
 
   if (s.relics.length === 0) {
     // 빈 줄을 그냥 두면 고장으로 보인다. 어디서 얻는지를 적어 둔다.
-    uiText(ctx, "아직 없어요", r.x + r.w / 2, r.y + r.h * 0.4, Math.max(11, r.w * 0.075), T.muted, {
+    const emptyY = r.y + Math.min(78, r.w * 0.2);
+    uiText(ctx, "아직 없어요", r.x + r.w / 2, emptyY, Math.max(11, r.w * 0.075), T.muted, {
       align: "center",
       weight: 700,
     });
     uiText(
       ctx,
-      "가위눌림을 밀어내면 하나 떨어져요",
+      "유물 정예전 승리 시 유물 1개",
       r.x + r.w / 2,
-      r.y + r.h * 0.4 + Math.max(16, r.w * 0.1),
+      emptyY + Math.max(22, r.w * 0.09),
       Math.max(10, r.w * 0.058),
       "rgba(156,139,118,0.7)",
       { align: "center", weight: 500, maxWidth: r.w * 0.92 },
@@ -3591,7 +3775,9 @@ function drawRerollButton(
     { align: L.columns ? "left" : "right", weight: 700 },
   );
   // 값 왼쪽에 생선. 카드 뱃지·HUD와 같은 그림이라 "이것도 생선 값"이 붙는다.
-  drawFish(ctx, rollRight - numW - rr.h * 0.34, rr.y + rr.h / 2, rr.h * 0.5, canRoll ? T.fish : T.muted);
+  const rollFish = rr.h * 0.48;
+  const rollGap = Math.max(8, rr.h * 0.2);
+  drawCurrencyToken(ctx, rollRight - numW - rollGap - rollFish / 2, rr.y + rr.h / 2, rollFish, canRoll);
   numText(ctx, String(REROLL_COST), rollRight, rr.y + rr.h / 2, rollPx, canRoll ? T.fish : T.muted, "right", false);
 }
 
@@ -3629,9 +3815,19 @@ function drawBottomZone(
      * 상점은 **적을 보면서 사는 자리**다 — 판을 어둡게 하면 그 순서를 만든 이유가
      * 사라진다.
      */
-    // 오른쪽 줄은 국면에 따라 내용만 바뀌고 자리는 늘 있다 — 상점이면 카드,
-    // 아니면 보유 유물. 국면마다 패널이 생겼다 사라지면 화면이 요동친다.
-    const p = L.offersPanel;
+    // 유물이 하나도 없을 때는 빈 검은 판을 화면 끝까지 늘이지 않는다. 첫 판에서
+    // 정보 두 줄뿐인 400px 패널은 전장보다 무거워 보였다. 좌표 열은 유지하고
+    // 배경만 내용 높이에 맞춰 줄여 국면 전환 때 보드가 흔들리지는 않는다.
+    const panelPad = uiSpace(L.scale, 3);
+    const p = !reward && s.relics.length === 0
+      ? {
+          ...L.offersPanel,
+          h: Math.min(
+            L.offersPanel.h,
+            L.offerCards.y + Math.max(126, L.offerCards.w * 0.38) - L.offersPanel.y,
+          ),
+        }
+      : L.offersPanel;
     roundRect(ctx, p, Math.min(16, p.w * 0.06));
     ctx.fillStyle = "rgba(20,14,11,0.80)";
     ctx.fill();
@@ -3641,7 +3837,6 @@ function drawBottomZone(
     // 왼쪽 줄(직업 수 + 목표)은 전투 중에도 남는다. 무엇이 몇 마리 살아 있고
     // 목표를 얼마나 채웠는지가 전투를 보는 정보다. 두 블록을 한 패널로 묶어야
     // 한 덩어리로 읽힌다 — 따로 깔았더니 직업 수만 떠 있는 상자로 보였다.
-    const panelPad = uiSpace(L.scale, 3);
     const leftPanelPad = Math.min(panelPad, L.offers.x);
     const lp = {
       x: L.offers.x - leftPanelPad,
@@ -3745,6 +3940,75 @@ function drawBottomZone(
  * 화면 아래 목표 세 줄이 무슨 뜻인지 알 수 없었다.
  * 네 조건은 전부 동시에 만족할 수 있으므로 셋 다 켜는 것이 실제 목표가 된다.
  */
+function synergyGeneratedCell(trigger: Trigger): number | null {
+  switch (trigger) {
+    case "front_melee_2":
+    case "front_melee_3":
+      return 12;
+    case "back_ranged_2":
+    case "back_ranged_3":
+      return 13;
+    case "warrior_3_archer_3":
+      return 9;
+    case "mage_3_rogue_3":
+      return 10;
+    case "summoner_3_mage_3":
+      return 11;
+    case "same_breed_2":
+      return null;
+  }
+}
+
+function drawSynergyIcon(
+  ctx: CanvasRenderingContext2D,
+  trigger: Trigger,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+): void {
+  const cell = synergyGeneratedCell(trigger);
+  const drawn = cell === null
+    ? drawGeneratedAtlasCell(ctx, 2, cx, cy, size, 0.96)
+    : drawGeneratedAtlasCellFrom(ctx, "generated-ui-atlas", cell, cx, cy, size, 0.96);
+  if (drawn) return;
+  const fallback: ClassKind = trigger.startsWith("back_")
+    ? "archer"
+    : trigger.startsWith("front_")
+      ? "warrior"
+      : trigger.startsWith("mage_")
+        ? "mage"
+        : trigger.startsWith("summoner_")
+          ? "summoner"
+          : "rogue";
+  drawIcon(ctx, CLASS_PICTO[fallback], cx, cy, size * 0.8, color);
+}
+
+function drawCompositeProgress(
+  ctx: CanvasRenderingContext2D,
+  parts: ReturnType<typeof synergyProgress>["parts"],
+  x: number,
+  y: number,
+  size: number,
+  active: boolean,
+): void {
+  let cursor = x;
+  parts.forEach((part, index) => {
+    const cls = CLASS_ORDER.find((candidate) => CLASS_LABEL[candidate] === part.label);
+    const text = `${part.label} ${Math.min(part.have, part.need)}/${part.need}`;
+    uiText(ctx, text, cursor, y, size, cls ? (active ? CLASS_COLOR[cls] : hexA(CLASS_COLOR[cls], 0.72)) : T.muted, {
+      align: "left",
+      weight: 800,
+    });
+    cursor += ctx.measureText(text).width;
+    if (index < parts.length - 1) {
+      const plus = "  +  ";
+      uiText(ctx, plus, cursor, y, size, T.muted, { align: "left", weight: 800 });
+      cursor += ctx.measureText(plus).width;
+    }
+  });
+}
+
 function drawSynergies(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -3754,121 +4018,80 @@ function drawSynergies(
   if (r.h < 12) return;
   const n = Math.max(1, s.synergies.length);
   const units = boardUnits(s);
-  // 세로줄에서는 위아래로 쌓고, 접힌 구성에서는 좌우로 늘어놓는다.
-  // 세로줄에서는 `synergyBar`가 이미 칩 셋에 딱 맞게 잡혀 있다(computeLayout).
-  // 같은 식을 써야 칩이 패널을 안 넘는다.
-  const gap = L.columns ? Math.max(6, r.w * 0.04) : r.w * 0.016;
+  const gap = L.columns ? Math.max(8, r.w * 0.035) : r.w * 0.016;
   const cw = L.columns ? r.w : (r.w - gap * (n - 1)) / n;
   const ch = L.columns ? (r.h - gap * (n - 1)) / n : r.h;
 
   s.synergies.forEach((syn, i) => {
     const on = s.activeSynergyIds.has(syn.id);
+    const difficulty = triggerDifficulty(syn.trigger);
+    const tier = difficultyLabel(difficulty);
     const hue = TRIGGER_COLOR[syn.trigger] ?? T.gold;
-    const { have, need } = synergyProgress(syn.trigger, units);
+    const tierHue = difficulty === "hard" ? T.gold : difficulty === "medium" ? T.fish : T.ally;
+    const progress = synergyProgress(syn.trigger, units);
+    const composite = progress.parts.length > 1;
     const cr: Rect = L.columns
       ? { x: r.x, y: r.y + i * (ch + gap), w: cw, h: ch }
       : { x: r.x + i * (cw + gap), y: r.y, w: cw, h: ch };
-    const fs = Math.max(10, cr.h * 0.27);
 
-    roundRect(ctx, cr, cr.h * 0.22);
-    ctx.fillStyle = on ? "rgba(240,186,74,0.13)" : "rgba(239,224,198,0.035)";
+    roundRect(ctx, cr, cr.h * 0.2);
+    ctx.fillStyle = on
+      ? difficulty === "hard" ? "rgba(255,209,102,0.18)" : "rgba(101,217,255,0.12)"
+      : difficulty === "hard" ? "rgba(255,209,102,0.07)" : "rgba(255,247,232,0.045)";
     ctx.fill();
-    ctx.strokeStyle = on ? hue : "rgba(239,224,198,0.10)";
-    ctx.lineWidth = on ? 2 : 1;
+    ctx.strokeStyle = on ? hue : difficulty === "hard" ? "rgba(255,209,102,0.58)" : "rgba(255,247,232,0.18)";
+    ctx.lineWidth = difficulty === "hard" ? 2 : on ? 2 : 1;
     ctx.stroke();
 
-    const padX = cr.h * 0.22;
-    const inner = cr.w - padX * 2;
-    const px = Math.max(1, cr.h * 0.03);
-    const prog = `${Math.min(have, need)}/${need}`;
+    const pad = Math.max(10, cr.h * 0.15);
+    const iconSize = Math.min(34, cr.h * 0.5);
+    const iconCx = cr.x + pad + iconSize / 2;
+    const iconCy = cr.y + cr.h / 2;
+    drawSynergyIcon(ctx, syn.trigger, iconCx, iconCy, iconSize, on ? hue : tierHue);
 
-    // 칩이 좁으면 좌우로 나눌 수 없다. 세로 화면에서 글자가 겹치던 문제.
-    const wide = cr.w > cr.h * 6;
-
-    if (wide) {
-      uiText(
-        ctx,
-        triggerLabel(syn.trigger),
-        cr.x + padX,
-        cr.y + cr.h * 0.34,
-        fs * 0.86,
-        on ? hue : T.muted,
-        {
-          align: "left",
-          weight: 700,
-          maxWidth: inner * 0.52,
-        },
-      );
-      numText(
-        ctx,
-        prog,
-        cr.x + padX,
-        cr.y + cr.h * 0.72,
-        px,
-        on ? hue : T.muted,
-        "left",
-        false,
-      );
-      uiText(
-        ctx,
-        syn.name,
-        cr.x + cr.w - padX,
-        cr.y + cr.h * 0.34,
-        fs * 0.86,
-        on ? T.text : T.muted,
-        {
-          align: "right",
-          weight: 800,
-          maxWidth: inner * 0.45,
-        },
-      );
-      uiText(
-        ctx,
-        effectLabel(syn.effect),
-        cr.x + cr.w - padX,
-        cr.y + cr.h * 0.72,
-        fs * 0.8,
-        on ? T.gold : "rgba(156,139,118,0.6)",
-        { align: "right", weight: 600, maxWidth: inner * 0.55 },
-      );
-      return;
-    }
-
-    // 좁은 칩: 두 줄로 확실히 나눈다. 이름(장식)은 뺀다 — 플레이어에게 필요한 건
-    // 무엇을 해야 하는가지 시너지의 이름이 아니다.
-    // 윗줄: 조건과 진행도. 아랫줄: 얻는 효과.
+    const textX = iconCx + iconSize / 2 + Math.max(10, cr.h * 0.14);
+    const right = cr.x + cr.w - pad;
+    const pillH = Math.min(24, cr.h * 0.3);
+    const pillW = Math.max(44, pillH * 1.9);
+    const pill = { x: right - pillW, y: cr.y + pad * 0.55, w: pillW, h: pillH };
+    roundRect(ctx, pill, pill.h / 2);
+    ctx.fillStyle = on ? hexA(hue, 0.18) : "rgba(255,247,232,0.04)";
+    ctx.fill();
+    ctx.strokeStyle = on ? hue : "rgba(255,247,232,0.16)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
     uiText(
       ctx,
-      triggerLabel(syn.trigger),
-      cr.x + padX,
-      cr.y + cr.h * 0.32,
-      fs * 0.86,
+      `${Math.min(progress.have, progress.need)}/${progress.need}`,
+      pill.x + pill.w / 2,
+      pill.y + pill.h / 2,
+      Math.max(12, pill.h * 0.58),
       on ? hue : T.muted,
-      {
+      { align: "center", weight: 800 },
+    );
+
+    const titleSize = Math.max(13, Math.min(18, cr.h * 0.23));
+    const bodySize = Math.max(12, Math.min(15, cr.h * 0.18));
+    uiText(ctx, `${i + 1} ${tier} · ${syn.name}`, textX, cr.y + cr.h * 0.24, titleSize, on ? hue : tierHue, {
+      align: "left",
+      weight: 800,
+      maxWidth: Math.max(20, pill.x - textX - 8),
+    });
+
+    if (composite) {
+      drawCompositeProgress(ctx, progress.parts, textX, cr.y + cr.h * 0.53, bodySize, on);
+    } else {
+      uiText(ctx, triggerLabel(syn.trigger), textX, cr.y + cr.h * 0.53, bodySize, on ? T.text : T.muted, {
         align: "left",
-        weight: 800,
-        maxWidth: inner * 0.68,
-      },
-    );
-    numText(
-      ctx,
-      prog,
-      cr.x + cr.w - padX,
-      cr.y + cr.h * 0.32,
-      px,
-      on ? hue : T.muted,
-      "right",
-      false,
-    );
-    uiText(
-      ctx,
-      effectLabel(syn.effect),
-      cr.x + cr.w / 2,
-      cr.y + cr.h * 0.72,
-      fs * 0.76,
-      on ? T.gold : "rgba(156,139,118,0.6)",
-      { align: "center", weight: 600, maxWidth: inner },
-    );
+        weight: 700,
+        maxWidth: right - textX,
+      });
+    }
+    uiText(ctx, effectLabel(syn.effect), textX, cr.y + cr.h * 0.8, bodySize, on ? T.gold : "rgba(215,196,222,0.72)", {
+      align: "left",
+      weight: 700,
+      maxWidth: right - textX,
+    });
   });
 }
 
@@ -3896,7 +4119,7 @@ export function mapNodeRects(L: Layout, s: RunState): { rect: Rect; step: number
   const box = mapBox(L);
   const rows = STAGE_STEPS;
   const rh = box.h / rows;
-  const r = Math.min(rh * 0.34, box.w * 0.1);
+  const r = Math.min(rh * 0.29, box.w * 0.09);
   for (let step = 0; step < rows; step++) {
     const row = s.map.steps[step] ?? [];
     for (let i = 0; i < row.length; i++) {
@@ -4277,7 +4500,7 @@ export interface MapChoiceLabelGeometry {
 export function mapChoiceLabelGeometry(L: Layout, rect: Rect, boss = false): MapChoiceLabelGeometry {
   const fontSize = Math.max(10, rect.w * (boss ? 0.3 : 0.28));
   const actionBoundary = L.button.y - L.actionGap;
-  const preferredY = rect.y + rect.h + fontSize * 0.95;
+  const preferredY = rect.y + rect.h + uiSpace(L.scale, 2) + fontSize * 0.5;
   const y = Math.min(preferredY, actionBoundary - fontSize * 0.6);
   return {
     y,
@@ -4299,7 +4522,7 @@ export function mapChoiceLabelText(shortcut: number, label: string): string {
  * 눈이 같은 곳을 본다.
  */
 function mapBox(L: Layout): Rect {
-  const top = L.notice.y + L.notice.h + L.scale * 10;
+  const top = L.notice.y + L.notice.h + uiSpace(L.scale, 5);
   // 맨 아래 원 밑에 숫자·종류 라벨이 설 한 토큰을 먼저 예약한다.
   const bottom = L.button.y - L.actionGap - uiSpace(L.scale, 3);
   const h = Math.max(L.scale * 160, bottom - top);
@@ -4660,7 +4883,7 @@ export function raidContractChipGeometry(
   const detailed = phase === "map"
     ? `${contract.name} · ${raidPrepLabel(raidPrepRoute(contract))}`
     : `${contract.name} · ${contract.counter}`;
-  const estimate = (text: string) => [...text].length * fontSize * 0.92 + 30;
+  const estimate = (text: string) => [...text].length * fontSize * 0.92 + 82;
   const maxChipW = Math.max(104, Math.min(r.w * 0.56, r.w - 92));
   const label = estimate(detailed) <= maxChipW ? detailed : contract.name;
   const chipW = Math.min(maxChipW, Math.max(104, estimate(label)));
@@ -4688,11 +4911,25 @@ function drawActiveRaidContractChip(
   ctx.strokeStyle = "rgba(239,224,198,0.28)";
   ctx.lineWidth = 1;
   ctx.stroke();
-  const claw = Math.max(5, Math.min(8, chip.h * 0.28));
-  drawRiskClaws(ctx, chip.x + 6, chip.y + chip.h * 0.63, risk, claw, T.enemy);
-  uiText(ctx, label, chip.x + 6 + claw * 2.35, chip.y + chip.h / 2, fontSize, T.paper, {
+  const riskColor = raidContractRiskColor(risk);
+  const badgeH = Math.max(22, chip.h * 0.66);
+  const badgeW = Math.max(58, fontSize * 4.4);
+  const badge = { x: chip.x + 10, y: chip.y + (chip.h - badgeH) / 2, w: badgeW, h: badgeH };
+  roundRect(ctx, badge, badge.h / 2);
+  ctx.fillStyle = hexA(riskColor, 0.16);
+  ctx.fill();
+  ctx.strokeStyle = hexA(riskColor, 0.72);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  uiText(ctx, `위험 ${risk}`, badge.x + badge.w / 2, badge.y + badge.h / 2, Math.max(12, fontSize * 0.82), riskColor, {
+    align: "center",
+    weight: 800,
+  });
+  const labelX = badge.x + badge.w + 12;
+  uiText(ctx, label, labelX, chip.y + chip.h / 2, fontSize, T.paper, {
     align: "left",
     weight: 800,
+    maxWidth: Math.max(20, chip.x + chip.w - 12 - labelX),
   });
 }
 
@@ -5037,7 +5274,7 @@ function drawRaidContractCard(
   const active = interaction.active;
   const compact = L.h < 380 || rect.h <= 168 || rect.w <= 280;
   const card = raidContractCardGeometry(rect, compact);
-  const face = active ? "rgba(62,39,29,0.99)" : "rgba(35,24,19,0.99)";
+  const face = active ? "rgba(47,29,78,0.99)" : "rgba(25,18,52,0.99)";
   bevelPanel(ctx, rect, Math.max(8, L.scale * 10), face, "rgba(0,0,0,0.72)", hot ? 6 : 3);
   roundRect(ctx, rect, Math.max(8, L.scale * 10));
   ctx.strokeStyle = interaction.borderRole === "action"
@@ -5109,7 +5346,7 @@ function drawRaidContractCard(
   const footer = card.footerRect;
   const fishSize = Math.max(13, Math.min(24, footer.h * 0.46));
   const fishX = footer.x + fishSize * 0.55;
-  drawFish(ctx, fishX, card.rewardY, fishSize, T.fish);
+  drawCurrencyToken(ctx, fishX, card.rewardY, fishSize);
   const rewardX = fishX + fishSize * 0.8;
   if (!card.ultraCompact && footer.h >= 38) {
     uiText(ctx, "승리 시", rewardX, footer.y + footer.h * 0.34, Math.max(10, card.labelSize), T.paperDim, {
@@ -5344,7 +5581,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, pointer:
   // **알파를 먼저 되돌린다.** 앞 단계가 남긴 globalAlpha가 곱해지면 막이
   // 0.975가 아니라 그 곱만큼만 덮여 아래 UI가 그대로 비친다.
   ctx.globalAlpha = 1;
-  ctx.fillStyle = "rgba(10,7,5,0.98)";
+  ctx.fillStyle = "rgba(10,8,32,0.72)";
   ctx.fillRect(0, 0, L.w, L.h);
   if (s.raidOffers.length > 0) {
     drawRaidContractOverlay(ctx, L, s, pointer);
@@ -5426,7 +5663,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, pointer:
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     ctx.arc(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2 + grow, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(14,10,8,0.92)";
+    ctx.fillStyle = "rgba(24,16,52,0.92)";
     ctx.fill();
     ctx.strokeStyle = hot ? "#FFFFFF" : contractPrep ? T.gold : hue;
     ctx.lineWidth = hot ? Math.max(3, L.scale * 3.4) : pickable ? Math.max(2, L.scale * 2.6) : Math.max(1, L.scale * 1.4);
@@ -5543,10 +5780,10 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, pointer:
       : info
       ? `${info.name} — ${info.hint}${hotIsPrep ? " · 이번 계약의 대응 경로" : ""}`
       : prepRoute && s.raidContract
-      ? `${activeContractLine(s.raidContract, s.seed, "map")} · 이중 고리 밖은 보스 강도 +${Math.round((BALANCE.contractMismatchPower - 1) * 100)}%`
+      ? `${activeContractLine(s.raidContract, s.seed, "map")} · 금빛 추천 길 이탈 시 보스 공격·체력 +${Math.round((BALANCE.contractMismatchPower - 1) * 100)}%`
       : `${s.map.stage}번째 밤${stageTitle} · ${step + 1}/${STAGE_STEPS} — ${kinds.map((k) => nodeInfo(k).name).join(" 또는 ")}`,
     L.w / 2,
-    mapBox(L).y - L.scale * 6,
+    mapBox(L).y - uiSpace(L.scale, 3),
     // 폰 세로에서 scale이 0.43이라 13×0.43 = 5.6px였다 — 하한 11px. 긴 보스 설명은 폭 안에서 줄인다.
     Math.max(11, L.scale * 13),
     T.paperDim,
@@ -5562,7 +5799,7 @@ function drawMap(ctx: CanvasRenderingContext2D, L: Layout, s: RunState, pointer:
 export function buttonText(s: RunState): string {
   switch (s.phase) {
     case "prepare":
-      return "전투 시작";
+      return canStartBattle(s) ? "전투 시작" : "고양이를 먼저 데려오세요";
     case "battle": {
       // 보스전에는 이 자리가 개입 버튼이다. 전투 중 죽어 있던 공간을 재사용하므로
       // 세로 레이아웃 예산이 늘지 않는다.
@@ -5601,7 +5838,7 @@ export function buttonText(s: RunState): string {
       // 파동은 첫 파동에서 이미 낸 값으로 공짜로 넘어간다("개입 1회로 연쇄
       // 전체를 넘긴다"). 여기를 `s.dodgeCharges <= 0`으로만 재면 그 무료
       // 순간에도 버튼이 "전투 중"으로 죽어 보여 아무도 안 누르게 된다.
-      if (!dodgeUsable(s)) return "전투 중";
+      if (!dodgeUsable(s)) return "회피 0 · 보스·저격전에서 충전";
       // 쿨다운 중에는 남은 시간을 그대로 보여준다. 잠긴 이유를 안 보여주면
       // 그냥 안 먹는 버튼으로 읽힌다 — 예전에 실제로 그 보고를 받았다.
       if (s.actCooldown > 0) return `${(s.actCooldown / 1000).toFixed(1)}초`;
@@ -5614,12 +5851,15 @@ export function buttonText(s: RunState): string {
        * "0인데 왜 눌러야 하나"는 혼란을 없앤다.
        */
       if (sweepDodgeFree(s)) return "연쇄 회피";
-      return s.dodgeCharges > 0 ? `회피  ${s.dodgeCharges}` : "회피";
+      return s.dodgeCharges > 0
+        ? `회피 ${s.dodgeCharges} · 붉음=산개 · 청록=집결`
+        : "회피 0 · 보스·저격전에서 충전";
     }
     case "reward":
       if (s.relicDraftActive) return "유물 건너뛰기";
       // 상점 다음은 배치다. 정찰 칸만은 싸우지 않으므로 다시 지도로 간다.
-      return s.nodeKind === "shop" ? "길 고르기" : "전투 시작";
+      if (s.nodeKind === "shop") return "길 고르기";
+      return canStartBattle(s) ? "전투 시작" : "고양이를 먼저 데려오세요";
     case "map":
       return s.raidOffers.length > 0 ? "계약 1 · 2 · 3 중 선택" : "길을 고르세요";
     case "gameover":
@@ -5676,6 +5916,64 @@ function dualButtonText(s: RunState, verb: "산개" | "집결", key: string, key
   return `${verb}! ${hint}  ${pool}`;
 }
 
+function drawBattleActionGlyph(
+  ctx: CanvasRenderingContext2D,
+  r: Rect,
+  s: RunState,
+  intent: "dodge" | "gather" | "strike",
+  active: boolean,
+): void {
+  if (r.w < 170) return;
+  const size = Math.min(48, r.h * 0.72);
+  const cx = r.x + Math.max(size * 0.75, r.h * 0.58);
+  const cy = r.y + r.h / 2;
+  let drawn = false;
+  if (active && intent !== "strike") {
+    drawn = drawGeneratedAtlasCellFrom(
+      ctx,
+      "generated-defense-atlas",
+      intent === "gather" ? 7 : 6,
+      cx,
+      cy,
+      size,
+      1,
+    );
+  } else if (intent === "strike") {
+    drawn = drawGeneratedAtlasCell(ctx, 6, cx, cy, size, active ? 1 : 0.55);
+  } else {
+    drawn = drawGeneratedAtlasCellFrom(
+      ctx,
+      "generated-ui-atlas",
+      s.dodgeCharges > 0 ? 14 : 15,
+      cx,
+      cy,
+      size,
+      s.dodgeCharges > 0 ? 0.92 : 0.55,
+    );
+  }
+  if (!drawn) {
+    ctx.save();
+    ctx.fillStyle = active ? T.fish : "rgba(185,167,201,0.55)";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - size * 0.34);
+    ctx.lineTo(cx + size * 0.28, cy);
+    ctx.lineTo(cx, cy + size * 0.34);
+    ctx.lineTo(cx - size * 0.28, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  if (active) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * (0.5 + motionPulse(130) * 0.08), 0, Math.PI * 2);
+    ctx.strokeStyle = intent === "gather" ? T.gather : intent === "dodge" ? T.danger : T.vuln;
+    ctx.lineWidth = Math.max(2, r.h * 0.04);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
 function drawButton(
   ctx: CanvasRenderingContext2D,
   L: Layout,
@@ -5725,7 +6023,7 @@ function drawButton(
    */
   const armed =
     !finalPhaseChannelActive(s) && // 최종 국면 채널 — 개입 버튼은 잠긴다("…")
-    ((s.phase !== "battle" && s.phase !== "map") ||
+    ((s.phase !== "battle" && s.phase !== "map" && primaryButtonAcceptsInput(s)) ||
       (s.phase === "battle" &&
         (dualChoiceActive(s)
           ? dodgeUsable(s) && s.actCooldown <= 0 && hazardsActive(s)
@@ -5745,10 +6043,22 @@ function drawButton(
     const [left, right] = splitButton(L.button);
     drawButtonFace(ctx, left, armed, pulse, dualButtonText(s, "산개", "Space", "spc", left.w));
     drawButtonFace(ctx, right, armed, pulse, dualButtonText(s, "집결", "G", "G", right.w));
+    drawBattleActionGlyph(ctx, left, s, "dodge", armed);
+    drawBattleActionGlyph(ctx, right, s, "gather", armed);
     return;
   }
 
   drawButtonFace(ctx, L.button, armed, pulse, buttonText(s));
+  if (s.phase === "battle") {
+    const intent = actIntentKind(s);
+    drawBattleActionGlyph(
+      ctx,
+      L.button,
+      s,
+      intent === "strike" ? "strike" : intent === "gather" ? "gather" : "dodge",
+      armed,
+    );
+  }
 }
 
 type ButtonVariant = "primary" | "secondary";
@@ -5773,7 +6083,7 @@ function drawButtonFace(
     ? "rgba(0,0,0,0.3)"
     : secondary
       ? "rgba(239,224,198,0.28)"
-      : "#A85E1E";
+      : "#B83E4E";
 
   bevelPanel(
     ctx,
@@ -6417,33 +6727,63 @@ const CURTAIN_REDUCED_MS = 420;
 let curtain: Curtain | null = null;
 let curtainAt = 0;
 /** 무엇이 바뀌었는지 알려면 직전 값을 들고 있어야 한다. */
-let seenSeed = -1;
+let seenRun: RunState | null = null;
 let seenStage = -1;
 let seenBosses = -1;
+
+/**
+ * 같은 시드로 재도전해도 새 RunState는 새 판이다. 시드는 콘텐츠 재현 키이지
+ * 렌더 생명주기 ID가 아니므로 객체 교체를 기준으로 전환 감시를 초기화한다.
+ */
+export function renderRunChanged(previous: RunState | null, next: RunState): boolean {
+  return previous !== next;
+}
+
+/** 제출 해상도 세로 직업 목록은 이름을 15px 아래로 줄이지 않는다. */
+export function classRowFontSize(rowHeight: number): number {
+  return Math.max(15, Math.min(16, rowHeight * 0.45));
+}
 
 function raise(title: string, sub: string): void {
   const life = reducedMotion() ? CURTAIN_REDUCED_MS : CURTAIN_MS;
   curtain = { title, sub, life, max: life };
 }
 
+/** 보스 격파와 새 스테이지 진입이 같은 프레임에 일어날 때 보여 줄 결합 문구. */
+export function stageAdvanceCue(stage: number, clearedWave: number): { title: string; sub: string } {
+  const theme = stageTheme(stage);
+  return {
+    title: `우두머리 격파 · ${stage}번째 밤`,
+    sub: theme.backdropScene
+      ? `새 지도 시작 · ${theme.name} — ${theme.subtitle}`
+      : `악몽 깊이 ${clearedWave} · 새 지도 시작`,
+  };
+}
+
 /** 상태의 변화를 보고 막을 올린다. 게임 코드는 이걸 모른다. */
 function watchTransitions(s: RunState): void {
   const bosses = bossesSeen(s);
 
-  if (s.seed !== seenSeed) {
-    // 새 판. 시드가 곧 판의 신원이다.
-    seenSeed = s.seed;
+  if (renderRunChanged(seenRun, s)) {
+    // 새 판. 재도전은 같은 시드를 쓰므로 RunState 교체 자체가 판의 신원이다.
+    seenRun = s;
     seenStage = s.map.stage;
     seenBosses = bosses;
     raise("냥 아레나", "집사님, 오늘 밤도 잘 부탁해요");
     return;
   }
   // 보스를 넘은 것이 먼저다. 넘는 순간 여정도 함께 바뀌는 경우가 있는데,
-  // 그때 여정 안내만 뜨면 방금 해낸 일이 화면에서 사라진다.
+  // 그때 둘 중 하나를 버리면 방금 해낸 일 또는 새 밤이 화면에서 사라진다.
   if (bosses > seenBosses) {
+    const stageChanged = s.map.stage !== seenStage;
     seenBosses = bosses;
     seenStage = s.map.stage;
-    raise("악몽을 밀어냈어요", `악몽 깊이 ${s.wave - 1}까지 나아갔어요`);
+    if (stageChanged) {
+      const cue = stageAdvanceCue(s.map.stage, s.wave - 1);
+      raise(cue.title, cue.sub);
+    } else {
+      raise("악몽을 밀어냈어요", `악몽 깊이 ${s.wave - 1}까지 나아갔어요`);
+    }
     return;
   }
   if (s.map.stage !== seenStage) {
@@ -6754,6 +7094,7 @@ export function render(
 
   drawDivider(ctx, L);
   drawSideLabels(ctx, L);
+  drawFormationGuides(ctx, L, s);
   drawBoard(ctx, L, "ally", T.ally, hoverCell);
   drawBoard(ctx, L, "enemy", T.enemy, -1);
   if (arrival) drawBossArrivalFrame(ctx, L, arrival);

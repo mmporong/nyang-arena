@@ -387,15 +387,15 @@ export function bossHint(breedId: number): string {
 export function nodeInfo(kind: NodeKind): { name: string; hint: string } {
   switch (kind) {
     case "elite":
-      return { name: "가위눌림", hint: "무거워요. 밀어내면 뭔가 하나 떨어뜨리고 가요" };
+      return { name: "유물 정예전", hint: "강적 전투 · 승리하면 유물 1개" };
     case "shop":
       // 종류 id는 shop이지만 하는 일은 정찰이다. 다음 보스를 대비하는 자리다.
-      return { name: "숨 돌리기", hint: "아무것도 안 와요. 생선과 다시 뽑기로 한 걸음 대비해요" };
+      return { name: "정찰 보급", hint: "전투 없음 · 생선 +5 · 다시 뽑기 +1 · 고위험 보스 회피 +3" };
     case "boss":
-      return { name: "악몽", hint: "되풀이되는 거예요. 예고를 잘 보고 움직이세요" };
+      return { name: "악몽", hint: "보스전 · 바닥 예고에 맞춰 산개와 집결" };
     // 보스별 안내는 bossHint가 따로 만든다 — 어느 보스가 오는지 알아야 해서다.
     case "battle":
-      return { name: "얕은 잠", hint: "자잘한 것들이에요. 밀어내기 어렵지 않아요" };
+      return { name: "일반 전투", hint: "일반 적 무리 · 승리하면 생선" };
   }
 }
 

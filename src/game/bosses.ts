@@ -247,7 +247,9 @@ export function bossKit(breedId: number, contract: RaidContract | null = null): 
 
 /** 카드 위험도와 실제 보스 체력·광역 피해를 잇는 단일 밸런스 계약. */
 export function raidRiskPower(risk: RaidContract["risk"]): number {
-  return [1, 1, 1.12, 1.5][risk] ?? 1;
+  // 빈 팀 온보딩의 초반 성장 유예를 감안해 각 위험 단계가 보상만큼 전투 압력도
+  // 분명히 높인다. 계약별 패턴 난도는 데이터 검증에서 별도로 70~97%에 잠근다.
+  return [1, 1.08, 1.2, 1.6][risk] ?? 1;
 }
 
 export const BOSS_BREEDS: readonly Breed[] = [

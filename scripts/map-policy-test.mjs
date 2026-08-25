@@ -10,6 +10,7 @@ import { BALANCE } from "../src/game/balance.ts";
 import { chooseNode, finishWave, newRun, scoutDodgeReward } from "../src/game/run.ts";
 import { makeStage, openLanes } from "../src/game/map.ts";
 import { raidContractById, raidPrepRoute } from "../src/game/raid.ts";
+import { renderRunChanged, stageAdvanceCue } from "../src/game/render.ts";
 import { MAP_POLICIES } from "./bot-policy.mjs";
 
 const contracts = {
@@ -18,6 +19,16 @@ const contracts = {
   3: raidContractById("spreading_dark"),
 };
 for (const risk of [1, 2, 3]) assert.ok(contracts[risk], `위험 ${risk} 계약이 없다`);
+
+// 재도전은 같은 시드를 보존하지만 렌더 전환 감시는 새 판으로 초기화돼야 한다.
+// seed 비교로 회귀하면 이전 판의 보스·스테이지 cue가 새 판에서도 억제된다.
+{
+  const previous = newRun(7999);
+  const retry = newRun(7999);
+  assert.equal(previous.seed, retry.seed, "재도전 회귀 픽스처의 시드가 다르다");
+  assert.equal(renderRunChanged(previous, retry), true, "같은 시드 재도전을 새 판으로 보지 않는다");
+  assert.equal(renderRunChanged(previous, previous), false, "같은 RunState를 새 판으로 오인한다");
+}
 
 const row = [
   { kind: "battle" },
@@ -99,6 +110,25 @@ for (let seed = 1; seed <= 300; seed++) {
   state.bonusDodge = 9;
   assert.equal(chooseNode(state, 0), true, "정찰 픽스처 진입 실패");
   assert.equal(state.bonusDodge, 9, "기존보다 낮은 정찰 준비가 중첩됐다");
+}
+
+// 마지막 보스는 실제 상태와 화면 전환 문구를 함께 새 밤으로 넘긴다. 보스 안내가
+// stage 감지를 먼저 소비해 새 지도가 조용히 바뀌던 회귀를 이 경계에서 막는다.
+{
+  const state = newRun(8501);
+  state.raidOffers = [];
+  state.wave = 6;
+  state.step = 5;
+  state.nodeKind = "boss";
+  state.nodeWave = "boss";
+  finishWave(state, true);
+  assert.equal(state.map.stage, 2, "우두머리 뒤 새 스테이지로 넘어가지 않았다");
+  assert.equal(state.step, 0, "새 스테이지의 첫 걸음으로 초기화되지 않았다");
+  assert.equal(state.phase, "map", "새 스테이지 지도가 열리지 않았다");
+  assert.equal(state.raidOffers.length, 3, "새 스테이지 악몽 계약 셋이 열리지 않았다");
+  const cue = stageAdvanceCue(state.map.stage, state.wave - 1);
+  assert.match(cue.title, /우두머리 격파 · 2번째 밤/, "보스·스테이지 결합 전환 문구가 없다");
+  assert.match(cue.sub, /새 지도 시작/, "새 지도 시작을 화면에 알리지 않는다");
 }
 
 console.log(

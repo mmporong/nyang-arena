@@ -50,8 +50,8 @@
     "counter": "표식냥에게 붙되 자라는 장판은 미리 벗어나세요.",
     "risk": 3,
     "rewardFish": 4,
-    "patterns": ["seize", "polarity", "gather"],
-    "phase2Patterns": ["sweep", "seize", "line"],
+    "patterns": ["seize", "polarity", "creep"],
+    "phase2Patterns": ["sweep", "seize", "creep"],
     "proofCode": "CODEX-05"
   },
   {

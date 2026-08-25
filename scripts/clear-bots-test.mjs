@@ -91,7 +91,7 @@ const expectedSeedOne = {
   "4축/조건 충족": "iron_tremor",
   "5축/무의식": "last_rescue",
   "5축/기본 봇": "iron_tremor",
-  "5축/조건 충족": "iron_tremor",
+  "5축/조건 충족": "split_night",
 };
 const groups = {
   "4축": CLEAR_BASELINE_BOTS,

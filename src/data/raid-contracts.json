@@ -86,13 +86,13 @@
     "patterns": [
       "seize",
       "polarity",
-      "gather"
+      "creep"
     ],
     "proofCode": "CODEX-05",
     "phase2Patterns": [
       "sweep",
       "seize",
-      "line"
+      "creep"
     ]
   },
   {
