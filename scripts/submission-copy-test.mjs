@@ -1,5 +1,6 @@
-/** 제출 폼에 붙일 문안·링크·썸네일의 기계 검증. */
+/** 제출 폼에 붙일 문안·링크·썸네일·데모 영상의 기계 검증. */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { parseRaidShareCode } from "../src/game/raid.ts";
@@ -27,6 +28,16 @@ const playableUrl = textBlock(
 );
 assert.equal(playableUrl, "https://mmporong.github.io/nyang-arena/", "플레이 URL이 공개 게임 빌드가 아니다");
 
+const demoUrl = textBlock(
+  /### 데모 영상 링크[^\n]*\n\s*```text\s*\n([\s\S]*?)\n```/,
+  "데모 영상 링크",
+);
+assert.equal(
+  demoUrl,
+  "https://mmporong.github.io/nyang-arena/submission-gameplay.mp4",
+  "데모 영상 URL이 Pages 공개 경로가 아니다",
+);
+
 const thumbnailPath = textBlock(/### 게임 썸네일[^\n]*\n\s*```text\s*\n([\s\S]*?)\n```/, "게임 썸네일");
 assert.equal(thumbnailPath, "docs/thumbnail.png", "썸네일 경로는 저장소 상대경로여야 한다");
 
@@ -50,6 +61,57 @@ const height = png.readUInt32BE(20);
 assert.ok(Math.abs(width / height - 16 / 9) < 0.001, `썸네일이 16:9가 아니다 (${width}x${height})`);
 const size = statSync(thumbnailPath).size;
 assert.ok(size <= 10 * 1024 * 1024, `썸네일이 10MB를 넘는다 (${size})`);
+
+const demoPath = "public/submission-gameplay.mp4";
+const demo = readFileSync(demoPath);
+const demoSize = statSync(demoPath).size;
+assert.equal(demo.subarray(4, 8).toString("ascii"), "ftyp", "데모 영상이 MP4 컨테이너가 아니다");
+assert.ok(demo.includes(Buffer.from("avc1")), "데모 영상에 H.264 트랙이 없다");
+assert.ok(demo.includes(Buffer.from("mp4a")), "데모 영상에 AAC 트랙이 없다");
+assert.ok(demoSize >= 1024 * 1024, `데모 영상이 실제 플레이 분량보다 지나치게 작다 (${demoSize})`);
+assert.ok(demoSize <= 100 * 1024 * 1024, `데모 영상이 100MB를 넘는다 (${demoSize})`);
+assert.equal(demo.includes(Buffer.from("NOT FOR SUBMISSION")), false, "데모 영상에 프리비즈 표식이 남았다");
+
+const probeResult = spawnSync(
+  "ffprobe",
+  [
+    "-v", "error", "-count_frames",
+    "-show_entries",
+    "format=duration:stream=codec_type,codec_name,pix_fmt,width,height,r_frame_rate,avg_frame_rate,nb_read_frames,sample_rate,channels",
+    "-of", "json", "--", demoPath,
+  ],
+  { encoding: "utf8", windowsHide: true, timeout: 15_000 },
+);
+assert.equal(probeResult.error, undefined, `ffprobe를 실행하지 못했다: ${probeResult.error?.message}`);
+assert.equal(probeResult.status, 0, `ffprobe가 데모 영상을 읽지 못했다: ${probeResult.stderr}`);
+const probe = JSON.parse(probeResult.stdout);
+const duration = Number(probe.format?.duration);
+const video = probe.streams?.filter((stream) => stream.codec_type === "video") ?? [];
+const audio = probe.streams?.filter((stream) => stream.codec_type === "audio") ?? [];
+assert.ok(duration >= 30 && duration <= 180, `데모 영상 길이가 30~180초가 아니다 (${duration})`);
+assert.equal(video.length, 1, `데모 영상 트랙이 정확히 1개가 아니다 (${video.length})`);
+assert.equal(audio.length, 1, `데모 오디오 트랙이 정확히 1개가 아니다 (${audio.length})`);
+assert.equal(video[0].codec_name, "h264", `데모 영상 코덱이 H.264가 아니다 (${video[0].codec_name})`);
+assert.equal(video[0].width, 1280, `데모 영상 폭이 1280이 아니다 (${video[0].width})`);
+assert.equal(video[0].height, 720, `데모 영상 높이가 720이 아니다 (${video[0].height})`);
+assert.equal(video[0].pix_fmt, "yuv420p", `데모 영상 픽셀 형식이 yuv420p가 아니다 (${video[0].pix_fmt})`);
+assert.equal(video[0].r_frame_rate, "30/1", `데모 영상 선언 프레임률이 30fps가 아니다 (${video[0].r_frame_rate})`);
+assert.equal(video[0].avg_frame_rate, "30/1", `데모 영상 평균 프레임률이 30fps가 아니다 (${video[0].avg_frame_rate})`);
+assert.ok(
+  Math.abs(Number(video[0].nb_read_frames) - Math.round(duration * 30)) <= 1,
+  `데모 영상 프레임 수가 CFR30 길이와 맞지 않는다 (${video[0].nb_read_frames}/${duration})`,
+);
+assert.equal(audio[0].codec_name, "aac", `데모 오디오 코덱이 AAC가 아니다 (${audio[0].codec_name})`);
+assert.equal(audio[0].sample_rate, "48000", `데모 오디오가 48kHz가 아니다 (${audio[0].sample_rate})`);
+assert.equal(audio[0].channels, 2, `데모 오디오가 스테레오가 아니다 (${audio[0].channels}ch)`);
+
+const decodeResult = spawnSync(
+  "ffmpeg",
+  ["-v", "error", "-xerror", "-err_detect", "explode", "-i", demoPath, "-map", "0:v:0", "-map", "0:a:0", "-f", "null", process.platform === "win32" ? "NUL" : "/dev/null"],
+  { encoding: "utf8", windowsHide: true, maxBuffer: 4 * 1024 * 1024, timeout: 120_000 },
+);
+assert.equal(decodeResult.error, undefined, `ffmpeg를 실행하지 못했다: ${decodeResult.error?.message}`);
+assert.equal(decodeResult.status, 0, `데모 영상 전체 디코딩에 실패했다: ${decodeResult.stderr}`);
 
 // 후보 커밋은 현재 제품의 수치·성능 증거까지 엄격히 검증하되, 그 커밋의 CI가
 // 성공한 뒤에만 최종 배포 metadata를 적을 수 있다. 후보와 최종 마커를 분리해
@@ -200,5 +262,5 @@ if (finalEvidenceRequired || candidateEvidenceRequired) {
 }
 
 console.log(
-  `제출 문안 PASS — 제목 ${titleChars}/80자 · 소개 ${descriptionChars}/200자 · Codex ${codexProcessChars}/5000자 · 공유 ${share} · 썸네일 ${width}x${height} ${(size / 1024).toFixed(1)}KB`,
+  `제출 문안 PASS — 제목 ${titleChars}/80자 · 소개 ${descriptionChars}/200자 · Codex ${codexProcessChars}/5000자 · 공유 ${share} · 썸네일 ${width}x${height} ${(size / 1024).toFixed(1)}KB · 영상 ${(demoSize / 1024 / 1024).toFixed(1)}MB`,
 );
