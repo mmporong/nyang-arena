@@ -54,7 +54,11 @@
       height: 4px;
       background: linear-gradient(90deg, #70d9ff, #f3c856 56%, transparent);
     }
-    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3, p, .seal, .payoff, .human, .source {
+      margin: 0;
+      word-break: keep-all;
+      overflow-wrap: normal;
+    }
     h1 { font-size: 76px; line-height: 1.05; letter-spacing: -2px; }
     h2 { font-size: 50px; line-height: 1.12; letter-spacing: -1.2px; }
     h3 { font-size: 31px; line-height: 1.2; }
@@ -153,7 +157,7 @@
     .rejects { position: absolute; left: 64px; bottom: 108px; display: flex; gap: 42px; align-items: center; }
     .rejects span { font-size: 22px; }
     .human {
-      position: absolute; right: 64px; bottom: 82px; width: 360px;
+      position: absolute; right: 64px; bottom: 112px; width: 360px;
       padding-left: 20px; border-left: 4px solid #ffd563;
       color: #e7dbb8; font-size: 19px; line-height: 1.5;
     }

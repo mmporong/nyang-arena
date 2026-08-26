@@ -1,11 +1,11 @@
 {
   "schema": 2,
   "generatedFrom": {
-    "commit": "506a578",
-    "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-    "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
-    "dirty": false,
-    "reproducible": true,
+    "commit": "9711c87",
+    "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+    "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
+    "dirty": true,
+    "reproducible": false,
     "node": "v24.12.0",
     "seeds": {
       "from": 1,
@@ -85,8 +85,8 @@
         "exitCode": 0,
         "command": "npm run --silent sim",
         "seeds": "1..300",
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "ef03bae54f799a1fc14ea72c8cd802e2c45bd79d1b55e151b940b20c2c460b0b",
@@ -98,8 +98,8 @@
         "exitCode": 0,
         "command": "npm run --silent decisions",
         "seeds": "1..300",
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "4eea9cf496f78ebce729f7ed7cd26fc78d5c442ed219427c9ba566d33f8b0ccd",
@@ -111,8 +111,8 @@
         "exitCode": 0,
         "command": "npm run --silent placement",
         "seeds": "1..1200",
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "9207305341960ea2724a57f9e180a785761c3f3415acc92cc02e74786278eac5",
@@ -124,8 +124,8 @@
         "exitCode": 0,
         "command": "npm run --silent intervention",
         "seeds": "1..300",
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "330d4f2f23eab3035b71df59a425bac810e1c64c2500edf8ed2f5400de9ce8dc",
@@ -137,8 +137,8 @@
         "exitCode": 0,
         "command": "npm run --silent map",
         "seeds": "prep:1..300;policy-space:1..1500",
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "c97333f5ef7bedba14f3d3bbf5d13668b38f9a7e56d320bb55fe2ab52fdabeb7",
@@ -150,20 +150,20 @@
         "exitCode": 0,
         "command": "npm run --silent relics",
         "seeds": "1..2000",
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
         "dirty": false,
         "node": "v24.12.0",
         "sha256": "eb6433925ba0227034440d04c67741a7c7b2ba1e4dd3872476dc65d689c852e2",
         "logShaMatches": true
       }
     ],
-    "provenanceMatches": true,
-    "allSixPassed": true,
+    "provenanceMatches": false,
+    "allSixPassed": false,
     "raidContracts": {
       "source": {
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
         "dirty": false,
         "command": "node --experimental-strip-types scripts/contract-space.mjs",
         "seeds": {
@@ -260,13 +260,13 @@
         "dominance": true,
         "balance": true
       },
-      "evidenceSha256": "a7ebda04f9ff4dd3995a94213b9714ac7934b2c753604676218352b5876206f4"
+      "evidenceSha256": "bc4175c930cbebd9f5e5a00a8bef82e21ba05d8b1f5467fc71ef3e01180c25f2"
     },
     "mapPreparation": {
       "source": {
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
-        "dirty": false,
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
+        "dirty": true,
         "command": "node --experimental-strip-types scripts/map-prep-space.mjs",
         "seeds": {
           "routeRuns": [
@@ -330,13 +330,13 @@
         "delivery": true,
         "outcome": true
       },
-      "evidenceSha256": "cae72fa2b36aaa158fa3dc3e803e01f52575db6ffd76c79889c8a4e4a512fb8f"
+      "evidenceSha256": "b689b247ae7df2a55c2bec83360137ca5f6f645ed8681f7c8ecf14872befa811"
     },
     "mapSpace": {
       "source": {
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
-        "dirty": false,
+        "head": "9711c8722d3374f16de82ab017cf3b19b0d3d330",
+        "tree": "04c927a7d27fa2f8ef85423c6acc8c159bd2c588",
+        "dirty": true,
         "command": "node --experimental-strip-types scripts/map-space.mjs",
         "seeds": {
           "from": 1,
@@ -362,559 +362,24 @@
         "effect": true,
         "read": true
       },
-      "evidenceSha256": "09891be5ea0ae8322a1112427eebe0f87f9a95c50a28f508a3ab232141f62c71"
+      "evidenceSha256": "e9d5d841ba0a67cbaa083c2aa967c1bbc12e9451995ec76e2b01c6aecf112b55"
     }
   },
   "observations": {
     "matchupCensus": {
-      "status": "OBSERVATION_ONLY",
+      "status": "STALE",
       "gate": false,
-      "decisionEligible": false,
-      "source": {
-        "head": "506a578a85a170a2d7997db3fa1a6e34103172ab",
-        "tree": "6543d42e0432f8d0a56f82a469308371893c3de6",
-        "dirty": false,
-        "command": "node --experimental-strip-types scripts/matchup-space.mjs",
-        "seeds": {
-          "scenarioSeed": 1296127043,
-          "fights": 81
-        },
-        "exitCode": 0,
-        "node": "v24.12.0"
-      },
-      "fights": 81,
-      "blocks": 9,
-      "cellN": 9,
-      "interactionDf": 4,
-      "estimand": "matched legal roster package × normal wave kind interaction residual",
-      "inference": "descriptive only; no p-value, confidence interval, or population claim",
-      "commonSeed": 1296127043,
-      "adjacencyMode": "kept as part of the actual roster package; not equalized or attributed to range alone",
-      "manifestSha256": "0d46546571ad1b2fe2067a5909aaff6820511b709ab1fe13cac2125060e7450c",
-      "cells": [
-        {
-          "team": "melee",
-          "waveKind": "mixed",
-          "fights": 9,
-          "wins": 2,
-          "meanMargin": -0.596016,
-          "interaction": -0.068029,
-          "meanElapsedMs": 3888.888889
-        },
-        {
-          "team": "melee",
-          "waveKind": "rush",
-          "fights": 9,
-          "wins": 3,
-          "meanMargin": -0.365596,
-          "interaction": 0.020986,
-          "meanElapsedMs": 4333.333333
-        },
-        {
-          "team": "melee",
-          "waveKind": "snipe",
-          "fights": 9,
-          "wins": 3,
-          "meanMargin": -0.212706,
-          "interaction": 0.047043,
-          "meanElapsedMs": 5611.111111
-        },
-        {
-          "team": "balanced",
-          "waveKind": "mixed",
-          "fights": 9,
-          "wins": 2,
-          "meanMargin": -0.512965,
-          "interaction": 0.020827,
-          "meanElapsedMs": 3888.888889
-        },
-        {
-          "team": "balanced",
-          "waveKind": "rush",
-          "fights": 9,
-          "wins": 3,
-          "meanMargin": -0.38924,
-          "interaction": 0.003147,
-          "meanElapsedMs": 4466.666667
-        },
-        {
-          "team": "balanced",
-          "waveKind": "snipe",
-          "fights": 9,
-          "wins": 3,
-          "meanMargin": -0.289527,
-          "interaction": -0.023974,
-          "meanElapsedMs": 6100
-        },
-        {
-          "team": "ranged",
-          "waveKind": "mixed",
-          "fights": 9,
-          "wins": 3,
-          "meanMargin": -0.3746,
-          "interaction": 0.047202,
-          "meanElapsedMs": 3455.555556
-        },
-        {
-          "team": "ranged",
-          "waveKind": "rush",
-          "fights": 9,
-          "wins": 3,
-          "meanMargin": -0.30453,
-          "interaction": -0.024133,
-          "meanElapsedMs": 3977.777778
-        },
-        {
-          "team": "ranged",
-          "waveKind": "snipe",
-          "fights": 9,
-          "wins": 3,
-          "meanMargin": -0.176631,
-          "interaction": -0.023069,
-          "meanElapsedMs": 5811.111111
-        }
-      ],
-      "checkpoints": [
-        {
-          "checkpoint": 4,
-          "fights": 27,
-          "wins": 25,
-          "cells": [
-            {
-              "team": "melee",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 2,
-              "meanMargin": 0.097356
-            },
-            {
-              "team": "melee",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 3,
-              "meanMargin": 0.592245
-            },
-            {
-              "team": "melee",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 3,
-              "meanMargin": 0.75672
-            },
-            {
-              "team": "balanced",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 2,
-              "meanMargin": 0.177281
-            },
-            {
-              "team": "balanced",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 3,
-              "meanMargin": 0.567025
-            },
-            {
-              "team": "balanced",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 3,
-              "meanMargin": 0.605176
-            },
-            {
-              "team": "ranged",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 3,
-              "meanMargin": 0.470468
-            },
-            {
-              "team": "ranged",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 3,
-              "meanMargin": 0.745847
-            },
-            {
-              "team": "ranged",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 3,
-              "meanMargin": 0.765222
-            }
-          ]
-        },
-        {
-          "checkpoint": 8,
-          "fights": 27,
-          "wins": 0,
-          "cells": [
-            {
-              "team": "melee",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.901567
-            },
-            {
-              "team": "melee",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.732318
-            },
-            {
-              "team": "melee",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.460028
-            },
-            {
-              "team": "balanced",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.76597
-            },
-            {
-              "team": "balanced",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.79667
-            },
-            {
-              "team": "balanced",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.562924
-            },
-            {
-              "team": "ranged",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.663011
-            },
-            {
-              "team": "ranged",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.724407
-            },
-            {
-              "team": "ranged",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.408041
-            }
-          ]
-        },
-        {
-          "checkpoint": 12,
-          "fights": 27,
-          "wins": 0,
-          "cells": [
-            {
-              "team": "melee",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.983838
-            },
-            {
-              "team": "melee",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.956715
-            },
-            {
-              "team": "melee",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.934809
-            },
-            {
-              "team": "balanced",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.950206
-            },
-            {
-              "team": "balanced",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.938073
-            },
-            {
-              "team": "balanced",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.910832
-            },
-            {
-              "team": "ranged",
-              "waveKind": "mixed",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.931257
-            },
-            {
-              "team": "ranged",
-              "waveKind": "rush",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.935029
-            },
-            {
-              "team": "ranged",
-              "waveKind": "snipe",
-              "fights": 3,
-              "wins": 0,
-              "meanMargin": -0.887075
-            }
-          ]
-        }
-      ],
-      "interactionResiduals": [
-        {
-          "team": "melee",
-          "waveKind": "mixed",
-          "count": 9,
-          "meanMargin": -0.596016,
-          "interaction": -0.068029
-        },
-        {
-          "team": "melee",
-          "waveKind": "rush",
-          "count": 9,
-          "meanMargin": -0.365596,
-          "interaction": 0.020986
-        },
-        {
-          "team": "melee",
-          "waveKind": "snipe",
-          "count": 9,
-          "meanMargin": -0.212706,
-          "interaction": 0.047043
-        },
-        {
-          "team": "balanced",
-          "waveKind": "mixed",
-          "count": 9,
-          "meanMargin": -0.512965,
-          "interaction": 0.020827
-        },
-        {
-          "team": "balanced",
-          "waveKind": "rush",
-          "count": 9,
-          "meanMargin": -0.38924,
-          "interaction": 0.003147
-        },
-        {
-          "team": "balanced",
-          "waveKind": "snipe",
-          "count": 9,
-          "meanMargin": -0.289527,
-          "interaction": -0.023974
-        },
-        {
-          "team": "ranged",
-          "waveKind": "mixed",
-          "count": 9,
-          "meanMargin": -0.3746,
-          "interaction": 0.047202
-        },
-        {
-          "team": "ranged",
-          "waveKind": "rush",
-          "count": 9,
-          "meanMargin": -0.30453,
-          "interaction": -0.024133
-        },
-        {
-          "team": "ranged",
-          "waveKind": "snipe",
-          "count": 9,
-          "meanMargin": -0.176631,
-          "interaction": -0.023069
-        }
-      ],
-      "dominant": {
-        "team": "melee",
-        "waveKind": "mixed",
-        "interaction": -0.068029,
-        "absInteraction": 0.068029
-      },
-      "sensitivity": {
-        "rosterOmissions": [
-          {
-            "omitted": 1,
-            "combatCount": 54,
-            "dominant": {
-              "team": "melee",
-              "waveKind": "snipe",
-              "interaction": 0.046361,
-              "absInteraction": 0.046361
-            },
-            "maxAbsDeltaFromFull": 0.027871
-          },
-          {
-            "omitted": 2,
-            "combatCount": 54,
-            "dominant": {
-              "team": "melee",
-              "waveKind": "mixed",
-              "interaction": -0.1022,
-              "absInteraction": 0.1022
-            },
-            "maxAbsDeltaFromFull": 0.04525
-          },
-          {
-            "omitted": 3,
-            "combatCount": 54,
-            "dominant": {
-              "team": "ranged",
-              "waveKind": "mixed",
-              "interaction": 0.069743,
-              "absInteraction": 0.069743
-            },
-            "maxAbsDeltaFromFull": 0.028842
-          }
-        ],
-        "checkpointOmissions": [
-          {
-            "omitted": 4,
-            "combatCount": 54,
-            "dominant": {
-              "team": "melee",
-              "waveKind": "mixed",
-              "interaction": -0.050891,
-              "absInteraction": 0.050891
-            },
-            "maxAbsDeltaFromFull": 0.025223
-          },
-          {
-            "omitted": 8,
-            "combatCount": 54,
-            "dominant": {
-              "team": "melee",
-              "waveKind": "mixed",
-              "interaction": -0.054507,
-              "absInteraction": 0.054507
-            },
-            "maxAbsDeltaFromFull": 0.015124
-          },
-          {
-            "omitted": 12,
-            "combatCount": 54,
-            "dominant": {
-              "team": "melee",
-              "waveKind": "mixed",
-              "interaction": -0.098688,
-              "absInteraction": 0.098688
-            },
-            "maxAbsDeltaFromFull": 0.030659
-          }
-        ],
-        "cells": [
-          {
-            "team": "melee",
-            "waveKind": "mixed",
-            "full": -0.068029,
-            "min": -0.1022,
-            "max": -0.040158,
-            "directionStable": true
-          },
-          {
-            "team": "melee",
-            "waveKind": "rush",
-            "full": 0.020986,
-            "min": -0.006203,
-            "max": 0.050655,
-            "directionStable": false
-          },
-          {
-            "team": "melee",
-            "waveKind": "snipe",
-            "full": 0.047043,
-            "min": 0.022369,
-            "max": 0.071502,
-            "directionStable": true
-          },
-          {
-            "team": "balanced",
-            "waveKind": "mixed",
-            "full": 0.020827,
-            "min": -0.008015,
-            "max": 0.066077,
-            "directionStable": false
-          },
-          {
-            "team": "balanced",
-            "waveKind": "rush",
-            "full": 0.003147,
-            "min": -0.035652,
-            "max": 0.028961,
-            "directionStable": false
-          },
-          {
-            "team": "balanced",
-            "waveKind": "snipe",
-            "full": -0.023974,
-            "min": -0.034303,
-            "max": -0.013095,
-            "directionStable": true
-          },
-          {
-            "team": "ranged",
-            "waveKind": "mixed",
-            "full": 0.047202,
-            "min": 0.024601,
-            "max": 0.069743,
-            "directionStable": true
-          },
-          {
-            "team": "ranged",
-            "waveKind": "rush",
-            "full": -0.024133,
-            "min": -0.047468,
-            "max": -0.009929,
-            "directionStable": true
-          },
-          {
-            "team": "ranged",
-            "waveKind": "snipe",
-            "full": -0.023069,
-            "min": -0.037199,
-            "max": 0.002154,
-            "directionStable": false
-          }
-        ],
-        "directionStableCells": 5
-      },
-      "evidenceSha256": "71451ceea8ca312b911d61a20437f5b7abe0573f82cdfb4ef38458174dfda0f3"
+      "decisionEligible": false
     }
   },
   "openIssues": [
     {
-      "id": "matchup-census-generalization-limited",
-      "what": "통제형 궁합 관찰은 매니페스트의 고정 81장면 밖으로 일반화할 수 없다",
-      "measured": "최대 |I| 0.068 · 체크포인트 승리 W4 25/27 · W8 0/27 · W12 0/27",
-      "diagnosis": "roster set·checkpoint·seed는 확률 표본이 아니라 사전 선택한 유한 census이며, wave 8·12는 바닥 포화가 있다",
-      "consequence": "이 값만으로 사거리 단일 효과나 자연 런 메타를 주장하거나 밸런스 수치를 바꾸지 않는다",
-      "stable": "leave-one-out에서 상호작용 방향을 유지한 셀 5/9"
+      "id": "matchup-metric-noisy",
+      "what": "궁합 표(팀 성격 x 웨이브 성격)가 결정에 쓸 만큼 안정적이지 않다",
+      "measured": "자연 런 사후 표는 셀 수와 진행 깊이가 다르며 현재 통제형 증거가 없거나 낡았다",
+      "diagnosis": "팀 성격 분류가 구매·생존 결과에 달려 있어 셀마다 표본과 노출 깊이가 다르다",
+      "consequence": "현재 트리에서 npm run matchup을 다시 실행하기 전까지 궁합 수치를 인용하지 않는다",
+      "stable": "없음"
     }
   ]
 }
