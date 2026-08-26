@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>냥 아레나: 악몽 계약 - OpenAI Game Builders Seoul</title>
+  <style>
+    @font-face {
+      font-family: "Maplestory";
+      src: url("../public/fonts/Maplestory-Light.ttf") format("truetype");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: "Maplestory";
+      src: url("../public/fonts/Maplestory-Bold.ttf") format("truetype");
+      font-weight: 700;
+    }
+    @page { size: 13.333333in 7.5in; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #080b1b; }
+    body {
+      color: #fff8e8;
+      font-family: "Maplestory", "Malgun Gothic", sans-serif;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .slide {
+      position: relative;
+      width: 1280px;
+      height: 720px;
+      overflow: hidden;
+      page-break-after: always;
+      background:
+        radial-gradient(circle at 15% 10%, rgba(77, 108, 255, .22), transparent 34%),
+        linear-gradient(135deg, #11163b 0%, #19133a 56%, #0b0d25 100%);
+    }
+    .slide:last-child { page-break-after: auto; }
+    .bg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .shade {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(6, 8, 24, .94) 0%, rgba(6, 8, 24, .72) 48%, rgba(6, 8, 24, .2) 100%);
+    }
+    .topline {
+      position: absolute;
+      left: 64px;
+      right: 64px;
+      top: 42px;
+      height: 4px;
+      background: linear-gradient(90deg, #70d9ff, #f3c856 56%, transparent);
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 76px; line-height: 1.05; letter-spacing: -2px; }
+    h2 { font-size: 50px; line-height: 1.12; letter-spacing: -1.2px; }
+    h3 { font-size: 31px; line-height: 1.2; }
+    p { font-size: 24px; line-height: 1.5; }
+    .eyebrow {
+      color: #70d9ff;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 1.6px;
+    }
+    .gold { color: #ffd563; }
+    .cyan { color: #72ddff; }
+    .coral { color: #ff8178; }
+    .muted { color: #c7c7dd; }
+    .page {
+      position: absolute;
+      right: 48px;
+      bottom: 28px;
+      color: rgba(255, 255, 255, .56);
+      font-size: 16px;
+    }
+    .source {
+      position: absolute;
+      left: 64px;
+      bottom: 26px;
+      color: rgba(255, 255, 255, .48);
+      font-size: 14px;
+    }
+    .frame {
+      border: 2px solid rgba(255, 255, 255, .22);
+      box-shadow: 0 22px 52px rgba(0, 0, 0, .38);
+      overflow: hidden;
+      background: #070914;
+    }
+    .frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    /* 1 */
+    .s1 .content { position: absolute; left: 72px; top: 116px; width: 760px; }
+    .s1 .tagline { margin-top: 30px; font-size: 34px; line-height: 1.35; max-width: 720px; }
+    .s1 .tagline strong { color: #ffd563; }
+    .s1 .proof { margin-top: 54px; color: #d3d8f4; font-size: 20px; }
+    .s1 .seal {
+      position: absolute; right: 72px; bottom: 66px;
+      width: 306px; padding: 18px 22px;
+      border-left: 4px solid #70d9ff;
+      background: rgba(8, 10, 26, .78);
+      font-size: 20px; line-height: 1.45;
+    }
+
+    /* 2 */
+    .s2 .title { position: absolute; left: 64px; top: 68px; width: 1140px; }
+    .s2 .shot { position: absolute; left: 64px; top: 166px; width: 740px; height: 416px; }
+    .s2 .copy { position: absolute; left: 850px; top: 178px; width: 355px; }
+    .s2 .copy p { margin-bottom: 30px; }
+    .s2 .copy .big { font-size: 34px; line-height: 1.25; }
+    .s2 .rail { position: absolute; left: 837px; top: 176px; width: 4px; height: 392px; background: linear-gradient(#ff8178, #72ddff, #ffd563); }
+
+    /* 3 */
+    .s3 .title { position: absolute; left: 64px; top: 64px; }
+    .sequence { position: absolute; left: 64px; right: 64px; top: 166px; display: flex; align-items: center; gap: 20px; }
+    .step { width: 348px; }
+    .step .frame { width: 348px; height: 196px; }
+    .step h3 { margin-top: 16px; }
+    .step p { margin-top: 8px; color: #c7c7dd; font-size: 20px; }
+    .arrow { color: #70d9ff; font-size: 48px; transform: translateY(-34px); }
+    .payoff {
+      position: absolute; left: 176px; right: 176px; bottom: 58px;
+      padding: 17px 28px; text-align: center;
+      border-top: 2px solid rgba(255, 213, 99, .65);
+      color: #ffe59b; font-size: 27px;
+    }
+
+    /* 4 */
+    .s4 .title { position: absolute; left: 64px; top: 62px; width: 1080px; }
+    .s4 .leftshot { position: absolute; left: 64px; top: 164px; width: 540px; height: 304px; }
+    .s4 .rightshot { position: absolute; right: 64px; top: 164px; width: 540px; height: 304px; }
+    .s4 .vs { position: absolute; left: 607px; top: 280px; width: 66px; text-align: center; font-size: 28px; color: #ffd563; }
+    .signals { position: absolute; left: 86px; right: 86px; bottom: 78px; display: flex; justify-content: space-between; }
+    .signal { width: 340px; padding-top: 17px; border-top: 4px solid; }
+    .signal h3 { font-size: 29px; }
+    .signal p { margin-top: 6px; font-size: 20px; color: #d7d8e7; }
+    .signal.red { border-color: #ff6b72; }
+    .signal.cyan { border-color: #57dbd0; }
+    .signal.goldline { border-color: #ffd563; }
+
+    /* 5 */
+    .s5 .title { position: absolute; left: 64px; top: 58px; width: 1110px; }
+    .s5 .lead { position: absolute; left: 64px; top: 130px; width: 930px; color: #cfd3ec; }
+    .pipeline { position: absolute; left: 64px; right: 64px; top: 232px; display: flex; align-items: center; }
+    .node { width: 170px; min-height: 126px; padding: 20px 16px; border-top: 5px solid #70d9ff; background: rgba(8, 12, 34, .8); }
+    .node.goldnode { border-color: #ffd563; }
+    .node.rednode { border-color: #ff8178; }
+    .node h3 { font-size: 23px; }
+    .node p { margin-top: 10px; font-size: 17px; color: #c5c8df; }
+    .pipearrow { flex: 1; text-align: center; color: #7bdfff; font-size: 28px; }
+    .rejects { position: absolute; left: 64px; bottom: 108px; display: flex; gap: 42px; align-items: center; }
+    .rejects span { font-size: 22px; }
+    .human {
+      position: absolute; right: 64px; bottom: 82px; width: 360px;
+      padding-left: 20px; border-left: 4px solid #ffd563;
+      color: #e7dbb8; font-size: 19px; line-height: 1.5;
+    }
+
+    /* 6 */
+    .s6 .title { position: absolute; left: 64px; top: 60px; width: 1120px; }
+    .s6 .metrics { position: absolute; left: 64px; top: 178px; width: 570px; }
+    .metric { display: flex; align-items: baseline; margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid rgba(255, 255, 255, .18); }
+    .metric strong { display: inline-block; min-width: 280px; margin-right: 18px; color: #ffd563; font-size: 38px; }
+    .metric span { font-size: 20px; color: #d0d4e9; }
+    .s6 .shot { position: absolute; right: 54px; top: 154px; width: 560px; height: 315px; transform: rotate(1.5deg); }
+    .play {
+      position: absolute; right: 64px; bottom: 100px; width: 555px;
+      padding: 24px 28px; border-left: 5px solid #70d9ff;
+      background: rgba(7, 10, 28, .82);
+    }
+    .play .url { margin-top: 12px; color: #72ddff; font-size: 23px; }
+    .play .final { font-size: 30px; color: #fff4d1; line-height: 1.35; }
+  </style>
+</head>
+<body>
+  <section class="slide s1">
+    <img class="bg" src="../public/ui/nightmare-arena-bg.png" alt="냥 아레나 야간 전장">
+    <div class="shade"></div>
+    <div class="topline"></div>
+    <div class="content">
+      <div class="eyebrow">OPENAI GAME BUILDERS SEOUL · TRACK 1</div>
+      <h1>냥 아레나<br><span class="gold">악몽 계약</span></h1>
+      <p class="tagline"><strong>내가 고른 악몽이</strong><br>다음 보스의 실제 전투 규칙이 됩니다.</p>
+      <p class="proof">픽셀 고양이 · 레이드 오토배틀러 · 브라우저 즉시 실행</p>
+    </div>
+    <div class="seal">심사 제출 버전의 제품 설계·핵심 루프·검증·출고를 <span class="cyan">Codex 중심</span>으로 완성했습니다.</div>
+    <div class="page">01</div>
+  </section>
+
+  <section class="slide s2">
+    <div class="topline"></div>
+    <div class="title">
+      <div class="eyebrow">OUR KICK</div>
+      <h2>첫 선택이 다음 보스를 설계합니다</h2>
+    </div>
+    <div class="frame shot"><img src="thumbnail.png" alt="악몽 계약 세 장 선택 화면"></div>
+    <div class="rail"></div>
+    <div class="copy">
+      <p class="big"><span class="coral">패턴</span> · <span class="gold">위험</span> · <span class="cyan">보상</span>을<br>싸우기 전에 직접 고릅니다.</p>
+      <p><strong>위험이 높을수록</strong><br><span class="muted">일반전·정예·정찰 준비 경로와 보상이 달라집니다.</span></p>
+      <p><strong>같은 계약은 URL로 공유</strong><br><span class="muted">서버 없이 동일한 조건을 재현합니다.</span></p>
+    </div>
+    <div class="source">실제 제출 빌드 첫 화면 · docs/thumbnail.png</div>
+    <div class="page">02</div>
+  </section>
+
+  <section class="slide s3">
+    <div class="topline"></div>
+    <div class="title">
+      <div class="eyebrow">ONE DECISION, ONE CONSEQUENCE</div>
+      <h2>계약은 설명문이 아니라 한 판의 인과입니다</h2>
+    </div>
+    <div class="sequence">
+      <div class="step">
+        <div class="frame"><img src="pitch-assets/01-map.png" alt="위험별 지도 경로"></div>
+        <h3><span class="coral">1</span> 위험에 맞는 길</h3>
+        <p>계약이 준비 경로와 상대를 바꿉니다.</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="frame"><img src="pitch-assets/02-shop.png" alt="고양이 구매와 배치 화면"></div>
+        <h3><span class="cyan">2</span> 보스를 보고 영입</h3>
+        <p>직업·스킬·가격을 읽고 즉시 배치합니다.</p>
+      </div>
+      <div class="arrow">→</div>
+      <div class="step">
+        <div class="frame"><img src="pitch-assets/03-battle.png" alt="복합 시너지 전투 화면"></div>
+        <h3><span class="gold">3</span> 3+3 시너지 전투</h3>
+        <p>마법사 3 + 도적 3의 복합 조건을 완성합니다.</p>
+      </div>
+    </div>
+    <div class="payoff">계약 보스 승리 → 추가 생선 → 중복 없는 유물 3장 중 하나 선택</div>
+    <div class="page">03</div>
+  </section>
+
+  <section class="slide s4">
+    <div class="topline"></div>
+    <div class="title">
+      <div class="eyebrow">LIMITED INTERVENTION</div>
+      <h2>자동전투에 조작을 늘리지 않고 <span class="gold">결정</span>을 넣었습니다</h2>
+    </div>
+    <div class="frame leftshot"><img src="pitch-assets/04-boss-start.png" alt="계약 보스전 시작"></div>
+    <div class="vs">회피<br><span class="gold">2회</span></div>
+    <div class="frame rightshot"><img src="pitch-assets/05-boss-impact.png" alt="보스 공격과 스킬 피격 효과"></div>
+    <div class="signals">
+      <div class="signal red"><h3>붉으면 산개</h3><p>큰 피해를 피하도록 흩어집니다.</p></div>
+      <div class="signal cyan"><h3>청록이면 집결</h3><p>안전 지대로 모여 판정을 버팁니다.</p></div>
+      <div class="signal goldline"><h3>금빛이면 결정타</h3><p>취약 창에 화력을 집중합니다.</p></div>
+    </div>
+    <div class="source">실제 제출 영상 프레임 · public/submission-gameplay.mp4</div>
+    <div class="page">04</div>
+  </section>
+
+  <section class="slide s5">
+    <div class="topline"></div>
+    <div class="title">
+      <div class="eyebrow">CODEX COLLABORATION</div>
+      <h2>Codex가 제출 버전의 제품 설계와 출고를 주도했습니다</h2>
+    </div>
+    <p class="lead">생성 결과를 믿고 넣지 않습니다. Codex가 제안하고, 좁은 계약과 적대 테스트와 실제 측정이 채택합니다.</p>
+    <div class="pipeline">
+      <div class="node"><h3>저장소 분석</h3><p>기존 프로토타입의 결정 공백을 찾음</p></div>
+      <div class="pipearrow">→</div>
+      <div class="node goldnode"><h3>악몽 계약 DSL</h3><p>허용 패턴·위험·보상을 제한</p></div>
+      <div class="pipearrow">→</div>
+      <div class="node"><h3>후보 생성</h3><p>빌드타임에만 규칙을 제안</p></div>
+      <div class="pipearrow">→</div>
+      <div class="node rednode"><h3>적대 입력 거절</h3><p>금지 토큰·중복·범위 밖 차단</p></div>
+      <div class="pipearrow">→</div>
+      <div class="node goldnode"><h3>게임·UI 적용</h3><p>경로·보스·보상·VFX로 연결</p></div>
+      <div class="pipearrow">→</div>
+      <div class="node"><h3>6축·브라우저 QA</h3><p>효과·성능·전환을 실제로 검증</p></div>
+    </div>
+    <div class="rejects">
+      <span class="coral">laser_beam ✕</span>
+      <span class="coral">중복 id ✕</span>
+      <span class="gold">범위 밖 수치 → clamp</span>
+      <span class="cyan">실패 → safe fallback</span>
+    </div>
+    <div class="human"><strong>사람이 직접 결정:</strong><br>최종 제품 방향 · 자산 채택/폐기 · 허용 범위 · 런타임 API 미사용 · 출고</div>
+    <div class="source">근거 · docs/codex-contribution.md · src/validate/raid-contract-schema.ts</div>
+    <div class="page">05</div>
+  </section>
+
+  <section class="slide s6">
+    <div class="topline"></div>
+    <div class="title">
+      <div class="eyebrow">AI SUGGESTS, MEASUREMENT SHIPS</div>
+      <h2>측정이 악몽 계약의 차이를 증명합니다</h2>
+    </div>
+    <div class="metrics">
+      <div class="metric"><strong>14 vs 6</strong><span>계약-aware / 보상-only 도달 웨이브 중앙값</span></div>
+      <div class="metric"><strong>96.5% vs 66.9%</strong><span>첫 두 보스 통과율</span></div>
+      <div class="metric"><strong>72.7% → 89.7%</strong><span>고위험 계약의 준비 전/후 통과율</span></div>
+      <div class="metric"><strong>0 / 0</strong><span>런타임 의존성 / 외부 네트워크 요청</span></div>
+    </div>
+    <div class="frame shot"><img src="pitch-assets/06-depth3.png" alt="깊이 3까지 이어지는 실제 플레이"></div>
+    <div class="play">
+      <div class="final">계약을 고르고,<br><span class="gold">당신의 악몽과 싸워 보세요.</span></div>
+      <div class="url">mmporong.github.io/nyang-arena/</div>
+    </div>
+    <div class="source">수치 · docs/generated/metrics-current.json · 공개 브라우저 빌드</div>
+    <div class="page">06</div>
+  </section>
+</body>
+</html>

@@ -188,7 +188,7 @@ $ npm run sim
 
 **재현 검증은 Node 24.12.0을 사용한다.** 측정 스크립트가 `--experimental-strip-types`로
 TypeScript를 그대로 임포트한다(브라우저와 헤드리스가 같은 코드를 쓰기 위한
-장치다). `.nvmrc`와 Pages CI도 같은 정확 버전에 고정했으므로 `nvm use` 뒤의
+장치다). `.nvmrc`와 로컬 검증도 같은 정확 버전에 고정했으므로 `nvm use` 뒤의
 6축 로그·구조화 증거·metrics가 같은 런타임을 기록한다.
 
 ```bash

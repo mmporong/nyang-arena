@@ -1,21 +1,24 @@
 {
-  "schema": 1,
+  "schema": 2,
   "status": "released",
-  "scope": "game-release-g006",
+  "scope": "game-release-g007-local-verification",
   "gameProductCommit": "4fb124c078d72dee95f039a47c37ed5998dcbee4",
-  "evidenceCommit": "7aa4e1c81821bd7b9bfa843626585d23f2b2a5c8",
-  "ci": {
-    "provider": "github-actions",
-    "workflow": "Deploy to GitHub Pages",
-    "runId": 32881591960,
-    "url": "https://github.com/mmporong/nyang-arena/actions/runs/32881591960",
-    "headSha": "7aa4e1c81821bd7b9bfa843626585d23f2b2a5c8",
+  "evidenceCommit": "0004556a43e6a96d8246f50cdf0a87258a052921",
+  "verification": {
+    "provider": "local",
+    "command": "npm run verify",
+    "verifiedCommit": "0004556a43e6a96d8246f50cdf0a87258a052921",
     "status": "completed",
     "conclusion": "success",
-    "createdAt": "2026-08-25T18:04:07Z",
-    "updatedAt": "2026-08-25T18:24:09Z"
+    "completedAt": "2026-08-25T23:46:22Z"
   },
   "publicBuild": {
-    "url": "https://mmporong.github.io/nyang-arena/"
+    "url": "https://mmporong.github.io/nyang-arena/",
+    "demoUrl": "https://mmporong.github.io/nyang-arena/submission-gameplay.mp4",
+    "demoBytes": 4393293,
+    "demoSha256": "93E3C5C15B24A8FA0FA39B7F75B1963974B8BB9F4D6D3C913FDC703262ABBB9C",
+    "checkedAt": "2026-08-26T00:13:47Z",
+    "statusCode": 200,
+    "contentType": "video/mp4"
   }
 }

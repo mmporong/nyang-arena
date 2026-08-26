@@ -65,6 +65,7 @@ assert.ok(size <= 10 * 1024 * 1024, `썸네일이 10MB를 넘는다 (${size})`);
 const demoPath = "public/submission-gameplay.mp4";
 const demo = readFileSync(demoPath);
 const demoSize = statSync(demoPath).size;
+const demoSha256 = createHash("sha256").update(demo).digest("hex").toUpperCase();
 assert.equal(demo.subarray(4, 8).toString("ascii"), "ftyp", "데모 영상이 MP4 컨테이너가 아니다");
 assert.ok(demo.includes(Buffer.from("avc1")), "데모 영상에 H.264 트랙이 없다");
 assert.ok(demo.includes(Buffer.from("mp4a")), "데모 영상에 AAC 트랙이 없다");
@@ -113,9 +114,8 @@ const decodeResult = spawnSync(
 assert.equal(decodeResult.error, undefined, `ffmpeg를 실행하지 못했다: ${decodeResult.error?.message}`);
 assert.equal(decodeResult.status, 0, `데모 영상 전체 디코딩에 실패했다: ${decodeResult.stderr}`);
 
-// 후보 커밋은 현재 제품의 수치·성능 증거까지 엄격히 검증하되, 그 커밋의 CI가
-// 성공한 뒤에만 최종 배포 metadata를 적을 수 있다. 후보와 최종 마커를 분리해
-// CI head가 자기 자신의 아직 존재하지 않는 run id를 요구하는 순환을 끊는다.
+// 후보와 최종 출고를 분리하되 GitHub Actions를 출고 근거로 사용하지 않는다.
+// 최종 출고는 재현 가능한 로컬 관문과 공개 파일의 byte/hash 계약을 함께 요구한다.
 const finalEvidenceRequired = doc.includes("<!-- SUBMISSION_EVIDENCE_REQUIRED -->");
 const candidateEvidenceRequired = doc.includes("<!-- SUBMISSION_EVIDENCE_CANDIDATE -->");
 assert.equal(
@@ -138,7 +138,7 @@ if (finalEvidenceRequired || candidateEvidenceRequired) {
   assert.equal(performance.constraints?.runtimeDependencies, 0, "런타임 의존성이 0이 아니다");
   assert.equal(performance.constraints?.externalNetwork, 0, "외부 네트워크 요청이 0이 아니다");
   assert.equal(performance.constraints?.canvas2d, true, "Canvas 2D 출고 조건이 깨졌다");
-  assert.equal(release.schema, 1, "제출 출고 manifest schema가 다르다");
+  assert.equal(release.schema, 2, "제출 출고 manifest schema가 다르다");
   assert.equal(
     release.status,
     finalEvidenceRequired ? "released" : "candidate",
@@ -146,6 +146,9 @@ if (finalEvidenceRequired || candidateEvidenceRequired) {
   );
   assert.equal(release.gameProductCommit, performance.productCommit, "출고 manifest와 성능 제품 커밋이 다르다");
   assert.equal(release.publicBuild?.url, playableUrl, "출고 manifest와 플레이 URL이 다르다");
+  assert.equal(release.publicBuild?.demoUrl, demoUrl, "출고 manifest와 데모 URL이 다르다");
+  assert.equal(release.publicBuild?.demoBytes, demoSize, "출고 manifest와 데모 byte가 다르다");
+  assert.equal(release.publicBuild?.demoSha256, demoSha256, "출고 manifest와 데모 SHA-256이 다르다");
 
   const rawHashes = Object.fromEntries(metrics.verification.sixAxis.map(({ axis, sha256 }) => [axis, sha256]));
   assert.deepEqual(rawHashes, performance.verification.sixAxisRawHashes, "6축 원시 해시가 성능 출고 증거와 다르다");
@@ -240,24 +243,24 @@ if (finalEvidenceRequired || candidateEvidenceRequired) {
   );
 
   if (finalEvidenceRequired) {
-    const evidenceCommit = /게임 출고 기준 증거·배포 커밋: `([0-9a-f]{40})`/.exec(doc)?.[1];
-    assert.ok(evidenceCommit, "게임 출고 증거·배포 커밋을 찾지 못했다");
+    const evidenceCommit = /로컬 검증 기준 커밋: `([0-9a-f]{40})`/.exec(doc)?.[1];
+    assert.ok(evidenceCommit, "로컬 검증 기준 커밋을 찾지 못했다");
     assert.equal(evidenceCommit, release.evidenceCommit, "문서와 출고 manifest의 증거 커밋이 다르다");
     assert.notEqual(release.evidenceCommit, release.gameProductCommit, "제품과 증거 커밋은 분리되어야 한다");
-    assert.equal(release.ci?.headSha, release.evidenceCommit, "CI HEAD가 출고 증거 커밋과 다르다");
-    assert.equal(release.ci?.workflow, "Deploy to GitHub Pages", "출고 CI workflow가 배포 관문이 아니다");
-    assert.equal(release.ci?.status, "completed", "출고 CI가 완료 상태가 아니다");
-    assert.equal(release.ci?.conclusion, "success", "출고 CI가 성공 상태가 아니다");
-    assert.equal(
-      release.ci?.url,
-      `https://github.com/mmporong/nyang-arena/actions/runs/${release.ci?.runId}`,
-      "출고 CI URL과 run id가 다르다",
-    );
-    assert.ok(doc.includes(release.ci.url), "문서의 GitHub Actions 링크가 출고 manifest와 다르다");
+    assert.equal(release.verification?.provider, "local", "최종 검증이 로컬 관문이 아니다");
+    assert.equal(release.verification?.command, "npm run verify", "최종 검증 명령이 다르다");
+    assert.equal(release.verification?.verifiedCommit, release.evidenceCommit, "로컬 검증 커밋이 다르다");
+    assert.equal(release.verification?.status, "completed", "로컬 검증이 완료 상태가 아니다");
+    assert.equal(release.verification?.conclusion, "success", "로컬 검증이 성공 상태가 아니다");
+    assert.equal(release.publicBuild?.statusCode, 200, "공개 영상 확인 상태가 200이 아니다");
+    assert.equal(release.publicBuild?.contentType, "video/mp4", "공개 영상 MIME이 video/mp4가 아니다");
+    assert.ok(doc.includes(demoSha256), "문서에 최종 데모 SHA-256이 없다");
+    assert.ok(doc.includes(`\`${demoSize.toLocaleString("en-US")}\` bytes`), "문서에 최종 데모 byte가 없다");
+    assert.equal(doc.includes("github.com/mmporong/nyang-arena/actions/runs/"), false, "최종 문안에 GitHub Actions 링크가 남았다");
   } else {
     assert.equal(release.evidenceCommit, null, "후보 manifest가 검증 전 evidence commit을 주장한다");
-    assert.equal(release.ci, null, "후보 manifest가 검증 전 CI 성공을 주장한다");
-    assert.ok(doc.includes("출고 후보 CI: 대기"), "후보 문안이 CI 대기 상태를 명시하지 않는다");
+    assert.equal(release.verification, null, "후보 manifest가 검증 전 성공을 주장한다");
+    assert.ok(doc.includes("로컬 출고 검증: 대기"), "후보 문안이 로컬 검증 대기 상태를 명시하지 않는다");
   }
 }
 
