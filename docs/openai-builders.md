@@ -166,7 +166,7 @@ Codex는 위 기반을 분석한 뒤 다음 범위를 새로 설계·구현·검
 <!-- SUBMISSION_EVIDENCE_REQUIRED -->
 
 - 게임 출고 기준 제품 커밋: `4fb124c078d72dee95f039a47c37ed5998dcbee4`
-- 로컬 검증 기준 커밋: `0004556a43e6a96d8246f50cdf0a87258a052921`
+- 로컬 검증 기준 커밋: `80d9ae808f24aa22e6928097047fa17814327217`
 - 로컬 출고 검증: `npm run verify` 전체 PASS — GitHub Actions 미사용
 - 공개 영상 확인: HTTP `200`, `video/mp4`, `4,393,293` bytes,
   SHA-256 `93E3C5C15B24A8FA0FA39B7F75B1963974B8BB9F4D6D3C913FDC703262ABBB9C`

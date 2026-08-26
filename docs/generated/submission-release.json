@@ -3,21 +3,21 @@
   "status": "released",
   "scope": "game-release-g007-local-verification",
   "gameProductCommit": "4fb124c078d72dee95f039a47c37ed5998dcbee4",
-  "evidenceCommit": "0004556a43e6a96d8246f50cdf0a87258a052921",
+  "evidenceCommit": "80d9ae808f24aa22e6928097047fa17814327217",
   "verification": {
     "provider": "local",
     "command": "npm run verify",
-    "verifiedCommit": "0004556a43e6a96d8246f50cdf0a87258a052921",
+    "verifiedCommit": "80d9ae808f24aa22e6928097047fa17814327217",
     "status": "completed",
     "conclusion": "success",
-    "completedAt": "2026-08-25T23:46:22Z"
+    "completedAt": "2026-08-26T03:32:39Z"
   },
   "publicBuild": {
     "url": "https://mmporong.github.io/nyang-arena/",
     "demoUrl": "https://mmporong.github.io/nyang-arena/submission-gameplay.mp4",
     "demoBytes": 4393293,
     "demoSha256": "93E3C5C15B24A8FA0FA39B7F75B1963974B8BB9F4D6D3C913FDC703262ABBB9C",
-    "checkedAt": "2026-08-26T00:13:47Z",
+    "checkedAt": "2026-08-26T03:33:00Z",
     "statusCode": 200,
     "contentType": "video/mp4"
   }
